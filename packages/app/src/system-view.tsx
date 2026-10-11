@@ -116,7 +116,10 @@ function locate(view: DemoView): { place?: ViewPlace; subject?: ViewSubject } {
 	return {};
 }
 
-export function SystemView() {
+const DEFAULT_CHROME =
+	"pointer-events-none absolute top-0 left-0 max-w-full p-6 pr-28 sm:max-w-xl";
+
+export function SystemView({ chromeClassName = DEFAULT_CHROME }: { chromeClassName?: string }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const demoRef = useRef<EnvironmentDemo | null>(null);
 	const [view, setView] = useState<DemoView>("system");
@@ -185,7 +188,7 @@ export function SystemView() {
 			{error ? (
 				<p className="absolute top-24 right-6 max-w-sm rounded bg-red-950/90 p-3 text-sm text-red-100">{error}</p>
 			) : null}
-			<div className="pointer-events-none absolute top-0 left-0 max-w-full p-6 pr-28 sm:max-w-xl">
+			<div className={chromeClassName}>
 				<p className="text-xs tracking-[0.22em] text-white/50 uppercase">Aphelion Run</p>
 				<h1 className="sr-only">{copy.label}</h1>
 				<nav

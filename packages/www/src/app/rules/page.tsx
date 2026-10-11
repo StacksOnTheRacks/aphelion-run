@@ -7,9 +7,9 @@ export default function RulesPage() {
 	return (
 		<main className="min-h-screen bg-black text-white">
 			<SiteNav current="rules" />
-			<header className="border-b border-white/10 px-6 pt-20 pb-12 sm:px-10">
-				<p className="text-xs tracking-[0.22em] text-white/50 uppercase">Aphelion Run</p>
-				<h1 className="mt-3 max-w-3xl text-4xl font-medium tracking-tight sm:text-5xl">The rules</h1>
+			<header className="border-b border-white/10 px-6 pt-24 pb-12 sm:px-10">
+				<p className="text-xs tracking-[0.22em] text-white/50 uppercase">How a run works</p>
+				<h1 className="mt-3 max-w-3xl text-4xl font-medium tracking-tight sm:text-5xl">Rules / play mechanics</h1>
 				<p className="mt-6 max-w-2xl text-lg leading-relaxed text-white/75">
 					The game is played entirely in space. Each player has one home base and one ship. Every burn is paid in
 					energy taken from the home warehouse, so a pilot who wants materials still has to keep going to the Sun.
@@ -170,9 +170,14 @@ export default function RulesPage() {
 						taken off a beaten ship.
 					</p>
 				</div>
-				<Link href="/" className="mt-10 inline-block text-sm text-amber-300 hover:text-amber-200">
-					Back to the system
-				</Link>
+				<div className="mt-10 flex flex-wrap gap-x-6 gap-y-3 text-sm">
+					<Link href="/" className="text-amber-300 hover:text-amber-200">
+						The solar system
+					</Link>
+					<Link href="/story" className="text-amber-300 hover:text-amber-200">
+						The story
+					</Link>
+				</div>
 			</section>
 		</main>
 	);

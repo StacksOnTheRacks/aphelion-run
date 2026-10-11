@@ -6,7 +6,7 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start --port 3000",
-    "test": "tsx --test test/rules-content.test.ts"
+    "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@aphelion/app": "*",
