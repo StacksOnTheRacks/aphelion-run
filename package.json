@@ -1,0 +1,18 @@
+{
+  "name": "aphelion-run",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace=@aphelion/www",
+    "dev:app": "npm run dev --workspace=@aphelion/app",
+    "build": "npm run build --workspace=@aphelion/www",
+    "test": "npm run test --workspace=@aphelion/app && npm run test --workspace=@aphelion/www && npm run test --workspace=@aphelion/infra"
+  },
+  "packageManager": "npm@10.9.2"
+}

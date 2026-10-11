@@ -1,0 +1,21 @@
+{
+  "name": "@aphelion/infra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "synth": "cdk synth",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.196.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.1",
+    "aws-cdk": "^2.196.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.8.3"
+  }
+}

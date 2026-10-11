@@ -1,0 +1,7 @@
+node_modules
+.next
+out
+dist
+cdk.out
+*.tsbuildinfo
+.DS_Store
