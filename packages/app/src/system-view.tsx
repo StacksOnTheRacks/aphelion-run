@@ -13,6 +13,7 @@ import {
 	type ViewPlace,
 	type ViewSubject,
 } from "./demo/environment";
+import { SYSTEM_TRADE, bodyName, tradeForBody } from "./demo/trade";
 
 const HAND: Record<string, { label: string; body: string }> = {
 	system: {
@@ -163,6 +164,12 @@ export function SystemView({ chromeClassName = DEFAULT_CHROME }: { chromeClassNa
 
 	const copy = COPY[view];
 	const { place, subject } = locate(view);
+	const trade =
+		view === "system"
+			? SYSTEM_TRADE
+			: place && subject
+				? tradeForBody(bodyName(place.label, subject.label))
+				: undefined;
 	const showSubject = Boolean(place && place.subjects.length > 1);
 	const showOrbit = Boolean(subject && subject.stops.length > 1);
 
@@ -277,6 +284,7 @@ export function SystemView({ chromeClassName = DEFAULT_CHROME }: { chromeClassNa
 					</button>
 				</nav>
 				<p className="mt-3 text-sm leading-relaxed text-white/75">{copy.body}</p>
+				{trade ? <p className="mt-2 text-sm leading-relaxed text-amber-200/90">{trade}</p> : null}
 			</div>
 		</div>
 	);

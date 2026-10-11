@@ -9,7 +9,7 @@
     "dev": "next dev --port 3001",
     "build": "next build",
     "start": "next start --port 3001",
-    "test": "tsx src/demo/bases.test.ts && tsx src/demo/camera-path.test.ts"
+    "test": "tsx src/demo/bases.test.ts && tsx src/demo/camera-path.test.ts && tsx src/demo/trade.test.ts"
   },
   "dependencies": {
     "@babylonjs/core": "9.27.1",
