@@ -34,7 +34,7 @@ const HAND: Record<string, { label: string; body: string }> = {
 	},
 	"sun-inner": {
 		label: "Sun (Inner)",
-		body: "The inner orbit beside the Sun, with 300 harvesting satellites. Gold are corporate, red are Marauder, pale are unclaimed. The view rides with them; drag to move along the orbit.",
+		body: "The inner orbit beside the Sun, with 300 harvesting satellites. Gold are corporate, red are Marauder, pale are unclaimed. The view turns with them, so they hold still until you drag.",
 	},
 	mercury: {
 		label: "Mercury",
