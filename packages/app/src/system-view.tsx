@@ -34,7 +34,7 @@ const HAND: Record<string, { label: string; body: string }> = {
 	},
 	"sun-inner": {
 		label: "Sun (Inner)",
-		body: "The inner orbit beside the Sun, with 300 harvesting satellites. Gold are corporate, red are Marauder, pale are unclaimed. Scroll in to see one up close.",
+		body: "The inner orbit beside the Sun, with 300 harvesting satellites. Gold are corporate, red are Marauder, pale are unclaimed. The view rides with them; drag to move along the orbit.",
 	},
 	mercury: {
 		label: "Mercury",
@@ -93,7 +93,16 @@ const COPY: Record<string, { label: string; body: string }> = { system: HAND.sys
 for (const place of PLACES) {
 	for (const subject of place.subjects) {
 		for (const stop of subject.stops) {
-			COPY[stop.view] = HAND[stop.view] ?? moonCopy(subject.label, stop.label === "Outer orbit");
+			const planetNote = HAND[place.label.toLowerCase()];
+			const planetSubject = subject.label === "Planet" || subject.label === place.label;
+			COPY[stop.view] =
+				HAND[stop.view] ??
+				(planetNote && planetSubject
+					? {
+							label: `${place.label} (${stop.label === "Outer orbit" ? "Outer" : "Inner"})`,
+							body: planetNote.body,
+						}
+					: moonCopy(subject.label, stop.label === "Outer orbit"));
 		}
 	}
 }

@@ -35,8 +35,10 @@ import {
 	EARTH_WAREHOUSE_RADIUS,
 	SATURN_RING_INNER_SCALE,
 	SATURN_RING_OUTER_SCALE,
+	moonBaseRadius,
 	moonBases,
 	planetBases,
+	warehouseRadius,
 	type BaseSlot,
 	type Faction,
 } from "./bases";
@@ -45,11 +47,11 @@ import { createMoonTerrain } from "./moon-terrain";
 
 type PlanetName = EphemerisPlanet;
 
-export type OrbitView = "system" | "earth-outer" | "earth-inner" | "sun-outer" | "sun-inner";
-export type PlanetView = Exclude<PlanetName, "earth">;
+/** A planet or the Sun: `<name>-outer` or `<name>-inner`. */
+export type BodyOrbitView = `${PlanetName | "sun"}-${"outer" | "inner"}`;
 /** A moon view id is `<planet>-<moon>-outer` or `<planet>-<moon>-inner`. */
 export type MoonView = `${PlanetName}-${string}-${"outer" | "inner"}`;
-export type DemoView = OrbitView | PlanetView | MoonView;
+export type DemoView = "system" | BodyOrbitView | MoonView;
 
 type Focus = "sun" | PlanetName | string;
 
@@ -72,6 +74,11 @@ type Shot = {
 	sunRelative?: boolean;
 	/** Orbit lines fade out on the way in, because up close they cut across the body's face. */
 	closeUp?: boolean;
+	/**
+	 * After arrival the camera stays at `radius` and its alpha advances with the satellites of this
+	 * body. Dragging still moves alpha along that orbit.
+	 */
+	ride?: boolean;
 	/** Corona size relative to its close-up size. From far out the Sun is a dot without a bigger halo. */
 	corona?: number;
 };
@@ -79,18 +86,17 @@ type Shot = {
 const SHOTS: Record<string, Shot> = {
 	system: { focus: "sun", alpha: -Math.PI / 2, beta: 0.28, radius: 1600, corona: 3 },
 	"earth-outer": { focus: "earth", alpha: 0.9, beta: 0.8, radius: 78, sunRelative: true },
-	// Far enough back that the inner-ring stations sit in frame beside the planet.
-	"earth-inner": { focus: "earth", alpha: 0.9, beta: 1.15, radius: 34, fill: 0.58, sunRelative: true, closeUp: true },
+	"earth-inner": {
+		focus: "earth",
+		alpha: 0.9,
+		beta: Math.PI / 2,
+		radius: EARTH_STATION_RADIUS,
+		// Arrival only. The ride does not keep turning with the Sun, or it would cancel the orbit.
+		sunRelative: true,
+		ride: true,
+		closeUp: true,
+	},
 	"sun-outer": { focus: "sun", alpha: 0.55, beta: 1.05, radius: 110 },
-	"sun-inner": { focus: "sun", alpha: 0.35, beta: 1.25, radius: 40, fill: 0.8, closeUp: true },
-	mercury: planetShot("mercury", 0.7),
-	venus: planetShot("venus", 0.7),
-	mars: planetShot("mars", 0.7),
-	jupiter: planetShot("jupiter", 0.7),
-	// Framed so the ring, not just the planet, fits on screen.
-	saturn: { ...planetShot("saturn", 0.36), beta: 1.1 },
-	uranus: planetShot("uranus", 0.7),
-	neptune: planetShot("neptune", 0.7),
 };
 
 /**
@@ -99,17 +105,52 @@ const SHOTS: Record<string, Shot> = {
  * across the moon at either distance.
  */
 const MOON_OUTER_FILL = 0.28;
-const MOON_INNER_FILL = 0.8;
 
-function moonShot(focus: string, level: "outer" | "inner"): Shot {
+function moonShot(focus: string, level: "outer" | "inner", diameter: number): Shot {
 	if (level === "outer") {
 		return { focus, alpha: 0.9, beta: 0.8, radius: 0, fill: MOON_OUTER_FILL, sunRelative: true, closeUp: true };
 	}
-	return { focus, alpha: 0.9, beta: 1.15, radius: 0, fill: MOON_INNER_FILL, sunRelative: true, closeUp: true };
+	return {
+		focus,
+		alpha: 0.9,
+		beta: Math.PI / 2,
+		radius: moonBaseRadius(diameter),
+		sunRelative: true,
+		ride: true,
+		closeUp: true,
+	};
 }
 
-function planetShot(focus: PlanetName, fill: number): Shot {
-	return { focus, alpha: 0.9, beta: 1.2, radius: 0, fill, sunRelative: true, closeUp: true };
+/** Pulled back far enough to see the planet and, where they exist, its moons. Saturn keeps the ring framing. */
+function planetOuterShot(spec: PlanetSpec): Shot {
+	if (spec.name === "saturn") {
+		return { focus: "saturn", alpha: 0.9, beta: 1.1, radius: 0, fill: 0.36, sunRelative: true, closeUp: true };
+	}
+	const moonReach = spec.moons.reduce((far, moon) => Math.max(far, moon.orbit), 0);
+	return {
+		focus: spec.name,
+		alpha: 0.9,
+		beta: 0.8,
+		radius: Math.max(spec.diameter * 4, moonReach * 1.8),
+		sunRelative: true,
+	};
+}
+
+/** On the halo the bases already use. Saturn sits above the ring plane so the camera is not in the mesh. */
+function planetInnerShot(spec: PlanetSpec): Shot {
+	return {
+		focus: spec.name,
+		alpha: 0.9,
+		beta: spec.name === "saturn" ? 1.15 : Math.PI / 2,
+		radius: warehouseRadius({
+			diameter: spec.diameter,
+			moons: spec.moons.map((moon) => ({ orbit: moon.orbit, diameter: moon.diameter })),
+			ringInnerScale: spec.name === "saturn" ? SATURN_RING_INNER_SCALE : undefined,
+		}),
+		sunRelative: true,
+		ride: true,
+		closeUp: true,
+	};
 }
 
 /** Fraction of a body's own color left on its night side, so it reads against space. */
@@ -300,14 +341,15 @@ function moonView(planet: PlanetName, moon: string, level: "outer" | "inner"): M
 	return `${planet}-${moon}-${level}`;
 }
 
+function planetOrbitView(name: PlanetName, level: "outer" | "inner"): BodyOrbitView {
+	return `${name}-${level}`;
+}
+
 function planetStops(name: PlanetName): ViewStop[] {
-	if (name === "earth") {
-		return [
-			{ view: "earth-outer", label: "Outer orbit" },
-			{ view: "earth-inner", label: "Inner orbit" },
-		];
-	}
-	return [{ view: name, label: PLANET_LABEL[name] }];
+	return [
+		{ view: planetOrbitView(name, "outer"), label: "Outer orbit" },
+		{ view: planetOrbitView(name, "inner"), label: "Inner orbit" },
+	];
 }
 
 /** Sun, then each planet outward. A planet with moons lists the planet first, then each moon. */
@@ -325,6 +367,10 @@ export const PLACES: ViewPlace[] = [
 		],
 	},
 	...PLANETS.map((spec): ViewPlace => {
+		if (spec.name !== "earth") {
+			SHOTS[planetOrbitView(spec.name, "outer")] = planetOuterShot(spec);
+			SHOTS[planetOrbitView(spec.name, "inner")] = planetInnerShot(spec);
+		}
 		const subjects: ViewSubject[] = [
 			{
 				label: spec.moons.length > 0 ? "Planet" : PLANET_LABEL[spec.name],
@@ -334,8 +380,8 @@ export const PLACES: ViewPlace[] = [
 		for (const moon of spec.moons) {
 			const outer = moonView(spec.name, moon.name, "outer");
 			const inner = moonView(spec.name, moon.name, "inner");
-			SHOTS[outer] = moonShot(moon.name, "outer");
-			SHOTS[inner] = moonShot(moon.name, "inner");
+			SHOTS[outer] = moonShot(moon.name, "outer", moon.diameter);
+			SHOTS[inner] = moonShot(moon.name, "inner", moon.diameter);
 			subjects.push({
 				label: title(moon.name),
 				stops: [
@@ -356,6 +402,14 @@ const SUN_SPIN = (Math.PI * 2) / (25.38 * 86_400);
 const SUNLIGHT_COLOR = new Color3(1, 0.95, 0.86);
 const SUN_OUTER_RING = 44;
 const SUN_INNER_RING = 24;
+SHOTS["sun-inner"] = {
+	focus: "sun",
+	alpha: 0.35,
+	beta: Math.PI / 2,
+	radius: SUN_INNER_RING,
+	ride: true,
+	closeUp: true,
+};
 const OUTER_RING_COLOR = new Color3(0.55, 0.62, 0.75);
 const INNER_RING_COLOR = new Color3(0.85, 0.55, 0.25);
 
@@ -389,8 +443,19 @@ const GALAXY_POLE = new Vector3(0.45, 0.4, 0.8);
 const GALAXY_CENTER_HINT = new Vector3(0.5, -1, 0.2);
 const MILKY_WAY_GLOW = 0.18;
 
-const TRAVEL_SECONDS = 2.4;
-const HOLD_MS = 3000;
+/** How long a camera move takes. Arriving at the Sun is a little slower, because the zoom covers more distance. */
+export const TRAVEL_SECONDS = 2.4;
+export const SUN_TRAVEL_SECONDS = 3.6;
+/** How long the tour rests after a move has finished, before the next one starts. */
+export const REST_MS = 5000;
+
+export function travelSeconds(view: DemoView): number {
+	return view === "sun-outer" || view === "sun-inner" ? SUN_TRAVEL_SECONDS : TRAVEL_SECONDS;
+}
+
+export function tourStepDelay(view: DemoView): number {
+	return travelSeconds(view) * 1000 + REST_MS;
+}
 const CAMERA_BETA_MIN = 0.05;
 const CAMERA_BETA_MAX = Math.PI / 2 + 0.4;
 const CAMERA_RADIUS_MIN = 3;
@@ -538,6 +603,7 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 	let flight: Flight | null = null;
 	let active: DemoView = "system";
 	let travel = 1;
+	let moveSeconds = TRAVEL_SECONDS;
 	let linesFrom = 1;
 	let linesNow = 1;
 	let coronaFrom = start.corona ?? 1;
@@ -694,11 +760,25 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		camera.upperBetaLimit = Math.PI - 0.0001;
 		camera.lowerRadiusLimit = 0.05;
 		camera.upperRadiusLimit = 50000;
+		camera.minZ = 0.1;
 		camera.inertialAlphaOffset = 0;
 		camera.inertialBetaOffset = 0;
 		camera.inertialRadiusOffset = 0;
 		camera.inertialPanningX = 0;
 		camera.inertialPanningY = 0;
+	};
+
+	/** Keeps the camera on the inner orbit. Alpha stays free so a drag still slides along that line. */
+	const holdOrbit = (shot: Shot) => {
+		const orbitRadius = shot.radius;
+		camera.lowerBetaLimit = CAMERA_BETA_MIN;
+		camera.upperBetaLimit = CAMERA_BETA_MAX;
+		camera.lowerRadiusLimit = orbitRadius;
+		camera.upperRadiusLimit = orbitRadius;
+		camera.radius = orbitRadius;
+		camera.inertialRadiusOffset = 0;
+		const clearance = orbitRadius - focusRadius(shot.focus);
+		camera.minZ = Math.min(0.1, Math.max(0.001, clearance * 0.25));
 	};
 
 	const restoreCamera = (focus: Focus) => {
@@ -748,6 +828,13 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		placeBodies(deltaSeconds);
 
 		if (travel >= 1) {
+			if (shot.ride) {
+				holdOrbit(shot);
+				camera.target.copyFrom(focusPosition(shot.focus));
+				camera.alpha += rideSpeed(shot.focus) * deltaSeconds;
+				return;
+			}
+			camera.minZ = 0.1;
 			restoreCamera(shot.focus);
 			if (shot.focus !== "sun") {
 				camera.target.copyFrom(focusPosition(shot.focus));
@@ -759,14 +846,19 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		}
 
 		const goal = goalFor(active);
-		travel = Math.min(1, travel + deltaSeconds / TRAVEL_SECONDS);
+		travel = Math.min(1, travel + deltaSeconds / moveSeconds);
 		const eased = travel * travel * (3 - 2 * travel);
 		if (travel >= 1 || !flight) {
 			camera.alpha = goal.alpha;
 			camera.beta = goal.beta;
 			camera.radius = goal.radius;
 			camera.target.copyFrom(goal.target);
-			restoreCamera(shot.focus);
+			if (shot.ride) {
+				holdOrbit(shot);
+			} else {
+				camera.minZ = 0.1;
+				restoreCamera(shot.focus);
+			}
 			camera.attachControl(canvas, true);
 		} else {
 			widenCamera();
@@ -793,6 +885,7 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		linesFrom = linesNow;
 		coronaFrom = coronaNow;
 		active = view;
+		moveSeconds = travelSeconds(view);
 		travel = 0;
 		// Positions come from the clock, so refresh them before the path is measured against the bodies.
 		placeBodies(0);
@@ -813,7 +906,7 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 				index += 1;
 				onView(view);
 				animateTo(view);
-				timers.push(window.setTimeout(step, HOLD_MS));
+				timers.push(window.setTimeout(step, tourStepDelay(view)));
 			};
 			step();
 		},
@@ -1385,6 +1478,14 @@ function buildSaturnRing(scene: Scene, saturn: Mesh, planetRadius: number): Mesh
 
 /** Radians per second before the game-speed scale. Slow enough that a base reads as orbiting, not as a moon. */
 const BASE_SPIN = 0.12;
+
+/** Angular speed of the craft the inner camera rides with. Matches the satellites or bases already in the scene. */
+function rideSpeed(focus: Focus): number {
+	if (focus === "sun") {
+		return (ORBIT_PACE * SATELLITE_ORBIT_RATE) / Math.pow(SUN_INNER_RING, 1.5);
+	}
+	return BASE_SPIN * ORBIT_PACE;
+}
 
 type SpinningBase = {
 	mesh: Mesh;
