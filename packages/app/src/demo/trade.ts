@@ -45,7 +45,7 @@ const LINES: Record<string, string> = {
 
 /** Shown on the whole-system view, which is not one body. */
 export const SYSTEM_TRADE =
-	"The Sun is mined for energy and sells nothing. Earth sells energy and yields nothing. Every other body yields one material: a base there receives it free, and a visiting ship can buy it.";
+	"The Sun is mined for energy and sells nothing. Earth sells energy and yields nothing. Every other body yields one or two materials: a base there receives its own free, and a visiting ship can buy them.";
 
 /** Place name when the camera labels the planet itself "Planet"; otherwise the subject. */
 export function bodyName(placeLabel: string, subjectLabel: string): string {

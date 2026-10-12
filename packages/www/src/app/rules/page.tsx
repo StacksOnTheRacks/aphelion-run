@@ -11,8 +11,9 @@ export default function RulesPage() {
 				<p className="text-xs tracking-[0.22em] text-white/50 uppercase">How a run works</p>
 				<h1 className="mt-3 max-w-3xl text-4xl font-medium tracking-tight sm:text-5xl">Rules / play mechanics</h1>
 				<p className="mt-6 max-w-2xl text-lg leading-relaxed text-white/75">
-					The game is played entirely in space. Each player has one home base and one ship. Every burn is paid in
-					energy taken from the home warehouse, so a pilot who wants materials still has to keep going to the Sun.
+					The game is played entirely in space. Each player has one home base and can build more than one ship
+					there. Every burn is paid in energy taken from the home warehouse, so a pilot who wants materials still
+					has to keep going to the Sun.
 				</p>
 			</header>
 
@@ -38,13 +39,14 @@ export default function RulesPage() {
 				<div className="mt-8 grid gap-8 lg:grid-cols-2">
 					<div>
 						<p className="max-w-xl text-sm leading-relaxed text-white/75">
-							The home base is the energy warehouse, the repair bay, and the bank. Improvements are built there, and
-							only there. It can orbit any planet or moon. It cannot orbit the Sun.
+							The home base is the energy warehouse, the repair bay, the bank, and the space dock. Ships are built and
+							improved there, and only there. It can orbit any planet or moon except Earth. It cannot orbit the Sun.
 						</p>
 						<p className="mt-4 max-w-xl text-sm leading-relaxed text-white/75">
-							A base receives that body&apos;s material steadily, free. It receives no other body&apos;s. A moon and a
-							planet work the same way. No yield stands in for another, and a planet&apos;s yield is not included in
-							its moons. Every pilot goes to every yielding body except the one they live on.
+							A base receives its own materials, free, a little at a time. A body yields one or two. It receives no
+							other body&apos;s. A moon and a planet work the same way. No yield stands in for another, and a
+							planet&apos;s yield is not included in its moons. Every pilot goes to every yielding body except the one
+							they live on.
 						</p>
 					</div>
 					<div>
@@ -57,8 +59,9 @@ export default function RulesPage() {
 							))}
 						</ul>
 						<p className="mt-4 max-w-md text-sm leading-relaxed text-white/75">
-							The Sun is where energy is mined. Earth is where energy is sold. Cash does not buy materials at either
-							of them.
+							The Sun is where energy is mined. Earth is where energy is sold, at trading stations, and it cannot hold
+							a pilot base. Cash does not buy materials at either of them. When the home warehouse is full, energy has
+							to be sold on Earth to make room.
 						</p>
 					</div>
 				</div>
@@ -154,15 +157,16 @@ export default function RulesPage() {
 				</h2>
 				<div className="mt-8 max-w-3xl space-y-4 text-sm leading-relaxed text-white/75">
 					<p>
-						Only a completed transfer at an Earth station changes the price of energy. SSI deliveries move the legal
-						price. Marauder deliveries move the black-market price. When the legal price drops, the domes buy the
-						surplus, the slums go without power, and stolen energy pays more. Selling into a flood is how that premium
-						disappears.
+						Only a completed transfer at an Earth station changes the price of energy. Sol Systems deliveries move
+						the legal price. Marauder deliveries move the black-market price. When the legal price drops, the domes buy
+						the surplus, the slums go without power, and stolen energy pays more. Selling into a flood is how that
+						premium disappears.
 					</p>
 					<p>
-						Cash stays on the ship until it is banked at home. Until then, any opposing ship in Earth&apos;s inner or
-						outer orbit can attack. Leaving Earth orbit ends the hunt. Orbits of other planets and moons are not combat
-						zones. That is why a contractor lives beside Earth, on the Moon, rather than in Earth&apos;s orbit.
+						Cash stays on the ship until it is banked at home. A ship in the inner orbit of any planet or moon can be
+						attacked. The Moon is not a combat zone. A cloak is the only defense: away from base it burns energy
+						faster, other ships cannot see it, a scan can, and a cloaked ship cannot be attacked. The Moon is where a
+						pilot lives beside Earth&apos;s market.
 					</p>
 					<p>
 						Banked cash is spent at other bodies, on the materials they yield. Two pilots docked at the same base can

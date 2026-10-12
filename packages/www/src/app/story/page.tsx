@@ -9,7 +9,7 @@ export default function StoryPage() {
 			<SiteNav current="story" />
 			<header className="border-b border-white/10 px-6 pt-24 pb-12 sm:px-10">
 				<p className="text-xs tracking-[0.22em] text-white/50 uppercase">The universe</p>
-				<h1 className="mt-3 max-w-3xl text-4xl font-medium tracking-tight sm:text-5xl">The story</h1>
+				<h1 className="mt-3 max-w-3xl text-4xl font-medium tracking-tight sm:text-5xl">The Aphelion Run Universe</h1>
 				<p className="mt-6 max-w-2xl text-lg leading-relaxed text-white/75">
 					Pilots cross a living solar system to contest a dwindling network of solar harvesting satellites. Sol Systems
 					sells the energy to the domes. The Ashland Marauders steal it for the slums.

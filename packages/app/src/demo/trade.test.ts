@@ -42,7 +42,7 @@ for (const name of ["Sun", "Earth"] as const) {
 expect(/mined from the satellites/i.test(tradeForBody("Sun") ?? ""), "the Sun is mined for energy");
 expect(/nothing is mined/i.test(tradeForBody("Earth") ?? ""), "Earth is not mined");
 expect(/sold at the pilot's own faction station/i.test(tradeForBody("Earth") ?? ""), "Earth sells energy");
-expect(SYSTEM_TRADE.includes("yields one material"), "the system view states the rule");
+expect(SYSTEM_TRADE.includes("yields one or two materials"), "the system view states the rule");
 
 if (failures.length > 0) {
 	for (const failure of failures) {
