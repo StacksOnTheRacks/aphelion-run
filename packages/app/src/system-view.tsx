@@ -7,13 +7,13 @@ import { Scene } from "@babylonjs/core/scene";
 
 import {
 	createEnvironment,
+	JOURNEY_STOPS,
 	PLACES,
 	type DemoView,
 	type EnvironmentDemo,
 	type ViewPlace,
 	type ViewSubject,
 } from "./demo/environment";
-import { SYSTEM_TRADE, bodyName, tradeForBody } from "./demo/trade";
 
 const HAND: Record<string, { label: string; body: string }> = {
 	system: {
@@ -22,7 +22,7 @@ const HAND: Record<string, { label: string; body: string }> = {
 	},
 	"earth-outer": {
 		label: "Earth (Outer)",
-		body: "Earth's outer orbit, with the Moon's path beyond it. Warehouse bases sit on this ring, and ships stage here before they leave. A ship in either of Earth's orbits can be attacked.",
+		body: "Earth's outer orbit, with the Moon's path beyond it. Ships come in here on the way to the stations. Sol does not permit a home in Earth's orbit. The two homes you can see sit on the Moon.",
 	},
 	"earth-inner": {
 		label: "Earth (Inner)",
@@ -115,6 +115,13 @@ const TOUR: DemoView[] = [
 	),
 ];
 
+const STOP_OPTIONS = JOURNEY_STOPS.map((stop) => ({ value: stop.id, label: stop.label, group: stop.group }));
+
+function stopLabel(id: string): string {
+	const label = JOURNEY_STOPS.find((stop) => stop.id === id)?.label ?? id;
+	return label === "Sun" || label === "Moon" ? `the ${label}` : label;
+}
+
 function locate(view: DemoView): { place?: ViewPlace; subject?: ViewSubject } {
 	for (const place of PLACES) {
 		for (const subject of place.subjects) {
@@ -134,6 +141,9 @@ export function SystemView({ chromeClassName = DEFAULT_CHROME }: { chromeClassNa
 	const demoRef = useRef<EnvironmentDemo | null>(null);
 	const [view, setView] = useState<DemoView>("system");
 	const [playing, setPlaying] = useState(false);
+	const [from, setFrom] = useState("neptune");
+	const [to, setTo] = useState("sun");
+	const [flight, setFlight] = useState<{ from: string; to: string } | null>(null);
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
@@ -173,12 +183,6 @@ export function SystemView({ chromeClassName = DEFAULT_CHROME }: { chromeClassNa
 
 	const copy = COPY[view];
 	const { place, subject } = locate(view);
-	const trade =
-		view === "system"
-			? SYSTEM_TRADE
-			: place && subject
-				? tradeForBody(bodyName(place.label, subject.label))
-				: undefined;
 	const showSubject = Boolean(place && place.subjects.length > 1);
 	const showOrbit = Boolean(subject && subject.stops.length > 1);
 
@@ -198,6 +202,19 @@ export function SystemView({ chromeClassName = DEFAULT_CHROME }: { chromeClassNa
 		setPlaying(true);
 	};
 
+	const toggleFlight = () => {
+		if (flight) {
+			demoRef.current?.land();
+			setFlight(null);
+			return;
+		}
+		if (from === to) {
+			return;
+		}
+		demoRef.current?.fly(from, to, () => setFlight(null));
+		setFlight({ from, to });
+	};
+
 	return (
 		<div className="absolute inset-0 overflow-hidden bg-black text-white">
 			<canvas ref={canvasRef} className="h-full w-full outline-none select-none" />
@@ -205,11 +222,10 @@ export function SystemView({ chromeClassName = DEFAULT_CHROME }: { chromeClassNa
 				<p className="absolute top-24 right-6 max-w-sm rounded bg-red-950/90 p-3 text-sm text-red-100">{error}</p>
 			) : null}
 			<div className={chromeClassName}>
-				<p className="text-xs tracking-[0.22em] text-white/50 uppercase">Aphelion Run</p>
 				<h1 className="sr-only">{copy.label}</h1>
 				<nav
 					aria-label="Views"
-					className="pointer-events-auto mt-3 flex w-fit max-w-full flex-wrap items-center gap-1 rounded-2xl border border-white/10 bg-black/50 p-1 text-sm backdrop-blur"
+					className="pointer-events-auto flex w-fit max-w-full flex-wrap items-center gap-1 rounded-2xl border border-white/10 bg-black/50 p-1 text-sm backdrop-blur"
 				>
 					<ol className="flex flex-wrap items-center">
 						<li>
@@ -292,8 +308,50 @@ export function SystemView({ chromeClassName = DEFAULT_CHROME }: { chromeClassNa
 						)}
 					</button>
 				</nav>
+				<nav
+					aria-label="Journey"
+					className="pointer-events-auto mt-2 flex w-fit max-w-full flex-wrap items-center gap-1 rounded-2xl border border-white/10 bg-black/50 p-1 text-sm backdrop-blur"
+				>
+					<span className="pl-3 text-white/45">From</span>
+					<Picker
+						label="Journey from"
+						value={from}
+						options={STOP_OPTIONS}
+						onChange={setFrom}
+						current
+					/>
+					<span className="text-white/45">to</span>
+					<Picker label="Journey to" value={to} options={STOP_OPTIONS} onChange={setTo} current />
+					<span aria-hidden className="mx-1 h-5 w-px bg-white/15" />
+					<button
+						type="button"
+						onClick={toggleFlight}
+						disabled={!flight && from === to}
+						aria-label={flight ? "Stop the journey" : `Fly from ${stopLabel(from)} to ${stopLabel(to)}`}
+						title={flight ? "Stop the journey" : from === to ? "Pick two different places" : "Fly"}
+						className={`flex h-8 w-8 items-center justify-center rounded-xl transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+							flight ? "bg-amber-300 text-black" : "text-amber-300 enabled:hover:bg-white/10"
+						}`}
+					>
+						{flight ? (
+							<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="currentColor" aria-hidden>
+								<rect x="3" y="3" width="10" height="10" rx="1.5" />
+							</svg>
+						) : (
+							<svg viewBox="0 0 16 16" className="h-4 w-4" fill="currentColor" aria-hidden>
+								<path d="M14.5 1.5 1.8 6.6a.5.5 0 0 0 .03.94l5.07 1.56 1.56 5.07a.5.5 0 0 0 .94.03L14.5 1.5Z" />
+							</svg>
+						)}
+					</button>
+				</nav>
 				<p className="mt-3 text-sm leading-relaxed text-white/75">{copy.body}</p>
-				{trade ? <p className="mt-2 text-sm leading-relaxed text-amber-200/90">{trade}</p> : null}
+				{flight ? (
+					<p className="mt-2 text-sm leading-relaxed text-white/60">
+						A ship is flying from {stopLabel(flight.from)} to {stopLabel(flight.to)}. The bright line is the way ahead. The dashed line is
+						where it has been. Where the line runs thin and pale, a planet&apos;s gravity bends the course and the
+						burn costs less.
+					</p>
+				) : null}
 			</div>
 		</div>
 	);
@@ -308,6 +366,22 @@ function Crumb({ children }: { children: ReactNode }) {
 			{children}
 		</li>
 	);
+}
+
+type PickerOption = { value: string; label: string; group?: string };
+
+/** Consecutive options that share a group, so each group renders as one optgroup. */
+function groupOptions(options: PickerOption[]): { group?: string; options: PickerOption[] }[] {
+	const runs: { group?: string; options: PickerOption[] }[] = [];
+	for (const option of options) {
+		const last = runs[runs.length - 1];
+		if (last && last.group === option.group) {
+			last.options.push(option);
+		} else {
+			runs.push({ group: option.group, options: [option] });
+		}
+	}
+	return runs;
 }
 
 /**
@@ -325,7 +399,7 @@ function Picker({
 	label: string;
 	value: string;
 	placeholder?: string;
-	options: { value: string; label: string }[];
+	options: PickerOption[];
 	onChange: (value: string) => void;
 	current: boolean;
 }) {
@@ -350,11 +424,20 @@ function Picker({
 						{placeholder}
 					</option>
 				) : null}
-				{options.map((option) => (
-					<option key={option.value} value={option.value} className="bg-neutral-900 text-white">
-						{option.label}
-					</option>
-				))}
+				{groupOptions(options).map((run) => {
+					const items = run.options.map((option) => (
+						<option key={option.value} value={option.value} className="bg-neutral-900 text-white">
+							{option.label}
+						</option>
+					));
+					return run.group ? (
+						<optgroup key={run.group} label={run.group} className="bg-neutral-900 text-white/60">
+							{items}
+						</optgroup>
+					) : (
+						items
+					);
+				})}
 			</select>
 			<svg
 				viewBox="0 0 16 16"

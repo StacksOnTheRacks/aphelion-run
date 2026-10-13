@@ -20,7 +20,7 @@ export const PARTS: ShipPart[] = [
 	},
 	{
 		name: "Siphon modules",
-		role: "How fast a ship drinks a harvesting satellite.",
+		role: "How fast a ship siphons a collector.",
 		mineral: {
 			name: "Helium rain",
 			body: "Saturn",
@@ -74,7 +74,7 @@ export const ROUTES = [
 	{
 		title: "Fill",
 		steps: "Home → Sun → home warehouse",
-		body: "The ship siphons a satellite until it is empty, or until another load would leave it short of the energy to depart. It stays exposed while it siphons and until it leaves the inner orbit.",
+		body: "The ship siphons a collector until it is empty, or until another load would leave it short of the energy to depart. It stays exposed while it siphons and until it leaves the inner orbit.",
 	},
 	{
 		title: "Sell",

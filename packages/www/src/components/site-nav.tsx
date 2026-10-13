@@ -4,6 +4,8 @@ const LINKS = [
 	{ href: "/", id: "system", label: "Solar System" },
 	{ href: "/story", id: "story", label: "Story" },
 	{ href: "/rules", id: "rules", label: "Rules" },
+	{ href: "/style", id: "style", label: "Style" },
+	{ href: "/glossary", id: "glossary", label: "Glossary" },
 ] as const;
 
 export type SiteSection = (typeof LINKS)[number]["id"];

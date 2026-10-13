@@ -4,8 +4,8 @@
  *
  * A planet's warehouses ride a halo between the surface and the innermost moon. Mercury and Venus
  * have no moons, so the halo is a fixed multiple of the radius. Saturn's moons sit outside the
- * rings, so its halo uses the gap inside the ring instead. Earth uses the two rings already drawn
- * in the scene: warehouses on the outer ring, faction stations on the inner ring.
+ * rings, so its halo uses the gap inside the ring instead. Earth has no homes. Its inner ring
+ * holds the two faction stations.
  */
 
 export type Faction = "corporate" | "marauder";
@@ -24,10 +24,12 @@ export type BaseSlot = {
 export type PlanetBaseInput = {
 	diameter: number;
 	moons: { orbit: number; diameter: number }[];
-	/** Earth: warehouses sit on the drawn outer ring. */
+	/** Earth: the drawn outer ring. Approach only; no homes sit on it. */
 	warehouseRadius?: number;
 	/** Earth: one station per faction on the drawn inner ring. */
 	stationRadius?: number;
+	/** Homes: warehouse, bay, bank, dock. Earth has none. */
+	homes?: boolean;
 	/** Saturn: warehouses stay inside this multiple of the planet radius, clear of the rings. */
 	ringInnerScale?: number;
 };
@@ -41,7 +43,7 @@ export const NO_MOON_HALO_SCALE = 1.8;
 /** Saturn's rings, in planet radii. Matches the ring mesh. */
 export const SATURN_RING_INNER_SCALE = 1.24;
 export const SATURN_RING_OUTER_SCALE = 2.27;
-/** Earth's drawn rings. Warehouses outside, stations inside. */
+/** Clearance past Earth's station ring, so the Moon's homes sit outside the approach. */
 export const EARTH_WAREHOUSE_RADIUS = 16;
 export const EARTH_STATION_RADIUS = 11;
 
@@ -83,9 +85,9 @@ export function radialReach(size: BoxSize): number {
 }
 
 export function planetBases(input: PlanetBaseInput): { warehouses: BaseSlot[]; stations: BaseSlot[] } {
-	const radius = warehouseRadius(input);
 	return {
-		warehouses: ring(PLANET_BASES_PER_FACTION, radius, WAREHOUSE_SIZE),
+		warehouses:
+			input.homes === false ? [] : ring(PLANET_BASES_PER_FACTION, warehouseRadius(input), WAREHOUSE_SIZE),
 		stations:
 			input.stationRadius == null ? [] : ring(1, input.stationRadius, STATION_SIZE),
 	};

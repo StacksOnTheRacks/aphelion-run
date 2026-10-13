@@ -32,7 +32,6 @@ import {
 } from "./camera-path";
 import {
 	EARTH_STATION_RADIUS,
-	EARTH_WAREHOUSE_RADIUS,
 	SATURN_RING_INNER_SCALE,
 	SATURN_RING_OUTER_SCALE,
 	moonBases,
@@ -41,7 +40,9 @@ import {
 	type Faction,
 } from "./bases";
 import { daysSinceJ2000, greenwichAngle, moonLongitude, planetLongitude, type EphemerisPlanet } from "./ephemeris";
+import { createJourney } from "./journey";
 import { createMoonTerrain } from "./moon-terrain";
+import { FLYBY_SCALE, planRoute, type Route } from "./route";
 
 type PlanetName = EphemerisPlanet;
 
@@ -83,8 +84,8 @@ type Shot = {
 };
 
 const SHOTS: Record<string, Shot> = {
-	system: { focus: "sun", alpha: -Math.PI / 2, beta: 0.28, radius: 1600, corona: 3 },
-	"earth-outer": { focus: "earth", alpha: 0.9, beta: 0.8, radius: 78, sunRelative: true },
+	system: { focus: "sun", alpha: -Math.PI / 2, beta: 0.28, radius: 3200, corona: 3 },
+	"earth-outer": { focus: "earth", alpha: 0.9, beta: 0.8, radius: 156, sunRelative: true },
 	// Far enough back that the station ring sits in frame beside the planet, outside that orbit.
 	"earth-inner": {
 		focus: "earth",
@@ -163,7 +164,7 @@ type Pose = {
 	target: Vector3;
 };
 
-type MoonSpec = {
+export type MoonSpec = {
 	name: string;
 	orbit: number;
 	diameter: number;
@@ -175,7 +176,7 @@ type MoonSpec = {
 	plane?: number;
 };
 
-type PlanetSpec = {
+export type PlanetSpec = {
 	name: PlanetName;
 	orbit: number;
 	diameter: number;
@@ -194,7 +195,7 @@ const MOON_PATH = new Color3(0.55, 0.55, 0.6);
 /** Scales the satellites' and the ship's orbits. Planets and moons move at real speed. */
 const ORBIT_PACE = 0.5;
 /** Saturn's axial tilt, 26.7°. */
-const SATURN_TILT = 0.466;
+export const SATURN_TILT = 0.466;
 /**
  * Earth's axial tilt, 23.44°. The axis leans toward ecliptic longitude 90° (+Z) and stays pointed there
  * all year, so the north pole faces the Sun in June and away from it in December.
@@ -210,10 +211,10 @@ const EARTH_DAY_BOOST = 1.35;
 /** Earth and its clouds also take more of the sunlight, which lifts the slopes toward the terminator. */
 const EARTH_SUNLIGHT = 1.25;
 
-const PLANETS: PlanetSpec[] = [
+export const PLANETS: PlanetSpec[] = [
 	{
 		name: "mercury",
-		orbit: 62,
+		orbit: 124,
 		diameter: 8,
 		color: new Color3(0.72, 0.68, 0.6),
 		texture: "/textures/mercury.jpg",
@@ -223,7 +224,7 @@ const PLANETS: PlanetSpec[] = [
 	},
 	{
 		name: "venus",
-		orbit: 96,
+		orbit: 192,
 		diameter: 12,
 		color: new Color3(0.9, 0.76, 0.42),
 		texture: "/textures/venus.jpg",
@@ -233,90 +234,90 @@ const PLANETS: PlanetSpec[] = [
 	},
 	{
 		name: "earth",
-		orbit: 136,
+		orbit: 272,
 		diameter: 14,
 		color: new Color3(0.32, 0.55, 0.9),
 		texture: "/textures/earth-day.jpg",
 		path: new Color3(0.28, 0.45, 0.7),
 		// The Moon is placed from the ephemeris, not from this period.
-		moons: [{ name: "moon", orbit: 26, diameter: 3.8, texture: "/textures/moon.jpg", period: 27.32 }],
+		moons: [{ name: "moon", orbit: 52, diameter: 3.8, texture: "/textures/moon.jpg", period: 27.32 }],
 	},
 	{
 		name: "mars",
-		orbit: 180,
+		orbit: 360,
 		diameter: 10,
 		color: new Color3(0.75, 0.32, 0.18),
 		texture: "/textures/mars.jpg",
 		day: 1.026,
 		path: new Color3(0.45, 0.24, 0.16),
 		moons: [
-			{ name: "phobos", orbit: 7.5, diameter: 0.7, period: 0.319 },
-			{ name: "deimos", orbit: 10, diameter: 0.5, period: 1.263 },
+			{ name: "phobos", orbit: 15, diameter: 0.7, period: 0.319 },
+			{ name: "deimos", orbit: 20, diameter: 0.5, period: 1.263 },
 		],
 	},
 	{
 		name: "jupiter",
-		orbit: 260,
+		orbit: 520,
 		diameter: 34,
 		color: new Color3(0.82, 0.62, 0.4),
 		texture: "/textures/jupiter.jpg",
 		day: 0.4135,
 		path: new Color3(0.45, 0.36, 0.22),
 		moons: [
-			{ name: "io", orbit: 24, diameter: 2.4, period: 1.769 },
-			{ name: "europa", orbit: 28, diameter: 2.1, period: 3.551 },
-			{ name: "ganymede", orbit: 34, diameter: 3.5, period: 7.155 },
-			{ name: "callisto", orbit: 40, diameter: 3.2, period: 16.689 },
+			{ name: "io", orbit: 48, diameter: 2.4, period: 1.769 },
+			{ name: "europa", orbit: 56, diameter: 2.1, period: 3.551 },
+			{ name: "ganymede", orbit: 68, diameter: 3.5, period: 7.155 },
+			{ name: "callisto", orbit: 80, diameter: 3.2, period: 16.689 },
 		],
 	},
 	{
 		name: "saturn",
-		orbit: 350,
+		orbit: 700,
 		diameter: 28,
 		color: new Color3(0.86, 0.74, 0.48),
 		texture: "/textures/saturn.jpg",
 		// No spin: the tilted ring is attached to the planet and would wobble. The bands look the same turned.
 		path: new Color3(0.48, 0.4, 0.22),
 		moons: [
-			{ name: "mimas", orbit: 34, diameter: 0.6, period: 0.942 },
-			{ name: "enceladus", orbit: 36.5, diameter: 0.7, period: 1.37 },
-			{ name: "tethys", orbit: 39, diameter: 1.1, period: 1.888 },
-			{ name: "dione", orbit: 42, diameter: 1.2, period: 2.737 },
-			{ name: "rhea", orbit: 45, diameter: 1.5, period: 4.518 },
-			{ name: "titan", orbit: 51, diameter: 3.4, period: 15.945 },
-			{ name: "iapetus", orbit: 57, diameter: 1.4, plane: IAPETUS_PLANE, period: 79.32 },
+			{ name: "mimas", orbit: 68, diameter: 0.6, period: 0.942 },
+			{ name: "enceladus", orbit: 73, diameter: 0.7, period: 1.37 },
+			{ name: "tethys", orbit: 78, diameter: 1.1, period: 1.888 },
+			{ name: "dione", orbit: 84, diameter: 1.2, period: 2.737 },
+			{ name: "rhea", orbit: 90, diameter: 1.5, period: 4.518 },
+			{ name: "titan", orbit: 102, diameter: 3.4, period: 15.945 },
+			{ name: "iapetus", orbit: 114, diameter: 1.4, plane: IAPETUS_PLANE, period: 79.32 },
 		],
 		// The major moons orbit in the ring plane.
 		moonPlane: SATURN_TILT,
 	},
 	{
 		name: "uranus",
-		orbit: 440,
+		orbit: 880,
 		diameter: 18,
 		color: new Color3(0.55, 0.86, 0.82),
 		texture: "/textures/uranus.jpg",
 		day: -0.7183,
 		path: new Color3(0.28, 0.42, 0.42),
 		moons: [
-			{ name: "miranda", orbit: 12, diameter: 0.6, period: 1.413 },
-			{ name: "ariel", orbit: 14, diameter: 1, period: 2.52 },
-			{ name: "umbriel", orbit: 16.5, diameter: 1, period: 4.144 },
-			{ name: "titania", orbit: 20, diameter: 1.3, period: 8.706 },
-			{ name: "oberon", orbit: 23, diameter: 1.3, period: 13.463 },
+			{ name: "miranda", orbit: 24, diameter: 0.6, period: 1.413 },
+			{ name: "ariel", orbit: 28, diameter: 1, period: 2.52 },
+			{ name: "umbriel", orbit: 33, diameter: 1, period: 4.144 },
+			{ name: "titania", orbit: 40, diameter: 1.3, period: 8.706 },
+			{ name: "oberon", orbit: 46, diameter: 1.3, period: 13.463 },
 		],
 	},
 	{
 		name: "neptune",
-		orbit: 530,
+		orbit: 1060,
 		diameter: 18,
 		color: new Color3(0.28, 0.38, 0.86),
 		texture: "/textures/neptune.jpg",
 		day: 0.6713,
 		path: new Color3(0.2, 0.26, 0.5),
 		moons: [
-			{ name: "proteus", orbit: 11.5, diameter: 0.6, period: 1.122 },
-			{ name: "triton", orbit: 15, diameter: 2.2, period: -5.877 },
-			{ name: "nereid", orbit: 22, diameter: 0.5, period: 360.1 },
+			{ name: "proteus", orbit: 23, diameter: 0.6, period: 1.122 },
+			{ name: "triton", orbit: 30, diameter: 2.2, period: -5.877 },
+			{ name: "nereid", orbit: 44, diameter: 0.5, period: 360.1 },
 		],
 	},
 ];
@@ -393,14 +394,14 @@ export const PLACES: ViewPlace[] = [
 	}),
 ];
 
-const SUN_DIAMETER = 28;
+export const SUN_DIAMETER = 28;
 /** Corona width as a multiple of the Sun's diameter. It fades out before the satellite band gets crowded. */
 const CORONA_SCALE = 2.2;
 /** The Sun turns once in about 25 days, in radians per second. */
 const SUN_SPIN = (Math.PI * 2) / (25.38 * 86_400);
 const SUNLIGHT_COLOR = new Color3(1, 0.95, 0.86);
 const SUN_OUTER_RING = 44;
-const SUN_INNER_RING = 24;
+export const SUN_INNER_RING = 24;
 SHOTS["sun-inner"] = {
 	focus: "sun",
 	alpha: 0.35,
@@ -459,9 +460,96 @@ export function tourStepDelay(view: DemoView): number {
 const CAMERA_BETA_MIN = 0.05;
 const CAMERA_BETA_MAX = Math.PI / 2 + 0.4;
 const CAMERA_RADIUS_MIN = 3;
-const CAMERA_RADIUS_MAX = 2400;
+const CAMERA_RADIUS_MAX = 4800;
 /** Clearance off Saturn's ring plane. The mesh is flat, so this is what "missing the rings" means. */
 const RING_HALF_HEIGHT = 0.7;
+/** A pass by Saturn stays this far outside the rings. */
+const SATURN_FLYBY_MARGIN = 3;
+
+export function saturnRing(center: Vector3): RingBody {
+	const planetRadius = PLANETS.find((spec) => spec.name === "saturn")!.diameter / 2;
+	return {
+		center: center.clone(),
+		normal: new Vector3(0, Math.cos(SATURN_TILT), Math.sin(SATURN_TILT)),
+		inner: planetRadius * SATURN_RING_INNER_SCALE,
+		outer: planetRadius * SATURN_RING_OUTER_SCALE,
+		halfHeight: RING_HALF_HEIGHT,
+	};
+}
+
+export function flybyRadius(spec: PlanetSpec): number {
+	const radius = spec.diameter / 2;
+	if (spec.name === "saturn") {
+		return radius * SATURN_RING_OUTER_SCALE + SATURN_FLYBY_MARGIN;
+	}
+	return radius * FLYBY_SCALE;
+}
+
+/** A body a journey can leave from or fly to. `id` is "sun", a planet name, or a moon name. */
+export type JourneyStop = { id: string; label: string; group?: string };
+
+/** The Sun, then each planet followed by its moons. */
+export const JOURNEY_STOPS: JourneyStop[] = [
+	{ id: "sun", label: "Sun" },
+	...PLANETS.flatMap((spec): JourneyStop[] => [
+		{ id: spec.name, label: PLANET_LABEL[spec.name], group: PLANET_LABEL[spec.name] },
+		...spec.moons.map((moon) => ({ id: moon.name, label: title(moon.name), group: PLANET_LABEL[spec.name] })),
+	]),
+];
+
+export type JourneyBody = {
+	id: string;
+	center: Vector3;
+	radius: number;
+	/** Radius of the orbit its bases ride, or the Sun's inner orbit. A ship arrives on it. */
+	halo: number;
+	/** World positions of its bases right now. A ship leaves from the one nearest its destination. */
+	bases: Vector3[];
+};
+
+/** Every body where it is at one moment: the Sun, each planet, and each moon. */
+export type JourneyLayout = { bodies: JourneyBody[] };
+
+/**
+ * From a base on one body to the base orbit of another. The ship leaves from the base nearest the
+ * destination and arrives on the side of the orbit that faces where it came from. Every planet that
+ * is not an end of the trip may give an assist.
+ */
+export function planJourney(layout: JourneyLayout, fromId: string, toId: string): Route {
+	const byId = new Map(layout.bodies.map((body) => [body.id, body]));
+	const from = byId.get(fromId);
+	const to = byId.get(toId);
+	const saturnBody = byId.get("saturn");
+	if (!from || !to || !saturnBody) {
+		throw new Error(`No journey from ${fromId} to ${toId}.`);
+	}
+
+	const start =
+		from.bases.length > 0
+			? from.bases.reduce((best, base) =>
+					Vector3.DistanceSquared(base, to.center) < Vector3.DistanceSquared(best, to.center) ? base : best
+				).clone()
+			: from.center.add(flatToward(from.center, to.center).scale(from.halo));
+	const end = to.center.add(flatToward(to.center, start).scale(to.halo));
+
+	const candidates = PLANETS.filter((spec) => spec.name !== fromId && spec.name !== toId).flatMap((spec) => {
+		const body = byId.get(spec.name);
+		return body ? [{ name: PLANET_LABEL[spec.name], center: body.center, flyby: flybyRadius(spec) }] : [];
+	});
+	return planRoute({
+		start,
+		end,
+		candidates,
+		spheres: layout.bodies.map((body) => ({ center: body.center, radius: body.radius })),
+		rings: [saturnRing(saturnBody.center)],
+	});
+}
+
+/** Unit direction from `from` toward `to`, flattened into the planets' plane. */
+function flatToward(from: Vector3, to: Vector3): Vector3 {
+	const direction = new Vector3(to.x - from.x, 0, to.z - from.z);
+	return direction.lengthSquared() < 1e-12 ? new Vector3(1, 0, 0) : direction.normalize();
+}
 
 type Flight = {
 	points: Vector3[];
@@ -499,6 +587,10 @@ export type EnvironmentDemo = {
 	/** Moves through the views in order, looping, until `go` or `stop` is called. */
 	play: (views: DemoView[], onView: (view: DemoView) => void) => void;
 	stop: () => void;
+	/** Flies a ship from a base on one body to another, by `JourneyStop` id. `onDone` runs when it arrives. */
+	fly: (fromId: string, toId: string, onDone: () => void) => void;
+	/** Ends the flight early and clears it. */
+	land: () => void;
 };
 
 export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanvasElement): EnvironmentDemo {
@@ -586,18 +678,41 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 	dressEarth(scene, earth.mesh, earth.spec.diameter);
 
 	glow.addExcludedMesh(buildSaturnRing(scene, saturn.mesh, saturn.spec.diameter / 2));
-	for (const [name, radius, color] of [
-		["earth-outer-ring", EARTH_WAREHOUSE_RADIUS, OUTER_RING_COLOR],
-		["earth-inner-ring", EARTH_STATION_RADIUS, INNER_RING_COLOR],
-	] as const) {
-		addOrbit(name, radius, color, earth.anchor);
-	}
+	addOrbit("earth-inner-ring", EARTH_STATION_RADIUS, INNER_RING_COLOR, earth.anchor);
 
 	const spinningBases = buildHabitats(scene, bodies);
 	const ship = buildShip(scene);
 	let shipAngle = 1.2;
 
 	const swarm = buildSatelliteSwarm(scene);
+
+	const journey = createJourney(scene, camera, glow);
+
+	const journeyBody = (id: string, center: Vector3, radius: number, anchor: TransformNode): JourneyBody => {
+		const riding = spinningBases.filter((base) => base.mesh.parent === anchor);
+		return {
+			id,
+			center: center.clone(),
+			radius,
+			halo: riding[0]?.radius ?? radius * 1.5,
+			// World matrices refresh at render, so add the anchor's position by hand.
+			bases: riding.map((base) => anchor.position.add(base.mesh.position)),
+		};
+	};
+
+	const journeyLayout = (): JourneyLayout => {
+		const layout: JourneyBody[] = [
+			{ id: "sun", center: Vector3.Zero(), radius: SUN_DIAMETER / 2, halo: SUN_INNER_RING, bases: [] },
+		];
+		for (const body of bodies) {
+			layout.push(journeyBody(body.spec.name, body.mesh.position, body.spec.diameter / 2, body.anchor));
+			body.moons.forEach((orbiter, index) => {
+				const id = body.spec.moons[index].name;
+				layout.push(journeyBody(id, orbiter.mesh.position, orbiter.radius, orbiter.baseAnchor));
+			});
+		}
+		return { bodies: layout };
+	};
 
 	let from = snapshot(camera);
 	let flight: Flight | null = null;
@@ -742,18 +857,7 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		return obstacles;
 	};
 
-	const ringObstacles = (): RingBody[] => {
-		const planetRadius = saturn.spec.diameter / 2;
-		return [
-			{
-				center: saturn.mesh.position.clone(),
-				normal: new Vector3(0, Math.cos(SATURN_TILT), Math.sin(SATURN_TILT)),
-				inner: planetRadius * SATURN_RING_INNER_SCALE,
-				outer: planetRadius * SATURN_RING_OUTER_SCALE,
-				halfHeight: RING_HALF_HEIGHT,
-			},
-		];
-	};
+	const ringObstacles = (): RingBody[] => [saturnRing(saturn.mesh.position)];
 
 	const widenCamera = () => {
 		camera.lowerBetaLimit = 0.0001;
@@ -813,6 +917,7 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		const shot = SHOTS[active];
 		const before = sunAngle(focusPosition(shot.focus));
 		placeBodies(deltaSeconds);
+		journey.update(deltaSeconds);
 
 		if (travel >= 1) {
 			camera.minZ = 0.1;
@@ -893,6 +998,11 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 			step();
 		},
 		stop: clearTimers,
+		fly(fromId, toId, onDone) {
+			placeBodies(0);
+			journey.start(planJourney(journeyLayout(), fromId, toId), onDone);
+		},
+		land: journey.stop,
 	};
 }
 
@@ -1482,8 +1592,8 @@ function buildHabitats(scene: Scene, bodies: PlanetBody[]): SpinningBase[] {
 		const placed = planetBases({
 			diameter: body.spec.diameter,
 			moons: body.spec.moons.map((moon) => ({ orbit: moon.orbit, diameter: moon.diameter })),
-			warehouseRadius: body.spec.name === "earth" ? EARTH_WAREHOUSE_RADIUS : undefined,
 			stationRadius: body.spec.name === "earth" ? EARTH_STATION_RADIUS : undefined,
+			homes: body.spec.name !== "earth",
 			ringInnerScale: body.spec.name === "saturn" ? SATURN_RING_INNER_SCALE : undefined,
 		});
 		addBaseSlots(scene, body.anchor, placed.warehouses, materials, `${body.spec.name}-warehouse`, spinning);

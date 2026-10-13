@@ -46,6 +46,12 @@ export default function StoryPage() {
 					<Link href="/rules" className="text-amber-300 hover:text-amber-200">
 						Rules / play mechanics
 					</Link>
+					<Link href="/style" className="text-amber-300 hover:text-amber-200">
+						Style bible
+					</Link>
+					<Link href="/glossary" className="text-amber-300 hover:text-amber-200">
+						Glossary
+					</Link>
 				</div>
 			</section>
 		</main>

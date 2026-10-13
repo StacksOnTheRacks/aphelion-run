@@ -128,10 +128,10 @@ export default function RulesPage() {
 					<article className="rounded-2xl border border-white/10 p-5">
 						<h3 className="text-lg">Harvest</h3>
 						<p className="mt-3 text-sm leading-relaxed text-white/75">
-							Dock at an empty or allied satellite and siphon until it is empty, or until another load would drop the
+							Dock at an empty or allied collector and siphon until it is empty, or until another load would drop the
 							ship under the reserve for today&apos;s departure. When the siphon stops, the ship is idle in the inner
 							orbit with its haul aboard. A departure plotted from the terminal is flown when the siphon stops. A ship
-							with no departure plotted stays on the empty satellite.
+							with no departure plotted stays on the empty collector.
 						</p>
 					</article>
 					<article className="rounded-2xl border border-amber-300/30 p-5">
@@ -180,6 +180,12 @@ export default function RulesPage() {
 					</Link>
 					<Link href="/story" className="text-amber-300 hover:text-amber-200">
 						The story
+					</Link>
+					<Link href="/style" className="text-amber-300 hover:text-amber-200">
+						Style bible
+					</Link>
+					<Link href="/glossary" className="text-amber-300 hover:text-amber-200">
+						Glossary
 					</Link>
 				</div>
 			</section>

@@ -5,7 +5,7 @@ An asynchronous space strategy game. The description of the game is in [BRIEF.md
 ## Packages
 
 - `@aphelion/app` — the game. The solar-system camera runs on its own here.
-- `@aphelion/www` — the proving ground. The solar system is at `/`, the story at `/story`, and the rules at `/rules`.
+- `@aphelion/www` — the proving ground. The solar system is at `/`, the story at `/story`, the rules at `/rules`, the style bible at `/style`, and the glossary at `/glossary`.
 - `@aphelion/infra` — the CDK stack that publishes the site to [aphelionrun.com](https://aphelionrun.com).
 
 ## Develop
