@@ -67,7 +67,7 @@ export const STYLE: StyleChapter[] = [
 		kicker: "The terminal",
 		title: "Issued, or done without a license",
 		paragraphs: [
-			"The phone is a terminal. Sol's is issued: tracked, wide letter-spacing, small type. The Marauder terminal does the same job without a license. Both stay readable at arm's length.",
+			"The terminal is the type and the layout of an interface, on a phone and on a desk. Sol's is issued: tracked, wide letter-spacing, small type. The Marauder terminal does the same job without a license. Both stay readable at arm's length. A phone opens every place a desk opens.",
 		],
 	},
 	{

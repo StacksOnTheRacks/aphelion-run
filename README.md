@@ -1,11 +1,11 @@
 # Aphelion Run
 
-An asynchronous space strategy game. The description of the game is in [BRIEF.md](BRIEF.md). Sources and licenses for the planet maps are in [CREDITS.md](CREDITS.md).
+An asynchronous space strategy game. The description of the game is in [BRIEF.md](BRIEF.md). How this version is built is in [STRATEGY.md](STRATEGY.md). Sources and licenses for the planet maps are in [CREDITS.md](CREDITS.md).
 
 ## Packages
 
-- `@aphelion/app` — the game. The solar-system camera runs on its own here.
-- `@aphelion/www` — the proving ground. The solar system is at `/`, the story at `/story`, the rules at `/rules`, the style bible at `/style`, and the glossary at `/glossary`.
+- `@aphelion/app` — the game. It opens on the galaxy; selecting Sol loads the solar system. It runs on its own here.
+- `@aphelion/www` — the proving ground. The game is at `/`, the story at `/story`, the rules at `/rules`, the style bible at `/style`, and the glossary at `/glossary`.
 - `@aphelion/infra` — the CDK stack that publishes the site to [aphelionrun.com](https://aphelionrun.com).
 
 ## Develop
@@ -15,7 +15,7 @@ npm ci
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The camera by itself is `npm run dev:app` on port 3001.
+Open [http://localhost:3000](http://localhost:3000). The game by itself is `npm run dev:app` on port 3001.
 
 ## Test
 

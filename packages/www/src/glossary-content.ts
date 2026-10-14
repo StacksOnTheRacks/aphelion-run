@@ -69,7 +69,7 @@ export const GLOSSARY: GlossarySection[] = [
 			{
 				term: "Base",
 				id: "base",
-				body: "A dock on a yielding body. Residents receive that body's free stream. A visiting ship can buy the stock. A base does not hand over energy, and it does not pay cash for materials.",
+				body: "A dock on a world. A pilot mines that world's yield here, at the planet or at a moon. A base does not hand the yield over, and it does not sell materials.",
 			},
 			{
 				term: "Collector",
@@ -80,7 +80,12 @@ export const GLOSSARY: GlossarySection[] = [
 			{
 				term: "Combat zone",
 				id: "combat-zone",
-				body: "The inner orbit of any planet or moon, except the Moon. A ship sitting there can be attacked. A cloaked ship cannot.",
+				body: "The inner orbit of any planet or moon, except the Moon. A ship sitting there can be attacked. A cloaked ship cannot. A dry ship cannot attack. It can be attacked.",
+			},
+			{
+				term: "Gravity boom",
+				id: "gravity-boom",
+				body: "A boom on the home base. It works the pull along its length as the base orbits, and feeds a slow stream of energy into the warehouse. Every home gets the same rate. It does not replace a haul from the Sun.",
 			},
 			{
 				term: "Home",
@@ -117,7 +122,12 @@ export const GLOSSARY: GlossarySection[] = [
 			{
 				term: "Warehouse",
 				id: "warehouse",
-				body: "At home. Energy from a collector is unloaded here, and spent from here on later burns. The free stream arrives here. When the warehouse is full, energy has to be sold at a station to make room.",
+				body: "At home. Energy from a collector is unloaded here, and materials mined aboard are unloaded here, and energy is spent from here on later burns. When the warehouse is full of energy, it has to be sold at a station to make room. Water is stored apart from that energy. A full energy store does not block a water unload.",
+			},
+			{
+				term: "World",
+				id: "world-yield",
+				body: "A planet and its moons. They share one yield. A pilot mines that yield at the planet or at any of its moons and gets the same materials either way.",
 			},
 		],
 	},
@@ -192,12 +202,12 @@ export const GLOSSARY: GlossarySection[] = [
 			{
 				term: "Supply",
 				id: "supply",
-				body: "The route home → a body that yields what the ship lacks → home. Cash buys that yield at a base there. Materials have weight. The base will not sell a load the ship cannot lift home on the wide path today.",
+				body: "The route home → a world, to mine → home. A planet and its moons share one yield. The ship mines it at the planet or at any of its moons, including the home world. Materials have weight. A ship is not loaded past what it can lift home on the wide path today.",
 			},
 			{
 				term: "Terminal",
 				id: "terminal",
-				body: "The phone. Check flights, set sell orders, manage repairs, plot the next path, including the departure from a collector.",
+				body: "Flights, sell orders, repairs, and the next path, including the departure from a collector. One place among the others. A phone opens it, and opens every other place.",
 			},
 			{
 				term: "Transfer",
@@ -219,12 +229,12 @@ export const GLOSSARY: GlossarySection[] = [
 			{
 				term: "Electronic warfare",
 				id: "electronic-warfare",
-				body: "The light fittings. Marauder ships are built around them. They spend storm tar, and the yields of Titan, Iapetus, and Triton.",
+				body: "The light fittings. Marauder ships are built around them.",
 			},
 			{
 				term: "Energy tanks",
 				id: "energy-tanks",
-				body: "How much energy the ship can hold. The burn spends that same store. They spend the yields of Venus and Io. Those yields have no name yet.",
+				body: "How much energy the ship can hold. The burn spends that same store.",
 			},
 			{
 				term: "Heavy",
@@ -234,7 +244,7 @@ export const GLOSSARY: GlossarySection[] = [
 			{
 				term: "Hull, armor, and guns",
 				id: "hull",
-				body: "The ship's strength in a fight, and the plate a repair bay puts back. They spend hydrogen metal, and the yields of Mercury, Mars, Phobos, and Deimos.",
+				body: "The ship's strength in a fight, and the plate a repair bay puts back.",
 			},
 			{
 				term: "Light",
@@ -249,12 +259,12 @@ export const GLOSSARY: GlossarySection[] = [
 			{
 				term: "Shields",
 				id: "shields",
-				body: "What a close pass wears down, and what a fight spends. They spend mantle ice, and the yields of Europa, Callisto, Mimas, Enceladus, Tethys, Dione, Rhea, Miranda, Ariel, Umbriel, Titania, Oberon, and Nereid.",
+				body: "What a close pass wears down, and what a fight spends.",
 			},
 			{
 				term: "Siphon modules",
 				id: "siphon-modules",
-				body: "The fittings that set siphon level, and so how fast a ship drinks a collector. They spend helium rain, and the yields of the Moon, Ganymede, and Proteus.",
+				body: "The fittings that set siphon level, and so how fast a ship drinks a collector.",
 				also: ["siphon level"],
 			},
 		],
@@ -263,12 +273,17 @@ export const GLOSSARY: GlossarySection[] = [
 		id: "materials",
 		kicker: "Materials",
 		title: "What a body yields",
-		intro: "Every yielding body offers one material, or two. A primary, and sometimes a second in a lesser quantity. The second is not named yet. No yield stands in for another. No faction owns one.",
+		intro: "A world is a planet and its moons. They share one yield. Ships are built and improved from hydrogen, ore, nitrogen, and carbon. Water is consumed. The same material is the same wherever it is mined. No faction owns one.",
 		entries: [
+			{
+				term: "Carbon",
+				id: "carbon",
+				body: "A material ships are built and improved from. Yielded by Venus, Mars, Saturn, Uranus, and Neptune.",
+			},
 			{
 				term: "Cash",
 				id: "cash",
-				body: "Paid onto the ship at a station, for energy sold. Banked only at home. Spent at other bodies, on the materials they yield. Cash has no weight.",
+				body: "Paid onto the ship at a station, for energy sold. Banked only at home. Banked cash can finish an improvement sooner. It does not buy materials, and it does not shorten a repair. Cash has no weight.",
 			},
 			{
 				term: "Energy",
@@ -276,34 +291,29 @@ export const GLOSSARY: GlossarySection[] = [
 				body: "Mined from collectors, stored in the warehouse, spent on burns, sold at a station. Energy has weight. Humanity's lifeblood.",
 			},
 			{
-				term: "Free stream",
-				id: "free-stream",
-				body: "The home body's yield, arriving a little at a time into the warehouse, at no cost. It is only that body's share. Visitors buy from a separate stock.",
+				term: "Hydrogen",
+				id: "hydrogen",
+				body: "A material ships are built and improved from. Yielded by Jupiter, Saturn, Uranus, and Neptune.",
 			},
 			{
-				term: "Helium rain",
-				id: "helium-rain",
-				body: "Scooped from Saturn. Helium falls through the sky in droplets. Spent on siphon modules. Also yielded by the Moon, Ganymede, and Proteus.",
+				term: "Nitrogen",
+				id: "nitrogen",
+				body: "A material ships are built and improved from. Yielded by Venus, Saturn, Uranus, and Neptune.",
 			},
 			{
-				term: "Hydrogen metal",
-				id: "hydrogen-metal",
-				body: "Scooped from Jupiter. Under the clouds, hydrogen is pressed into a metal. The scoops bring it up and it stays solid. Spent on hull, armor, and guns. Also yielded by Mercury, Mars, Phobos, and Deimos.",
+				term: "Ore",
+				id: "ore",
+				body: "A material ships are built and improved from. Yielded by Mercury, Venus, Mars, and Jupiter.",
 			},
 			{
-				term: "Mantle ice",
-				id: "mantle-ice",
-				body: "Scooped from Uranus. The hot ice under the clouds is lifted out and kept. Spent on shields. Also yielded by Europa, Callisto, Mimas, Enceladus, Tethys, Dione, Rhea, Miranda, Ariel, Umbriel, Titania, Oberon, and Nereid.",
-			},
-			{
-				term: "Storm tar",
-				id: "storm-tar",
-				body: "Scooped from Neptune. Heat and wind draw carbon out of the methane. Spent on electronic warfare. Also yielded by Titan, Iapetus, and Triton.",
+				term: "Water",
+				id: "water",
+				body: "Consumed at the home base, at one rate for the fleet, whether or not the pilot is online. A ship in the repair bay does not count. A route does not spend it. When the base is dry, a ship can depart only for a world that yields it. A ship already sent finishes its route. A sale at Earth is not allowed while the base is dry. A dry ship cannot attack. It can be attacked. Not spent to build a ship. Yielded by Mercury, Mars, Jupiter, Saturn, Uranus, and Neptune.",
 			},
 			{
 				term: "Yield",
 				id: "yield",
-				body: "What a body gives. The Sun yields energy, into collectors. Earth yields nothing a ship is built from. Every other body yields one material or two. A visitor buys it. A resident receives the free stream.",
+				body: "What a world gives. The Sun yields energy, into collectors. Earth yields nothing a ship can mine, and the Moon shares that. Every other world yields the materials named for it. The pilot mines them there, including at home.",
 			},
 		],
 	},

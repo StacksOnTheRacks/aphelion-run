@@ -1,20 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { EXCEPTIONS, PARTS, ROUTES } from "../src/rules-content";
+import { EXCEPTIONS, ROUTES, WORLDS } from "../src/rules-content";
 
-test("the rules name the giant minerals and the two exceptions", () => {
-	const minerals = PARTS.flatMap((part) => (part.mineral ? [part.mineral.name] : []));
-	assert.deepEqual(minerals, ["Hydrogen metal", "Helium rain", "Mantle ice", "Storm tar"]);
+test("the rules name each world's yield and the two exceptions", () => {
+	const byName = Object.fromEntries(WORLDS.map((world) => [world.name, world.materials]));
+	assert.deepEqual(byName.Mercury, ["Ore", "Water"]);
+	assert.deepEqual(byName.Venus, ["Ore", "Nitrogen", "Carbon"]);
+	assert.deepEqual(byName.Mars, ["Ore", "Carbon", "Water"]);
+	assert.deepEqual(byName.Jupiter, ["Hydrogen", "Ore", "Water"]);
+	assert.deepEqual(byName.Saturn, ["Hydrogen", "Nitrogen", "Carbon", "Water"]);
+	assert.deepEqual(byName.Uranus, ["Hydrogen", "Nitrogen", "Carbon", "Water"]);
+	assert.deepEqual(byName.Neptune, ["Hydrogen", "Nitrogen", "Carbon", "Water"]);
+	assert.equal(WORLDS.some((world) => world.name === "Europa"), false);
 	assert.deepEqual([...EXCEPTIONS], ["Sun", "Earth"]);
 });
 
-test("every ship part names the bodies that feed it", () => {
-	const byName = Object.fromEntries(PARTS.map((part) => [part.name, part.bodies]));
-	assert.ok(byName["Hull, armor, and guns"]?.includes("Jupiter"));
-	assert.ok(byName["Siphon modules"]?.includes("Saturn"));
-	assert.ok(byName["Shields"]?.includes("Europa"));
-	assert.ok(byName["Energy tanks"]?.includes("Io"));
-	assert.ok(byName["Electronic warfare"]?.includes("Titan"));
+test("the supply route mines a shared world yield", () => {
+	const supply = ROUTES.find((route) => route.title === "Supply");
+	assert.ok(supply);
+	assert.match(supply.body, /share one yield/);
 	assert.equal(ROUTES.length, 3);
 });

@@ -1,73 +1,19 @@
 export const EXCEPTIONS = ["Sun", "Earth"] as const;
 
-export type ShipPart = {
+export type WorldYield = {
 	name: string;
-	role: string;
-	mineral?: { name: string; body: string; note: string };
-	bodies: string[];
+	materials: string[];
 };
 
-export const PARTS: ShipPart[] = [
-	{
-		name: "Hull, armor, and guns",
-		role: "The ship's strength in a fight, and the plate a repair bay puts back.",
-		mineral: {
-			name: "Hydrogen metal",
-			body: "Jupiter",
-			note: "Under the clouds, hydrogen is pressed into a metal. The scoops bring it up and it stays solid.",
-		},
-		bodies: ["Jupiter", "Mercury", "Mars", "Phobos", "Deimos"],
-	},
-	{
-		name: "Siphon modules",
-		role: "How fast a ship siphons a collector.",
-		mineral: {
-			name: "Helium rain",
-			body: "Saturn",
-			note: "Helium falls through the sky in droplets.",
-		},
-		bodies: ["Saturn", "Moon", "Ganymede", "Proteus"],
-	},
-	{
-		name: "Shields",
-		role: "What a close pass wears down, and what a fight spends.",
-		mineral: {
-			name: "Mantle ice",
-			body: "Uranus",
-			note: "The hot ice under the clouds is lifted out and kept.",
-		},
-		bodies: [
-			"Uranus",
-			"Europa",
-			"Callisto",
-			"Mimas",
-			"Enceladus",
-			"Tethys",
-			"Dione",
-			"Rhea",
-			"Miranda",
-			"Ariel",
-			"Umbriel",
-			"Titania",
-			"Oberon",
-			"Nereid",
-		],
-	},
-	{
-		name: "Energy tanks",
-		role: "How much solar energy the ship can hold. The burn spends that same store.",
-		bodies: ["Venus", "Io"],
-	},
-	{
-		name: "Electronic warfare",
-		role: "The light fittings. Marauder ships are built around them.",
-		mineral: {
-			name: "Storm tar",
-			body: "Neptune",
-			note: "Heat and wind draw carbon out of the methane.",
-		},
-		bodies: ["Neptune", "Titan", "Iapetus", "Triton"],
-	},
+/** A planet and its moons share one yield. Earth and the Sun are the exceptions. */
+export const WORLDS: WorldYield[] = [
+	{ name: "Mercury", materials: ["Ore", "Water"] },
+	{ name: "Venus", materials: ["Ore", "Nitrogen", "Carbon"] },
+	{ name: "Mars", materials: ["Ore", "Carbon", "Water"] },
+	{ name: "Jupiter", materials: ["Hydrogen", "Ore", "Water"] },
+	{ name: "Saturn", materials: ["Hydrogen", "Nitrogen", "Carbon", "Water"] },
+	{ name: "Uranus", materials: ["Hydrogen", "Nitrogen", "Carbon", "Water"] },
+	{ name: "Neptune", materials: ["Hydrogen", "Nitrogen", "Carbon", "Water"] },
 ];
 
 export const ROUTES = [
@@ -79,11 +25,11 @@ export const ROUTES = [
 	{
 		title: "Sell",
 		steps: "Home warehouse → Earth station → home bank",
-		body: "A pilot sells only at their own faction's station. The station pays cash onto the ship for the surplus above the burn home. That cash is banked only at home.",
+		body: "A pilot sells only at their own faction's station. The station pays cash onto the ship for the surplus above the burn home. That cash is banked only at home, and banked cash can finish an improvement sooner.",
 	},
 	{
 		title: "Supply",
-		steps: "Home → a body that yields what the ship lacks → home",
-		body: "Cash buys that body's yield at a base there. Materials have weight. The base will not sell a load the ship cannot lift home on the wide path today.",
+		steps: "Home → a world, to mine → home",
+		body: "A planet and its moons share one yield. The ship mines that yield at the planet or at any of its moons, including the home world. Materials have weight. A ship is not loaded past what it can lift home on the wide path today.",
 	},
 ];

@@ -8,17 +8,20 @@ const text = STORY.flatMap((chapter) => [chapter.title, ...chapter.paragraphs]).
 test("the story says why both factions fly the same route", () => {
 	assert.ok(text.includes("Sol Systems"));
 	assert.ok(text.includes("Ashland Marauders"));
-	assert.ok(text.includes("hydrogen metal"));
-	assert.ok(text.includes("helium rain"));
-	assert.ok(text.includes("mantle ice"));
-	assert.ok(text.includes("storm tar"));
+	assert.ok(text.includes("hydrogen"));
+	assert.ok(text.includes("ore"));
+	assert.ok(text.includes("nitrogen"));
+	assert.ok(text.includes("carbon"));
+	assert.ok(text.includes("water"));
 	assert.ok(text.includes("The Sun is where energy is mined."));
 	assert.ok(text.includes("Earth is where energy is sold."));
 	assert.ok(text.includes("Ships are never destroyed."));
 	assert.match(text, /same materials/);
 	assert.match(text, /not from the same design/);
 	assert.match(text, /must use Sol's blueprints/);
-	assert.match(text, /at least one material but no more than two/);
+	assert.match(text, /share one yield/);
+	assert.match(text, /Water is consumed/);
+	assert.equal(text.includes("hydrogen metal"), false);
 	assert.match(text, /besides Earth or the Sun/);
 	assert.match(text, /The only defense is a cloak/);
 	assert.equal(text.includes("jury-rigged"), false);

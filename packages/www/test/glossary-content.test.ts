@@ -25,16 +25,20 @@ test("the glossary locks collector and siphon", () => {
 	assert.ok(collector.also?.includes("harvesting satellite"));
 });
 
-test("the glossary names the factions, the four minerals, and the unnamed tanks", () => {
+test("the glossary names the factions and the materials", () => {
 	assert.ok(entry("Sol Systems"));
 	assert.ok(entry("Ashland Marauders"));
-	assert.ok(entry("Hydrogen metal"));
-	assert.ok(entry("Helium rain"));
-	assert.ok(entry("Mantle ice"));
-	assert.ok(entry("Storm tar"));
+	assert.ok(entry("Hydrogen"));
+	assert.ok(entry("Ore"));
+	assert.ok(entry("Nitrogen"));
+	assert.ok(entry("Carbon"));
+	assert.ok(entry("Water"));
 	assert.ok(entry("Energy"));
 	assert.ok(entry("Cash"));
-	assert.match(entry("Energy tanks")?.body ?? "", /no name yet/);
+	assert.ok(entry("World"));
+	assert.match(entry("Water")?.body ?? "", /Consumed/);
+	assert.match(entry("World")?.body ?? "", /share one yield/);
+	assert.equal(entry("Hydrogen metal"), undefined);
 	assert.ok(GLOSSARY.some((section) => section.id === "materials"));
 });
 

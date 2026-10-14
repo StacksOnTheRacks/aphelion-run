@@ -50,8 +50,8 @@ export const STORY: StoryChapter[] = [
 		kicker: "The route",
 		title: "Travelling between home and the Sun",
 		paragraphs: [
-			"The work is done entirely in space. You set a home base on a planet or moon, and you fly to the Sun to harvest energy. You can then fly to Earth to sell the energy and buy materials to improve your ship or to build another one. You then fly to your home base to build your ship, and you fly back to the Sun to harvest more energy. You then fly to Earth to sell the energy and buy materials to build your ship, and you repeat the process. You don't have to fly to Earth every time you collect energy, you can take it to your home base and store it. Energy stored in the home base can be used to power more trips, but when the base warehouse is full, you have to sell it on an Earth market to make room for more.",
-			"The ship fills at a satellite and unloads into the warehouse at home. It carries that energy to its own faction's station at Earth and brings the cash home to the bank. It spends the cash at some other world, on the material the home does not yield, and hauls that material back. Every burn is paid in energy from the warehouse. A pilot who wants anything the home cannot give still has to go back to the Sun.",
+			"The work is done entirely in space. You set a home base on a planet or moon, and you fly to the Sun to harvest energy. You mine a world's materials at the planet or at any of its moons, including home, and you fly them back to build. You can fly to Earth to sell energy. The cash is banked at home and can finish an improvement sooner. You don't have to fly to Earth every time you collect energy, you can take it to your home base and store it. Energy stored in the home base can be used to power more trips, but when the base warehouse is full, you have to sell it on an Earth market to make room for more.",
+			"The ship fills at a satellite and unloads into the warehouse at home. It carries that energy to its own faction's station at Earth and brings the cash home to the bank. It mines a world, including the home world, and hauls those materials back. Every burn is paid in energy from the warehouse, so a pilot who wants materials still has to keep going to the Sun.",
 			"Energy must be spent wisely, so the gravity of planets and moons can be used to a players advantage. A ship can be boosted by a low orbit swing around a planet or moon, and based on the alignment of planets, routes will change at different times of the year. The best routes are the ones that are profitable and that are easy to execute.",
 		],
 	},
@@ -63,7 +63,7 @@ export const STORY: StoryChapter[] = [
 			"A base can orbit any planet or moon besides Earth or the Sun. The Sun has harvesting satellites and no bases. Sol does not permit pilot bases in Earth's orbit either. The base contains the warehouse, the repair bay, and the space dock. The ship is improved there, and only there.",
 			"Where it sits is a choice about how much of the haul a direct burn will eat. Mercury is the cheap hop to the Sun. The Moon is the cheap hop to Earth's market, and the Moon is not a combat zone. Venus sits between them. A base from Mars outward pays more for the same burn.",
 			"Battles happen where ships are most vulnerable. Any ship sitting in inner orbit of any planet or moon is an attack target. The only defense is a cloak. Cloaks cause a ship to consume energy faster while away from base, but they also make a ship impossible to detect by other ships. Cloaked ships can be detected by scan, but they cannot be attacked. Energy burn must account for the amount of cloak needed to perform a trip.",
-			"Players still have to visit every world that yields something their home world lacks. The planets keep moving. The one that can bend a course this month is what makes a long trip possible, and a close pass wears the ship down. A pass in the wrong month saves nothing. Next month it is a different planet.",
+			"A pilot mines the home world's yield to have it. The base does not hand it over. The same material from another world is the same material. The planets keep moving. The one that can bend a course this month is what makes a long trip possible, and a close pass wears the ship down. A pass in the wrong month saves nothing. Next month it is a different planet.",
 		],
 	},
 	{
@@ -71,10 +71,9 @@ export const STORY: StoryChapter[] = [
 		kicker: "The outer system",
 		title: "Why you go that far",
 		paragraphs: [
-			"The Sun is where energy is mined. Earth is where energy is sold. There are no resources to mine on Earth, so Earth satellites function as trading stations.Those two are the only bodies that yield nothing a ship is built from, and cannot be used as a base.",
-			"Everywhere else yields at least one material but no more than two. A base receives its own materials, free, incrementally. Each body has a primary element it offers, and possibly another at lesser quanities.  A visitor buys from those yields. No yield stands in for another, and no faction owns one.",
-			"The giant planets have no ground to stand on. They are still why a pilot goes that far, because each one holds something a ship can carry, scooped from orbit. Under Jupiter, hydrogen is pressed into a metal the scoops bring up and keep: hydrogen metal, for hull, armor, and guns. On Saturn, helium falls through the sky in droplets: helium rain, for the siphon modules that decide how fast a satellite can be drunk. Under Uranus, hot ice is lifted out and kept: mantle ice, for shields. Over Neptune, heat and wind draw carbon out of the methane: storm tar, for electronic warfare, the fittings Marauder ships are built around.",
-			"The worlds between those giants feed the same parts with yields of their own. Living on one of them does not excuse the rest. Every step of a ship's strength spends all of it, and the free stream at home is only home's share.",
+			"The Sun is where energy is mined. Earth is where energy is sold. Earth yields nothing a ship can mine, and the Moon shares that, so the Moon yields nothing either. The Sun and Earth cannot hold a pilot base.",
+			"A world is a planet and its moons. They share one yield. Mining the planet or any of its moons returns the same materials. The materials are hydrogen, ore, nitrogen, carbon, and water. Ships are built and improved from the first four. Water is consumed at the home base, at one rate for the fleet, whether or not the pilot is there. A ship in the repair bay does not count. A route does not spend it. A dry base can send a ship only toward water, and cannot sell at Earth until water is home. A dry ship cannot attack, and it can be attacked. The same material is the same wherever it is mined.",
+			"Mercury yields ore and water. Venus yields ore, nitrogen, and carbon. Mars yields ore, carbon, and water. Jupiter yields hydrogen, ore, and water. Saturn, Uranus, and Neptune yield hydrogen, nitrogen, carbon, and water. The giants are mined from orbit. The home's only advantage is where it sits.",
 		],
 	},
 	{
@@ -84,7 +83,7 @@ export const STORY: StoryChapter[] = [
 		paragraphs: [
 			"Only a finished transfer at an Earth station changes the price. Energy sitting in a warehouse does not. A fight that steals a cargo before the transfer finishes is not a delivery.",
 			"A pilot sells only at their own station. Sol Systems deliveries move the legal price. Ashland Marauder deliveries move the black-market price. Flood the legal station and the corporate payouts fall. The domes buy the surplus. The slums go without power. Stolen energy then pays more, more pilots run as Marauders, the legal supply thins, and the legal price rises again.",
-			"Pilots hold a haul at home and sell when their own side's price is high. That high price is the premium. Selling into the flood is how the premium dies. The station pays cash onto the ship. It is banked only at home, and until then the other faction can take it.",
+			"Pilots hold a haul at home and sell when their own side's price is high. That high price is the premium. Selling into the flood is how the premium dies. The station pays cash onto the ship. It is banked only at home, and until then the other faction can take it. Banked cash can finish an improvement sooner.",
 		],
 	},
 	{
@@ -94,7 +93,7 @@ export const STORY: StoryChapter[] = [
 		paragraphs: [
 			"Ships are never destroyed. A beaten pilot is sent home to the repair bay. The winner takes the energy and the cash that were aboard, and scrap from the wreck. The trip home does not deliver the cargo.",
 			"Energy has weight. Materials have weight. Cash does not. A full ship of either faction turns slowly and fires slowly. The run out of Earth with the payout aboard is a light ship in a combat zone, and that is as true of an armored frigate as it is of a Marauder. Manage the weight or lose the route. Win the fight or lose the haul. Neither design skips that.",
-			"Repairs are made at home, from the same materials the ship was built from. The free stream covers only the home world's share. Missing a material delays the work. It does not, by itself, keep the ship from flying.",
+			"Repairs are made at home, from the same materials the ship was built from. Each material, including what the home world offers, waits on what the ship has mined and brought back. Missing a material delays the work. It does not, by itself, keep the ship from flying.",
 		],
 	},
 ];

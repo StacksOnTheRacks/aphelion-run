@@ -41,7 +41,9 @@ import {
 } from "./bases";
 import { daysSinceJ2000, greenwichAngle, moonLongitude, planetLongitude, type EphemerisPlanet } from "./ephemeris";
 import { createJourney } from "./journey";
+import { awayFrom, type LabelFrame, type LabelSource } from "./labels";
 import { createMoonTerrain } from "./moon-terrain";
+import { trackPicks } from "./pointer";
 import { FLYBY_SCALE, planRoute, type Route } from "./route";
 
 type PlanetName = EphemerisPlanet;
@@ -65,6 +67,10 @@ type Shot = {
 	radius: number;
 	/** When set, distance is chosen so the focus body covers this share of the screen's shorter side. */
 	fill?: number;
+	/** When set, the camera also stands back far enough to keep a sphere this wide around the focus on screen. */
+	reach?: number;
+	/** When set, distance is the closest at which a circle this wide around the focus, in the planets' plane, fits the screen. */
+	fitOrbit?: number;
 	offset?: Vector3;
 	/**
 	 * Alpha is measured from the side of the body that faces the Sun, and the camera turns with the
@@ -84,7 +90,6 @@ type Shot = {
 };
 
 const SHOTS: Record<string, Shot> = {
-	system: { focus: "sun", alpha: -Math.PI / 2, beta: 0.28, radius: 3200, corona: 3 },
 	"earth-outer": { focus: "earth", alpha: 0.9, beta: 0.8, radius: 156, sunRelative: true },
 	// Far enough back that the station ring sits in frame beside the planet, outside that orbit.
 	"earth-inner": {
@@ -124,17 +129,18 @@ function moonShot(focus: string, level: "outer" | "inner"): Shot {
 	};
 }
 
-/** Pulled back far enough to see the planet and, where they exist, its moons. Saturn keeps the ring framing. */
+/** Share of the screen's shorter side the outermost moon orbit spans in a planet's outer shot. */
+const MOON_REACH_FILL = 0.9;
+
+/** Pulled back far enough to see the planet and every moon's whole orbit. */
 function planetOuterShot(spec: PlanetSpec): Shot {
-	if (spec.name === "saturn") {
-		return { focus: "saturn", alpha: 0.9, beta: 1.1, radius: 0, fill: 0.36, sunRelative: true, closeUp: true };
-	}
 	const moonReach = spec.moons.reduce((far, moon) => Math.max(far, moon.orbit), 0);
 	return {
 		focus: spec.name,
 		alpha: 0.9,
 		beta: 0.8,
-		radius: Math.max(spec.diameter * 4, moonReach * 1.8),
+		radius: spec.diameter * 4,
+		reach: moonReach || undefined,
 		sunRelative: true,
 	};
 }
@@ -322,6 +328,18 @@ export const PLANETS: PlanetSpec[] = [
 	},
 ];
 
+/** The whole system from nearly overhead, as close as the outermost planet's orbit allows. */
+SHOTS.system = {
+	focus: "sun",
+	alpha: -Math.PI / 2,
+	beta: 0.28,
+	radius: 0,
+	fitOrbit: Math.max(...PLANETS.map((spec) => spec.orbit + spec.diameter / 2)),
+	corona: 3,
+};
+/** Share of the screen the system shot's outermost orbit may span, on each axis. */
+const ORBIT_FIT_FILL = 0.94;
+
 const PLANET_LABEL: Record<PlanetName, string> = {
 	mercury: "Mercury",
 	venus: "Venus",
@@ -447,20 +465,16 @@ const MILKY_WAY_GLOW = 0.18;
 /** How long a camera move takes. Arriving at the Sun is a little slower, because the zoom covers more distance. */
 export const TRAVEL_SECONDS = 2.4;
 export const SUN_TRAVEL_SECONDS = 3.6;
-/** How long the tour rests after a move has finished, before the next one starts. */
-export const REST_MS = 5000;
 
 export function travelSeconds(view: DemoView): number {
 	return view === "sun-outer" || view === "sun-inner" ? SUN_TRAVEL_SECONDS : TRAVEL_SECONDS;
 }
 
-export function tourStepDelay(view: DemoView): number {
-	return travelSeconds(view) * 1000 + REST_MS;
-}
 const CAMERA_BETA_MIN = 0.05;
 const CAMERA_BETA_MAX = Math.PI / 2 + 0.4;
 const CAMERA_RADIUS_MIN = 3;
-const CAMERA_RADIUS_MAX = 4800;
+/** Far enough out that a phone held upright still fits Neptune's orbit across its width. */
+const CAMERA_RADIUS_MAX = 7000;
 /** Clearance off Saturn's ring plane. The mesh is flat, so this is what "missing the rings" means. */
 const RING_HALF_HEIGHT = 0.7;
 /** A pass by Saturn stays this far outside the rings. */
@@ -496,6 +510,56 @@ export const JOURNEY_STOPS: JourneyStop[] = [
 		...spec.moons.map((moon) => ({ id: moon.name, label: title(moon.name), group: PLANET_LABEL[spec.name] })),
 	]),
 ];
+
+/** A body the pointer can pick, and the view a click on it opens: that body's outer orbit. */
+export type BodyTarget = { id: string; label: string; view: DemoView };
+
+const SUN_TARGET: BodyTarget = { id: "sun", label: "Sun", view: "sun-outer" };
+
+function planetTarget(spec: PlanetSpec): BodyTarget {
+	return { id: spec.name, label: PLANET_LABEL[spec.name], view: planetOrbitView(spec.name, "outer") };
+}
+
+function moonTarget(spec: PlanetSpec, moon: MoonSpec): BodyTarget {
+	return { id: moon.name, label: title(moon.name), view: moonView(spec.name, moon.name, "outer") };
+}
+
+/** From the whole system, the Sun and the planets. Beside a planet, its moons. Nothing beside the Sun or a moon. */
+export function bodyTargets(view: DemoView): BodyTarget[] {
+	if (view === "system") {
+		return [SUN_TARGET, ...PLANETS.map(planetTarget)];
+	}
+	const spec = PLANETS.find(
+		(candidate) => view === planetOrbitView(candidate.name, "outer") || view === planetOrbitView(candidate.name, "inner")
+	);
+	return spec ? spec.moons.map((moon) => moonTarget(spec, moon)) : [];
+}
+
+/** The bodies between the whole system and this view, outermost first: the planet, then its moon. */
+export function viewTrail(view: DemoView): BodyTarget[] {
+	if (view === "sun-outer" || view === "sun-inner") {
+		return [SUN_TARGET];
+	}
+	for (const spec of PLANETS) {
+		if (view === planetOrbitView(spec.name, "outer") || view === planetOrbitView(spec.name, "inner")) {
+			return [planetTarget(spec)];
+		}
+		for (const moon of spec.moons) {
+			if (view === moonView(spec.name, moon.name, "outer") || view === moonView(spec.name, moon.name, "inner")) {
+				return [planetTarget(spec), moonTarget(spec, moon)];
+			}
+		}
+	}
+	return [];
+}
+
+/** A body and where it is on screen, in CSS pixels from the canvas's top left. */
+type BodySpot = { target: BodyTarget; x: number; y: number; radius: number };
+
+/** Bodies smaller than this on screen still catch the pointer this far from their center. */
+const MIN_HIT_PIXELS = 14;
+/** Names fade in over this long once the camera arrives, and out as fast when it leaves. */
+const LABEL_FADE_SECONDS = 0.3;
 
 export type JourneyBody = {
 	id: string;
@@ -582,11 +646,10 @@ type PlanetBody = {
 	moons: MoonBody[];
 };
 
-export type EnvironmentDemo = {
+export type EnvironmentDemo = LabelSource & {
 	go: (view: DemoView) => void;
-	/** Moves through the views in order, looping, until `go` or `stop` is called. */
-	play: (views: DemoView[], onView: (view: DemoView) => void) => void;
-	stop: () => void;
+	/** Calls back when a body is clicked or tapped. Returns a stop function. */
+	onSelect: (listener: (target: BodyTarget) => void) => () => void;
 	/** Flies a ship from a base on one body to another, by `JourneyStop` id. `onDone` runs when it arrives. */
 	fly: (fromId: string, toId: string, onDone: () => void) => void;
 	/** Ends the flight early and clears it. */
@@ -603,7 +666,7 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 	camera.lowerRadiusLimit = CAMERA_RADIUS_MIN;
 	camera.upperRadiusLimit = CAMERA_RADIUS_MAX;
 	camera.minZ = 0.1;
-	camera.maxZ = 8000;
+	camera.maxZ = 9000;
 	camera.wheelDeltaPercentage = 0.02;
 	camera.attachControl(canvas, true);
 	scene.activeCamera = camera;
@@ -719,12 +782,13 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 	let active: DemoView = "system";
 	let travel = 1;
 	let moveSeconds = TRAVEL_SECONDS;
+	/** How visible the names are. They drop out the moment the camera leaves and fade back in on arrival. */
+	let labelFade = 0;
 	let linesFrom = 1;
 	let linesNow = 1;
 	let coronaFrom = start.corona ?? 1;
 	let coronaNow = coronaFrom;
 	sun.setCorona(coronaNow);
-	const timers: number[] = [];
 
 	const setOrbitLines = (amount: number) => {
 		linesNow = amount;
@@ -776,6 +840,43 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		return bodyRadius / Math.sin(halfShort * fill);
 	};
 
+	/** Closest distance at which a flat circle around the target, seen from this angle, fits both screen axes. */
+	const fitDistance = (orbit: number, alpha: number, beta: number, fill: number): number => {
+		const tanVertical = Math.tan(camera.fov / 2) * fill;
+		const tanHorizontal = Math.tan(camera.fov / 2) * engine.getAspectRatio(camera) * fill;
+		const back = new Vector3(Math.cos(alpha) * Math.sin(beta), Math.cos(beta), Math.sin(alpha) * Math.sin(beta));
+		const forward = back.scale(-1);
+		const right = Vector3.Cross(Vector3.Up(), forward).normalize();
+		const up = Vector3.Cross(forward, right);
+		const point = new Vector3();
+		const fits = (distance: number) => {
+			for (let i = 0; i < 64; i++) {
+				const angle = (i / 64) * Math.PI * 2;
+				point.set(Math.cos(angle) * orbit - back.x * distance, -back.y * distance, Math.sin(angle) * orbit - back.z * distance);
+				const depth = Vector3.Dot(point, forward);
+				if (
+					depth <= 0 ||
+					Math.abs(Vector3.Dot(point, right)) > depth * tanHorizontal ||
+					Math.abs(Vector3.Dot(point, up)) > depth * tanVertical
+				) {
+					return false;
+				}
+			}
+			return true;
+		};
+		let near = orbit * 0.5;
+		let far = orbit * 20;
+		for (let i = 0; i < 40; i++) {
+			const middle = (near + far) / 2;
+			if (fits(middle)) {
+				far = middle;
+			} else {
+				near = middle;
+			}
+		}
+		return far;
+	};
+
 	const goalFor = (view: DemoView): Pose => {
 		const shot = SHOTS[view];
 		const target = focusPosition(shot.focus).clone();
@@ -786,9 +887,16 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		if (shot.sunRelative) {
 			alpha += sunAngle(focusPosition(shot.focus)) + Math.PI;
 		}
-		const radius = shot.fill ? fillDistance(focusRadius(shot.focus), shot.fill) : shot.radius;
+		let radius = shot.fill ? fillDistance(focusRadius(shot.focus), shot.fill) : shot.radius;
+		if (shot.reach) {
+			radius = Math.max(radius, fillDistance(shot.reach, MOON_REACH_FILL));
+		}
+		if (shot.fitOrbit) {
+			radius = fitDistance(shot.fitOrbit, alpha, shot.beta, ORBIT_FIT_FILL);
+		}
 		return { alpha, beta: shot.beta, radius, target };
 	};
+	camera.radius = goalFor("system").radius;
 
 	const moonTurn = new Matrix();
 	const earthSpin = new Matrix();
@@ -959,12 +1067,6 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		setCorona(coronaFrom + (coronaGoal - coronaFrom) * eased);
 	});
 
-	const clearTimers = () => {
-		while (timers.length > 0) {
-			window.clearTimeout(timers.pop());
-		}
-	};
-
 	const animateTo = (view: DemoView) => {
 		camera.detachControl();
 		widenCamera();
@@ -980,24 +1082,98 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		flight = makeFlight(from, goalFor(view));
 	};
 
+	const hitRadius = (id: string): number =>
+		id === "saturn" ? (saturn.spec.diameter / 2) * SATURN_RING_OUTER_SCALE : focusRadius(id);
+
+	const projected = new Vector3();
+	const spotFor = (target: BodyTarget): BodySpot | null => {
+		const center = focusPosition(target.id);
+		const viewport = camera.viewport.toGlobal(canvas.clientWidth, canvas.clientHeight);
+		Vector3.ProjectToRef(center, Matrix.IdentityReadOnly, scene.getTransformMatrix(), viewport, projected);
+		if (projected.z < 0 || projected.z > 1) {
+			return null;
+		}
+		const depth = Vector3.Distance(camera.globalPosition, center);
+		const radius = (hitRadius(target.id) / (depth * Math.tan(camera.fov / 2))) * (canvas.clientHeight / 2);
+		return { target, x: projected.x, y: projected.y, radius };
+	};
+
+	/** The pickable body nearest the point, measured against how big each one is on screen. */
+	const hitAt = (x: number, y: number): BodySpot | null => {
+		if (travel < 1) {
+			return null;
+		}
+		let best: BodySpot | null = null;
+		let bestScore = 1;
+		for (const target of bodyTargets(active)) {
+			const spot = spotFor(target);
+			if (!spot) {
+				continue;
+			}
+			const score = Math.hypot(spot.x - x, spot.y - y) / Math.max(spot.radius + 4, MIN_HIT_PIXELS);
+			if (score <= bestScore) {
+				best = spot;
+				bestScore = score;
+			}
+		}
+		return best;
+	};
+
+	const selectListeners = new Set<(target: BodyTarget) => void>();
+	const picker = trackPicks(
+		canvas,
+		scene,
+		(x, y) => hitAt(x, y)?.target.id ?? null,
+		(id) => {
+			const target = bodyTargets(active).find((candidate) => candidate.id === id);
+			if (target) {
+				for (const listener of selectListeners) {
+					listener(target);
+				}
+			}
+		}
+	);
+
+	// Bodies move under a still pointer and under their names, so both are found again every frame.
+	const labelListeners = new Set<(frame: LabelFrame) => void>();
+	const center = { x: 0, y: 0 };
+	scene.onAfterRenderObservable.add(() => {
+		const hovered = picker.update();
+		const step = engine.getDeltaTime() / 1000 / LABEL_FADE_SECONDS;
+		labelFade = travel >= 1 ? Math.min(1, labelFade + step) : 0;
+		if (labelListeners.size === 0) {
+			return;
+		}
+		const viewport = camera.viewport.toGlobal(canvas.clientWidth, canvas.clientHeight);
+		Vector3.ProjectToRef(focusPosition(SHOTS[active].focus), Matrix.IdentityReadOnly, scene.getTransformMatrix(), viewport, projected);
+		center.x = projected.x;
+		center.y = projected.y;
+		const anchors = bodyTargets(active).flatMap((target) => {
+			const spot = spotFor(target);
+			return spot
+				? [{ id: target.id, x: spot.x, y: spot.y, radius: spot.radius, away: awayFrom(center, spot.x, spot.y) }]
+				: [];
+		});
+		const frame: LabelFrame = { anchors, hovered, opacity: labelFade };
+		for (const listener of labelListeners) {
+			listener(frame);
+		}
+	});
+
 	return {
-		go(view) {
-			clearTimers();
-			animateTo(view);
-		},
-		play(views, onView) {
-			clearTimers();
-			let index = 0;
-			const step = () => {
-				const view = views[index % views.length];
-				index += 1;
-				onView(view);
-				animateTo(view);
-				timers.push(window.setTimeout(step, tourStepDelay(view)));
+		go: animateTo,
+		onLabels(listener) {
+			labelListeners.add(listener);
+			return () => {
+				labelListeners.delete(listener);
 			};
-			step();
 		},
-		stop: clearTimers,
+		onSelect(listener) {
+			selectListeners.add(listener);
+			return () => {
+				selectListeners.delete(listener);
+			};
+		},
 		fly(fromId, toId, onDone) {
 			placeBodies(0);
 			journey.start(planJourney(journeyLayout(), fromId, toId), onDone);

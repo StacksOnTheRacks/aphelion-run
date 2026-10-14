@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { SiteNav } from "@/components/site-nav";
-import { EXCEPTIONS, PARTS, ROUTES } from "@/rules-content";
+import { EXCEPTIONS, ROUTES, WORLDS } from "@/rules-content";
 
 export default function RulesPage() {
 	return (
@@ -43,14 +43,12 @@ export default function RulesPage() {
 							improved there, and only there. It can orbit any planet or moon except Earth. It cannot orbit the Sun.
 						</p>
 						<p className="mt-4 max-w-xl text-sm leading-relaxed text-white/75">
-							A base receives its own materials, free, a little at a time. A body yields one or two. It receives no
-							other body&apos;s. A moon and a planet work the same way. No yield stands in for another, and a
-							planet&apos;s yield is not included in its moons. Every pilot goes to every yielding body except the one
-							they live on.
+							A base does not receive materials on its own. The pilot mines the home world the same as any other world.
+							A planet and its moons share one yield. The home's only advantage is where it sits.
 						</p>
 					</div>
 					<div>
-						<p className="text-sm text-white/50">The only bodies that yield nothing</p>
+						<p className="text-sm text-white/50">No pilot base</p>
 						<ul className="mt-3 flex gap-2">
 							{EXCEPTIONS.map((name) => (
 								<li key={name} className="rounded-full border border-white/15 px-3 py-1 text-sm">
@@ -59,40 +57,35 @@ export default function RulesPage() {
 							))}
 						</ul>
 						<p className="mt-4 max-w-md text-sm leading-relaxed text-white/75">
-							The Sun is where energy is mined. Earth is where energy is sold, at trading stations, and it cannot hold
-							a pilot base. Cash does not buy materials at either of them. When the home warehouse is full, energy has
-							to be sold on Earth to make room.
+							The Sun is where energy is mined. Earth is where energy is sold, at trading stations, and it cannot hold a pilot base. The Moon shares Earth's yield, so it yields nothing either, and it can hold a home. Cash does not buy materials. When the home warehouse is full, energy has to be sold on Earth to make room.
 						</p>
 					</div>
 				</div>
 			</section>
 
-			<section className="border-b border-white/10 px-6 py-12 sm:px-10" aria-labelledby="parts">
-				<h2 id="parts" className="text-xs tracking-[0.22em] text-amber-300/90 uppercase">
-					Five parts
+			<section className="border-b border-white/10 px-6 py-12 sm:px-10" aria-labelledby="yields">
+				<h2 id="yields" className="text-xs tracking-[0.22em] text-amber-300/90 uppercase">
+					Yields
 				</h2>
 				<p className="mt-4 max-w-2xl text-sm leading-relaxed text-white/75">
-					Every step up in strength spends every body&apos;s yield. The free yield at home is only that body&apos;s
-					share. This sets no prices and no amounts.
+					A world is a planet and its moons. They share one yield. Mining the planet or any of its moons returns the
+					same materials. Ships are built and improved from hydrogen, ore, nitrogen, and carbon. The same material
+					is the same wherever it is mined. This sets no amounts.
 				</p>
-				<ol className="mt-8 space-y-4">
-					{PARTS.map((part) => (
-						<li key={part.name} className="rounded-2xl border border-white/10 p-5">
-							<div className="flex flex-wrap items-baseline justify-between gap-3">
-								<h3 className="text-lg">{part.name}</h3>
-								{part.mineral ? (
-									<p className="text-sm text-amber-300">
-										{part.mineral.name}
-										<span className="text-white/40"> from {part.mineral.body}</span>
-									</p>
-								) : null}
-							</div>
-							<p className="mt-2 max-w-2xl text-sm leading-relaxed text-white/70">{part.role}</p>
-							{part.mineral ? <p className="mt-2 max-w-2xl text-sm text-white/50">{part.mineral.note}</p> : null}
+				<p className="mt-4 max-w-2xl text-sm leading-relaxed text-white/75">
+					Water is consumed at the home base, at one rate for the fleet, whether or not the pilot is online. A ship
+					in the repair bay does not count. A route does not spend it. A dry base can send a ship only to a world
+					that yields water, and cannot sell at Earth until water is home. A dry ship cannot attack. It can be attacked. Water unloads even when the energy store
+					is full.
+				</p>
+				<ol className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+					{WORLDS.map((world) => (
+						<li key={world.name} className="rounded-2xl border border-white/10 p-5">
+							<h3 className="text-lg">{world.name}</h3>
 							<ul className="mt-4 flex flex-wrap gap-2">
-								{part.bodies.map((body) => (
-									<li key={body} className="rounded-full bg-white/10 px-3 py-1 text-xs text-white/80">
-										{body}
+								{world.materials.map((material) => (
+									<li key={material} className="rounded-full bg-white/10 px-3 py-1 text-xs text-white/80">
+										{material}
 									</li>
 								))}
 							</ul>
@@ -137,7 +130,7 @@ export default function RulesPage() {
 					<article className="rounded-2xl border border-amber-300/30 p-5">
 						<h3 className="text-lg">Attack</h3>
 						<p className="mt-3 text-sm leading-relaxed text-white/75">
-							The inner orbit is a combat zone. Ships fight with their stats. The player does not steer the shots. If
+							The inner orbit is a combat zone. Ships fight with their stats. The player does not steer the shots. A dry ship cannot attack. It can be attacked. If
 							the attacker wins, they take the energy and the cash that were aboard, plus scrap from the wreck. The
 							defender is sent home to the repair bay. The recall does not deliver a cargo. Ships are never permanently
 							destroyed.
@@ -166,12 +159,11 @@ export default function RulesPage() {
 						Cash stays on the ship until it is banked at home. A ship in the inner orbit of any planet or moon can be
 						attacked. The Moon is not a combat zone. A cloak is the only defense: away from base it burns energy
 						faster, other ships cannot see it, a scan can, and a cloaked ship cannot be attacked. The Moon is where a
-						pilot lives beside Earth&apos;s market.
+						pilot lives beside Earth&apos;s market. That location is the home&apos;s only advantage.
 					</p>
 					<p>
-						Banked cash is spent at other bodies, on the materials they yield. Two pilots docked at the same base can
-						trade materials. A base does not pay cash for materials. Cash comes from energy sold at Earth, or from cash
-						taken off a beaten ship.
+						Materials are mined at the world that yields them, at the planet or at any of its moons, including the home world. They are not bought, and they are not traded. Cash comes from energy sold at Earth, or from cash taken off a beaten ship. Banked cash
+						can finish an improvement sooner. It does not buy materials, and it does not shorten a repair.
 					</p>
 				</div>
 				<div className="mt-10 flex flex-wrap gap-x-6 gap-y-3 text-sm">
