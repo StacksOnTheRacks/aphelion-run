@@ -21,7 +21,7 @@ const RING_STROKE = { idle: "rgba(232, 228, 217, 0.5)", muted: "rgba(232, 228, 2
  * The names over a scene: a ring around every body in view, a leader line, and its name. Selectable
  * names are buttons, so a tap or a keyboard reaches what a pointer can. The scene reports where its
  * bodies are after every frame, and the names are laid out and written straight to the DOM then.
- * `keepOut` is the chrome over the scene, which names stay clear of.
+ * `keepOut` is chrome over the scene, which names stay clear of. Several regions can be passed.
  */
 export function SpaceLabels({
 	source,
@@ -32,7 +32,7 @@ export function SpaceLabels({
 	source: LabelSource;
 	items: LabelItem[];
 	title: string;
-	keepOut?: RefObject<HTMLElement | null>;
+	keepOut?: RefObject<HTMLElement | null> | readonly RefObject<HTMLElement | null>[];
 }) {
 	const rootRef = useRef<HTMLDivElement>(null);
 	const nameRefs = useRef(new Map<string, HTMLLIElement>());
@@ -60,14 +60,17 @@ export function SpaceLabels({
 
 			const origin = root.getBoundingClientRect();
 			const zones: Rect[] = [];
-			const chrome = keepOut?.current?.getBoundingClientRect();
-			if (chrome && chrome.width > 0) {
-				zones.push({
-					left: chrome.left - origin.left,
-					top: chrome.top - origin.top,
-					right: chrome.right - origin.left,
-					bottom: chrome.bottom - origin.top,
-				});
+			const regions = !keepOut ? [] : Array.isArray(keepOut) ? keepOut : [keepOut];
+			for (const region of regions) {
+				const chrome = region.current?.getBoundingClientRect();
+				if (chrome && chrome.width > 0 && chrome.height > 0) {
+					zones.push({
+						left: chrome.left - origin.left,
+						top: chrome.top - origin.top,
+						right: chrome.right - origin.left,
+						bottom: chrome.bottom - origin.top,
+					});
+				}
 			}
 			const anchors = frame.anchors.filter((anchor) => nameRefs.current.has(anchor.id));
 			for (const anchor of anchors) {

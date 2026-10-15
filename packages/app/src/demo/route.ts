@@ -5,6 +5,10 @@ import { routeAroundBodies, type RingBody, type SphereBody } from "./camera-path
 /**
  * A ship's course from one point to another in the planets' plane (y = 0).
  *
+ * Either end may be a circle instead of a point: the outer orbit the ship is leaving or joining.
+ * The course meets that circle along a tangent, so the burn does not cut through the orbit. Of the
+ * ways to turn onto and off those circles, the shorter course is the one flown.
+ *
  * A planet that sits near the way ahead is taken as a gravity assist: the course bends toward it,
  * wraps around it at its flyby radius with the planet on the inside of the turn, and leaves toward
  * the next pass. The arc is where the planet does the work, so it is the cheap part of the course.
@@ -23,6 +27,12 @@ export type AssistCandidate = {
 export type RouteInput = {
 	start: Vector3;
 	end: Vector3;
+	/** Radius of the circle the course leaves. 0 leaves from `start` itself. */
+	startRadius?: number;
+	/** Radius of the circle the course joins. 0 arrives at `end` itself. */
+	endRadius?: number;
+	/** When set, the course leaves the start circle turning only this way: +1 counterclockwise. */
+	startTurn?: number;
 	candidates: AssistCandidate[];
 	spheres: SphereBody[];
 	rings: RingBody[];
@@ -36,14 +46,15 @@ export type Route = {
 	total: number;
 	/** Names of the planets the course passes for an assist, in the order they are reached. */
 	assists: string[];
+	/** +1 counterclockwise, -1 clockwise, 0 when that end is a point. */
+	startTurn: number;
+	endTurn: number;
 };
 
 /** A pass is taken only when going by the planet adds at most this share to the distance left. */
 export const MAX_DETOUR = 0.15;
 /** A pass that bends the course further than this is not one gravity can give. */
 export const MAX_TURN = (75 * Math.PI) / 180;
-/** Flyby radius, in planet radii. */
-export const FLYBY_SCALE = 2.5;
 
 const ARC_STEP = (3 * Math.PI) / 180;
 /** Height of the climb out of a ring's gap, as a share of the ring's outer radius. */
@@ -52,19 +63,52 @@ const RING_CLIMB = 0.5;
 type Circle = { center: Vector3; radius: number; turn: number };
 
 export function planRoute(input: RouteInput): Route {
+	const startRadius = input.startRadius ?? 0;
+	const endRadius = input.endRadius ?? 0;
+	const startTurns = input.startTurn !== undefined ? [input.startTurn] : startRadius > 0 ? [1, -1] : [0];
+	const endTurns = endRadius > 0 ? [1, -1] : [0];
+	let best: Route | undefined;
+	for (const startTurn of startTurns) {
+		for (const endTurn of endTurns) {
+			const route = planTurns(input, startTurn, endTurn);
+			if (!best || route.total < best.total) {
+				best = route;
+			}
+		}
+	}
+	return best ?? planTurns(input, 0, 0);
+}
+
+/** One choice of which way the end circles turn. Drops any assist that cannot be joined. */
+function planTurns(input: RouteInput, startTurn: number, endTurn: number): Route {
 	let chosen = pickAssists(input.start, input.end, input.candidates);
 	for (;;) {
-		const built = buildCourse(input, chosen);
+		const built = buildCourse(input, chosen, startTurn, endTurn);
 		if (built.route) {
 			return built.route;
 		}
 		if (chosen.length === 0) {
-			const points = [input.start.clone(), input.end.clone()];
-			const total = Vector3.Distance(input.start, input.end);
-			return { points, kinds: ["burn"], cumulative: [0, total], total, assists: [] };
+			return fallbackRoute(input, startTurn, endTurn);
 		}
 		chosen = chosen.filter((_, index) => index !== built.failed);
 	}
+}
+
+/** A straight join, used only when the circles cannot share a tangent. Points land on each rim. */
+function fallbackRoute(input: RouteInput, startTurn: number, endTurn: number): Route {
+	const points = [rimPoint(input.start, input.startRadius ?? 0, input.end), rimPoint(input.end, input.endRadius ?? 0, input.start)];
+	const total = Vector3.Distance(points[0], points[1]);
+	return { points, kinds: ["burn"], cumulative: [0, total], total, assists: [], startTurn, endTurn };
+}
+
+/** The point on the horizontal circle at `center` in the direction of `toward`, or the center when the radius is 0. */
+function rimPoint(center: Vector3, radius: number, toward: Vector3): Vector3 {
+	if (radius <= 0) {
+		return center.clone();
+	}
+	const flat = new Vector3(toward.x - center.x, 0, toward.z - center.z);
+	const direction = flat.lengthSquared() < 1e-12 ? new Vector3(1, 0, 0) : flat.normalize();
+	return new Vector3(center.x + direction.x * radius, center.y, center.z + direction.z * radius);
 }
 
 /** Where the ship is, `distance` along the course. */
@@ -132,11 +176,16 @@ function pickAssists(start: Vector3, end: Vector3, candidates: AssistCandidate[]
 
 type Built = { route: Route; failed?: undefined } | { route?: undefined; failed: number };
 
-function buildCourse(input: RouteInput, assists: AssistCandidate[]): Built {
+function buildCourse(input: RouteInput, assists: AssistCandidate[], startTurn: number, endTurn: number): Built {
+	const startRadius = input.startRadius ?? 0;
+	const endRadius = input.endRadius ?? 0;
 	const centers = [input.start, ...assists.map((assist) => assist.center), input.end];
 	const circles: Circle[] = centers.map((center, index) => {
-		if (index === 0 || index === centers.length - 1) {
-			return { center, radius: 0, turn: 0 };
+		if (index === 0) {
+			return { center, radius: startRadius, turn: startRadius > 0 ? startTurn : 0 };
+		}
+		if (index === centers.length - 1) {
+			return { center, radius: endRadius, turn: endRadius > 0 ? endTurn : 0 };
 		}
 		const bend = cross2(center.subtract(centers[index - 1]), centers[index + 1].subtract(center));
 		return { center, radius: assists[index - 1].flyby, turn: bend >= 0 ? 1 : -1 };
@@ -165,7 +214,9 @@ function buildCourse(input: RouteInput, assists: AssistCandidate[]): Built {
 		}
 	};
 
-	push(input.start, "burn");
+	if (startRadius === 0) {
+		push(input.start, "burn");
+	}
 	for (let i = 0; i < tangents.length; i++) {
 		const { leave, arrive } = tangents[i];
 		const climb = climbOutOfRings(leave, arrive, input.rings);
@@ -185,7 +236,9 @@ function buildCourse(input: RouteInput, assists: AssistCandidate[]): Built {
 			}
 		}
 	}
-	push(input.end, "burn");
+	if (endRadius === 0) {
+		push(input.end, "burn");
+	}
 
 	const cumulative = [0];
 	for (let i = 1; i < points.length; i++) {
@@ -198,6 +251,8 @@ function buildCourse(input: RouteInput, assists: AssistCandidate[]): Built {
 			cumulative,
 			total: cumulative[cumulative.length - 1],
 			assists: assists.map((assist) => assist.name),
+			startTurn: startRadius > 0 ? startTurn : 0,
+			endTurn: endRadius > 0 ? endTurn : 0,
 		},
 	};
 }
@@ -278,6 +333,117 @@ function arcPoints(circle: Circle, from: Vector3, to: Vector3): Vector3[] {
 		);
 	}
 	return points;
+}
+
+/**
+ * The cost of a climb that heads against the orbit, in world units. Reversing throws away the speed
+ * the ship already has and builds it the other way, which costs as much as flying halfway around the
+ * orbit it is already on. Swinging around with the orbit is the cheaper departure until the swing
+ * costs more than that.
+ */
+export function reversalPenalty(radius: number): number {
+	return Math.PI * Math.max(0, radius);
+}
+
+/**
+ * The slow climb from a dock out to where the burn leaves the outer orbit. The ship keeps turning
+ * `turn` (+1 counterclockwise): it starts along the orbit it is on, eases outward, and arrives along
+ * the outer orbit headed the way the burn leaves. A ring in the way is crossed above or below it.
+ */
+export function departureSpiral(center: Vector3, from: Vector3, to: Vector3, turn: number, rings: RingBody[]): Vector3[] {
+	const a0 = Math.atan2(from.z - center.z, from.x - center.x);
+	const a1 = Math.atan2(to.z - center.z, to.x - center.x);
+	const r0 = Math.hypot(from.x - center.x, from.z - center.z);
+	const r1 = Math.hypot(to.x - center.x, to.z - center.z);
+	const direction = turn >= 0 ? 1 : -1;
+	const sweep = sweepToward(a0, a1, direction);
+	const steps = Math.max(8, Math.ceil(Math.max(sweep, Math.abs(r1 - r0) / Math.max(r0, 1)) / ARC_STEP));
+	const points: Vector3[] = [];
+	for (let i = 0; i <= steps; i++) {
+		const u = i / steps;
+		const radius = r0 + (r1 - r0) * ease(u);
+		const angle = a0 + direction * sweep * u;
+		points.push(
+			new Vector3(center.x + Math.cos(angle) * radius, from.y + (to.y - from.y) * u, center.z + Math.sin(angle) * radius)
+		);
+	}
+	points[0] = from.clone();
+	points[points.length - 1] = to.clone();
+	return liftSpiral(points, rings);
+}
+
+/** Sweep from `from` to `to` in the direction of `turn`, in [0, 2π). */
+function sweepToward(from: number, to: number, turn: number): number {
+	const full = Math.PI * 2;
+	const raw = turn * (to - from);
+	return ((raw % full) + full) % full;
+}
+
+/** Zero slope at both ends, so a climb leaves and arrives along its orbit. */
+function ease(u: number): number {
+	return u * u * (3 - 2 * u);
+}
+
+/** How far off a ring's plane a crossing must pass, as a multiple of the ring's thickness. */
+const RING_CLEARANCE = 2.4;
+/** How far outside a ring's edge the climb starts to rise, in world units. */
+const RING_FADE = 3;
+
+function liftSpiral(points: Vector3[], rings: RingBody[]): Vector3[] {
+	let lifted = points;
+	for (const ring of rings) {
+		const start = acrossRing(lifted[0], ring);
+		const innerMargin = Math.max(1e-3, Math.min(RING_FADE, (ring.inner - start.across) * 0.6));
+		const side = spiralRingSide(lifted, ring);
+		lifted = lifted.map((point, index) =>
+			index === 0 || index === lifted.length - 1 ? point : liftPoint(point, ring, side, innerMargin)
+		);
+	}
+	return lifted;
+}
+
+/** The side of the ring the climb mostly crosses on, so the whole rise stays to one side of it. */
+function spiralRingSide(points: Vector3[], ring: RingBody): number {
+	let sum = 0;
+	for (const point of points) {
+		const { height, across } = acrossRing(point, ring);
+		if (across >= ring.inner && across <= ring.outer) {
+			sum += height;
+		}
+	}
+	return sum < 0 ? -1 : 1;
+}
+
+function liftPoint(point: Vector3, ring: RingBody, side: number, innerMargin: number): Vector3 {
+	const { height, across, normal } = acrossRing(point, ring);
+	const over =
+		smoothstep(ring.inner - innerMargin, ring.inner, across) * (1 - smoothstep(ring.outer, ring.outer + RING_FADE, across));
+	if (over <= 0) {
+		return point;
+	}
+	const clear = ring.halfHeight * RING_CLEARANCE;
+	const lifted = side * softMax(side * height, clear, ring.halfHeight);
+	return point.add(normal.scale((lifted - height) * over));
+}
+
+function acrossRing(point: Vector3, ring: RingBody): { height: number; across: number; normal: Vector3 } {
+	const normal = ring.normal.normalizeToNew();
+	const offset = point.subtract(ring.center);
+	const height = Vector3.Dot(offset, normal);
+	return { height, across: Math.sqrt(Math.max(0, offset.lengthSquared() - height * height)), normal };
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+	if (edge1 === edge0) {
+		return x >= edge1 ? 1 : 0;
+	}
+	const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+	return t * t * (3 - 2 * t);
+}
+
+/** A max with its corner rounded over `soft`, so the lifted path has no kink. */
+function softMax(a: number, b: number, soft: number): number {
+	return 0.5 * (a + b + Math.sqrt((a - b) * (a - b) + soft * soft));
 }
 
 /** How far the course bends at `at`, going from `from` toward `to`. */

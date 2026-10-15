@@ -1,11 +1,15 @@
 /**
- * Where warehouse bases and Earth's energy stations sit. Layout only: no Babylon types, so the
- * clearance rules can be checked without starting the scene.
+ * Where warehouse bases, Earth's energy stations, and outer orbits sit. Layout only: no Babylon
+ * types, so the clearance rules can be checked without starting the scene.
  *
  * A planet's warehouses ride a halo between the surface and the innermost moon. Mercury and Venus
  * have no moons, so the halo is a fixed multiple of the radius. Saturn's moons sit outside the
  * rings, so its halo uses the gap inside the ring instead. Earth has no homes. Its inner ring
  * holds the two faction stations.
+ *
+ * The outer orbit is the battle surface and the circle ships burn between. It sits outside the
+ * bases and Saturn's rings, and inside the innermost moon's own outer orbit, so two zones never
+ * meet. A moon's outer orbit is its own.
  */
 
 export type Faction = "corporate" | "marauder";
@@ -46,6 +50,14 @@ export const SATURN_RING_OUTER_SCALE = 2.27;
 /** Clearance past Earth's station ring, so the Moon's homes sit outside the approach. */
 export const EARTH_WAREHOUSE_RADIUS = 16;
 export const EARTH_STATION_RADIUS = 11;
+/** The Sun's outer orbit. Ships arrive here; the collectors sit further in. */
+export const SUN_OUTER_ORBIT = 44;
+/** A moon's outer orbit, in moon radii. Wide enough to clear its bases, narrow enough that neighbors stay apart. */
+export const MOON_OUTER_ORBIT_SCALE = 3;
+/** Mercury and Venus: outer orbit as a multiple of the planet radius. */
+export const NO_MOON_OUTER_SCALE = 2.5;
+/** A pass stays this far outside Saturn's rings. */
+export const SATURN_FLYBY_MARGIN = 3;
 
 /** Small against the planet, on the order of a solar collector. Width is the radial extent. */
 export const WAREHOUSE_SIZE: BoxSize = { width: 0.18, height: 0.05, depth: 0.3 };
@@ -54,6 +66,33 @@ export const STATION_SIZE: BoxSize = { width: 0.32, height: 0.09, depth: 0.52 };
 
 /** Long side stays near a tenth of the moon, so a base reads as a craft beside it. */
 const MOON_BASE_WIDTH = 0.07;
+
+/** Outer orbit of a moon: three moon radii, clear of the bases on its surface. */
+export function moonOuterOrbitRadius(diameter: number): number {
+	return (diameter / 2) * MOON_OUTER_ORBIT_SCALE;
+}
+
+/**
+ * Outer orbit of a planet. With moons, the midpoint between the base orbit and the inner edge of
+ * the innermost moon's zone. Saturn also stays outside its rings. Without moons, a fixed multiple
+ * of the radius.
+ */
+export function outerOrbitRadius(input: PlanetBaseInput): number {
+	const surface = input.diameter / 2;
+	if (input.moons.length === 0) {
+		return surface * NO_MOON_OUTER_SCALE;
+	}
+	const base = Math.max(warehouseRadius(input), input.stationRadius ?? 0);
+	let innerEdge = Infinity;
+	for (const moon of input.moons) {
+		innerEdge = Math.min(innerEdge, moon.orbit - moonOuterOrbitRadius(moon.diameter));
+	}
+	let radius = (base + innerEdge) / 2;
+	if (input.ringInnerScale != null) {
+		radius = Math.max(radius, surface * SATURN_RING_OUTER_SCALE + SATURN_FLYBY_MARGIN);
+	}
+	return radius;
+}
 
 export function warehouseRadius(input: PlanetBaseInput): number {
 	if (input.warehouseRadius != null) {

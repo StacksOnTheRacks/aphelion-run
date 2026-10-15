@@ -20,16 +20,19 @@ function stopLabel(id: string): string {
 }
 
 /**
- * Sol: every body in view named on the scene, and the chrome over it, with a breadcrumb from the galaxy
- * down to the body in view and a journey between any two bodies. Selecting a body, on the scene or by
- * its name, opens its outer orbit; Escape goes back up one step.
+ * Sol: every body in view named on the scene, and the chrome over it. A button bar at the bottom center
+ * steps back up the zoom — galaxy, then Sol, then a planet, then its moon. The galaxy itself has no bar.
+ * Selecting a body, on the scene or by its name, opens its outer orbit; Escape goes back up one step.
  */
 export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLeave: () => void }) {
 	const chromeRef = useRef<HTMLDivElement>(null);
+	const barRef = useRef<HTMLOListElement>(null);
+	const keepOut = useMemo(() => [chromeRef, barRef], []);
 	const [view, setView] = useState<DemoView>("system");
 	const [from, setFrom] = useState("neptune");
 	const [to, setTo] = useState("sun");
 	const [flight, setFlight] = useState<{ from: string; to: string } | null>(null);
+	const [docked, setDocked] = useState<string | null>(null);
 	const trail = viewTrail(view);
 
 	const go = useCallback(
@@ -77,45 +80,27 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		if (flight) {
 			system.land();
 			setFlight(null);
+			setDocked(null);
 			return;
 		}
 		if (from === to) {
 			return;
 		}
-		system.fly(from, to, () => setFlight(null));
-		setFlight({ from, to });
+		const origin = from;
+		const destination = to;
+		system.fly(origin, destination, () => {
+			setFlight(null);
+			setFrom(destination);
+			setDocked(destination);
+		});
+		setFlight({ from: origin, to: destination });
+		setDocked(null);
 	};
 
 	return (
 		<>
-			<SpaceLabels source={system} items={labels} title="Bodies in view" keepOut={chromeRef} />
+			<SpaceLabels source={system} items={labels} title="Bodies in view" keepOut={keepOut} />
 			<GameChrome ref={chromeRef}>
-				<nav aria-label="Breadcrumb" className="mt-1">
-					<ol className="flex flex-wrap items-center text-[11px] tracking-[0.22em] uppercase">
-						{crumbs.map((crumb, index) => (
-							<li key={crumb.label} className="flex items-center">
-								{index > 0 ? (
-									<span aria-hidden className="px-1 text-white/30">
-										›
-									</span>
-								) : null}
-								{crumb.onSelect ? (
-									<button
-										type="button"
-										onClick={crumb.onSelect}
-										className="pointer-events-auto -mx-1 rounded-lg px-1 py-0.5 tracking-[0.22em] text-white/50 uppercase transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-1 focus-visible:ring-white/40 focus-visible:outline-none"
-									>
-										{crumb.label}
-									</button>
-								) : (
-									<h2 aria-current="page" className="py-0.5 text-amber-300">
-										{crumb.label}
-									</h2>
-								)}
-							</li>
-						))}
-					</ol>
-				</nav>
 				<nav
 					aria-label="Journey"
 					className="pointer-events-auto mt-3 flex w-fit max-w-full flex-wrap items-center gap-1 rounded-2xl border border-white/10 bg-black/50 p-1 text-sm backdrop-blur"
@@ -148,12 +133,41 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 				</nav>
 				{flight ? (
 					<p className="mt-3 text-sm leading-relaxed text-white/60">
-						A ship is flying from {stopLabel(flight.from)} to {stopLabel(flight.to)}. The bright line is the way ahead. The dashed
-						line is where it has been. Where the line runs thin and pale, a planet&apos;s gravity bends the course and the burn
-						costs less.
+						A ship is flying from {stopLabel(flight.from)} to {stopLabel(flight.to)}. It climbs out with the orbit, burns
+						fast along the bright line, then drops slowly inward to dock with a satellite. Where the line runs thin and pale,
+						a planet&apos;s gravity bends the course and the burn costs less.
 					</p>
+				) : docked ? (
+					<p className="mt-3 text-sm leading-relaxed text-white/60">Docked with a satellite of {stopLabel(docked)}.</p>
 				) : null}
 			</GameChrome>
+			<nav
+				aria-label="Breadcrumb"
+				className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-6"
+			>
+				<ol
+					ref={barRef}
+					className="pointer-events-auto flex max-w-full overflow-x-auto rounded-2xl border border-[#E8E4D9]/20 bg-black/60 text-[11px] tracking-[0.22em] uppercase backdrop-blur [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+				>
+					{crumbs.map((crumb, index) => (
+						<li key={crumb.label} className={`flex shrink-0 ${index > 0 ? "border-l border-[#E8E4D9]/20" : ""}`}>
+							{crumb.onSelect ? (
+								<button
+									type="button"
+									onClick={crumb.onSelect}
+									className="px-4 py-2.5 whitespace-nowrap text-[#E8E4D9]/70 transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:ring-inset focus-visible:outline-none"
+								>
+									{crumb.label}
+								</button>
+							) : (
+								<h2 aria-current="page" className="px-4 py-2.5 whitespace-nowrap text-amber-300">
+									{crumb.label}
+								</h2>
+							)}
+						</li>
+					))}
+				</ol>
+			</nav>
 		</>
 	);
 }

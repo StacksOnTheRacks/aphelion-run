@@ -14,17 +14,28 @@ import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import type { Scene } from "@babylonjs/core/scene";
 
-import { headingAt, pointAt, type Route } from "./route";
+import type { RingBody } from "./camera-path";
+import { headingAt, pointAt, type Route, type RouteKind } from "./route";
 
 /**
- * A ship flying a planned route. The way ahead is a bright line that shortens as the ship goes;
- * the way behind is a dim dashed line that grows. Both are drawn at a fixed width on screen, so the
+ * A ship flying a planned trip. It climbs slowly out to the origin's outer orbit, burns fast along
+ * the bright line to the destination's outer orbit, slowing as it arrives, then drops slowly inward
+ * to dock with one of the craft circling there, and rides with it until the next trip. The bright
+ * line is the way ahead and shortens as the ship goes. It is drawn at a fixed width on screen, so the
  * route reads from the whole-system view and from beside a planet alike. Nothing here moves the camera.
  */
 
-/** World units a ship covers per second, on average. Neptune to the Sun takes about 40 seconds. */
+/** World units a ship covers per second on a fast burn, on average. Neptune to the Sun takes about 40 seconds. */
 export const JOURNEY_PACE = 28;
-/** A hop between neighbours still lasts long enough to watch; the longest trips are capped. */
+/** World units a ship covers per second while climbing out to the outer orbit. */
+export const CLIMB_PACE = 6;
+/** Average speed of the drop from the outer orbit to a dock. Slower than the climb, so the arrival reads as settling in. */
+export const APPROACH_PACE = 3.6;
+/** Even a short drop takes this long. */
+export const APPROACH_MIN_SECONDS = 5;
+/** The ship swings at least this far around the body on the way in, so it closes on its dock from behind. */
+export const APPROACH_MIN_SWEEP = 0.8;
+/** A hop between neighbours still lasts long enough to watch; the longest burns are capped. */
 export const JOURNEY_MIN_SECONDS = 8;
 export const JOURNEY_MAX_SECONDS = 60;
 
@@ -32,39 +43,140 @@ export function journeySeconds(total: number): number {
 	return Math.min(JOURNEY_MAX_SECONDS, Math.max(JOURNEY_MIN_SECONDS, total / JOURNEY_PACE));
 }
 
+/**
+ * Speed `t` seconds into a burn. It starts and ends at the climb speed and peaks in the middle.
+ * The peak is chosen so the burn still covers `length` in `seconds`. A burn already slower than the
+ * climb, because the trip is short, stays at that one speed.
+ */
+export function cruiseSpeed(t: number, length: number, seconds: number): number {
+	if (seconds < 1e-6) {
+		return CLIMB_PACE;
+	}
+	const average = length / seconds;
+	if (average <= CLIMB_PACE) {
+		return average;
+	}
+	const along = Math.min(1, Math.max(0, t / seconds));
+	const peak = CLIMB_PACE + (average - CLIMB_PACE) * (Math.PI / 2);
+	return CLIMB_PACE + (peak - CLIMB_PACE) * Math.sin(Math.PI * along);
+}
+
+/** How far along a burn the ship is after `t` seconds. At `t === seconds` this is `length`. */
+export function cruiseDistance(t: number, length: number, seconds: number): number {
+	if (seconds < 1e-6) {
+		return length;
+	}
+	const clamped = Math.min(seconds, Math.max(0, t));
+	const average = length / seconds;
+	if (average <= CLIMB_PACE) {
+		return average * clamped;
+	}
+	const peak = CLIMB_PACE + (average - CLIMB_PACE) * (Math.PI / 2);
+	const rise = peak - CLIMB_PACE;
+	return CLIMB_PACE * clamped + rise * (seconds / Math.PI) * (1 - Math.cos((Math.PI * clamped) / seconds));
+}
+
+/** The body the burn ends at, and the way the ship is turning around it when it gets there. */
+export type Arrival = { id: string; turn: number };
+
+/**
+ * A trip in three parts. `climb` is the slow walk from a base, or from the craft the ship is docked
+ * with, out to the departure tangent. `cruise` is the fast burn. `arrive` is where the burn ends; the
+ * drop to a dock is planned on arrival, because the craft keep moving.
+ */
+export type JourneyPlan = {
+	climb: Vector3[];
+	cruise: Route;
+	arrive: Arrival;
+};
+
+/** A craft a ship can dock with. */
+export type Dock = {
+	/** Where it is now, relative to the center of the body it circles. */
+	position: () => Vector3;
+	/** How fast it circles that body, radians per second, counterclockwise seen from above. */
+	rate: number;
+};
+
+/** A ring around the body, centered on it. */
+export type HarborRing = Omit<RingBody, "center">;
+
+/** What a ship can dock with at one body, and the ring it must not cut through on the way in. */
+export type Harbor = { docks: Dock[]; ring?: HarborRing };
+
+/**
+ * The drop from the outer orbit to one dock. It is laid out around the dock as it moves: the angle
+ * between the ship and the dock closes to zero while the radius eases in, so the ship ends riding
+ * alongside the dock however fast it circles.
+ */
+export type Approach = {
+	dock: Dock;
+	/** Where the ship met the outer orbit, relative to the body. */
+	from: Vector3;
+	/** Angle from the dock to the ship at the start, around the body. */
+	lead: number;
+	/** How fast that angle closes at the start, per whole approach. It matches the speed the ship arrived at. */
+	closing: number;
+	seconds: number;
+	/** Which side of the ring plane the ship crosses the ring on: +1 along the ring's normal, -1 against it. */
+	side: number;
+	ring?: HarborRing;
+};
+
 /** Ship length on screen, in CSS pixels. */
 const SHIP_PIXELS = 14;
-/** Line widths on screen, in CSS pixels. */
+/** A docked ship sits this far above its dock on screen, in CSS pixels, so the dock stays in sight. */
+const DOCK_RISE_PIXELS = 6;
+/** How far off the ring plane the ship passes, as a multiple of the ring's half height. */
+const RING_LIFT = 2.4;
+/** How far outside the ring's edge the ship starts to lift, in world units. */
+const RING_LIFT_MARGIN = 3;
+/** Line width on screen, in CSS pixels. */
 const AHEAD_WIDTH = 3;
-const BEHIND_WIDTH = 1.6;
 /** An assist costs less, so its stretch of the line is drawn at this share of the width. */
 const ASSIST_WIDTH = 0.5;
-/** World units per dash on the travelled line. */
-const DASH_LENGTH = 12;
-/** A short hop is viewed up close, so it still gets enough dashes to read as dashed. */
-const MIN_DASHES = 24;
 
 const BONE = Color3.FromHexString("#E8E4D9");
 const AMBER = Color3.FromHexString("#FCD34D");
 const ENERGY = Color3.FromHexString("#F5E6C8");
-const BEHIND = BONE.scale(0.42);
 
 export type Journey = {
-	start: (route: Route, onDone: () => void) => void;
-	/** Clears the ship and both lines without calling `onDone`. */
+	start: (plan: JourneyPlan, onDone: () => void) => void;
+	/** Clears the ship and the line without calling `onDone`. */
 	stop: () => void;
-	update: (deltaSeconds: number) => void;
+	update: (deltaSeconds: number, centerOf: (id: string) => Vector3) => void;
+	/** Where the ship is docked, and which way that satellite circles, once a trip has arrived. */
+	docked: () => { id: string; position: Vector3; turn: number } | null;
 };
 
 type Flight = {
-	route: Route;
-	onDone: () => void;
+	plan: JourneyPlan;
+	path: Route;
+	climbLength: number;
+	climbSeconds: number;
+	cruiseLength: number;
+	cruiseSeconds: number;
 	elapsed: number;
+	phase: "transit" | "approach" | "docked";
+	/** Null when the body has nothing to dock with: the ship stays where it arrived. */
+	approach: Approach | null;
+	/** Seconds since the ship reached the outer orbit. */
+	since: number;
+	/** Where the ship was last frame, relative to the body. Its heading follows from the step. */
+	last: Vector3;
+	heading: Vector3;
+	/** Which way the satellite the ship docked with circles: +1 counterclockwise. */
+	turn: number;
+	onDone: () => void;
 	ahead: GreasedLineBaseMesh;
-	behind: GreasedLineBaseMesh;
 };
 
-export function createJourney(scene: Scene, camera: Camera, glow: GlowLayer): Journey {
+export function createJourney(
+	scene: Scene,
+	camera: Camera,
+	glow: GlowLayer,
+	harborOf: (id: string) => Harbor
+): Journey {
 	const engine = scene.getEngine();
 	const ship = buildShip(scene);
 	let flight: Flight | null = null;
@@ -76,58 +188,299 @@ export function createJourney(scene: Scene, camera: Camera, glow: GlowLayer): Jo
 			return;
 		}
 		flight.ahead.dispose(false, true);
-		flight.behind.dispose(false, true);
 		ship.setEnabled(false);
 		flight = null;
 	};
 
-	const placeShip = (route: Route, distance: number) => {
-		const position = pointAt(route, distance);
-		ship.position.copyFrom(position);
-		ship.lookAt(position.add(headingAt(route, distance)));
-		const fov = camera.fov;
+	const worldPerPixel = (position: Vector3) => {
 		const cssHeight = engine.getRenderHeight() / pixelRatio();
-		const worldPerPixel = (2 * Vector3.Distance(camera.globalPosition, position) * Math.tan(fov / 2)) / cssHeight;
-		ship.scaling.setAll(SHIP_PIXELS * worldPerPixel);
+		return (2 * Vector3.Distance(camera.globalPosition, position) * Math.tan(camera.fov / 2)) / cssHeight;
+	};
+
+	const placeShip = (position: Vector3, heading: Vector3) => {
+		ship.position.copyFrom(position);
+		ship.lookAt(position.add(heading));
+		ship.scaling.setAll(SHIP_PIXELS * worldPerPixel(position));
+	};
+
+	const arrive = (current: Flight, center: Vector3) => {
+		const end = current.path.points[current.path.points.length - 1];
+		current.ahead.setEnabled(false);
+		current.last = end.subtract(center);
+		current.heading = headingAt(current.path, current.path.total);
+		current.since = 0;
+		current.approach = planApproach(current.last, current.plan.arrive.turn || 1, harborOf(current.plan.arrive.id));
+		current.turn = Math.sign(current.approach?.dock.rate ?? 0) || Math.sign(current.plan.arrive.turn) || 1;
+		current.phase = current.approach ? "approach" : "docked";
+	};
+
+	const settle = (current: Flight, deltaSeconds: number, center: Vector3) => {
+		const approach = current.approach;
+		if (!approach) {
+			placeShip(center.add(current.last), current.heading);
+			return;
+		}
+		if (current.phase === "approach") {
+			current.since += deltaSeconds;
+		}
+		const dock = approach.dock.position();
+		dock.y += DOCK_RISE_PIXELS * worldPerPixel(center.add(dock));
+		const relative = approachPoint(approach, current.since, dock);
+		if (current.phase === "docked" && approach.dock.rate !== 0) {
+			const angle = Math.atan2(relative.z, relative.x);
+			const turn = Math.sign(approach.dock.rate);
+			current.heading = new Vector3(-Math.sin(angle) * turn, 0, Math.cos(angle) * turn);
+		} else {
+			const step = relative.subtract(current.last);
+			if (step.lengthSquared() > 1e-12) {
+				current.heading = step.normalize();
+			}
+		}
+		current.last = relative;
+		placeShip(center.add(relative), current.heading);
 	};
 
 	return {
-		start(route, onDone) {
+		start(plan, onDone) {
 			clear();
-			const ahead = buildAhead(scene, route, pixelRatio());
-			const behind = buildBehind(scene, route, pixelRatio());
+			const path = stitch(plan);
+			const ahead = buildAhead(scene, path, pixelRatio());
 			glow.addExcludedMesh(ahead);
-			glow.addExcludedMesh(behind);
-			flight = { route, onDone, elapsed: 0, ahead, behind };
+			flight = {
+				plan,
+				path,
+				climbLength: polylineLength(plan.climb),
+				climbSeconds: polylineLength(plan.climb) / CLIMB_PACE,
+				cruiseLength: plan.cruise.total,
+				cruiseSeconds: journeySeconds(plan.cruise.total),
+				elapsed: 0,
+				phase: "transit",
+				approach: null,
+				since: 0,
+				last: Vector3.Zero(),
+				heading: headingAt(path, 0),
+				turn: 1,
+				onDone,
+				ahead,
+			};
 			ship.setEnabled(true);
-			placeShip(route, 0);
+			const position = pointAt(path, 0);
+			placeShip(position, headingAt(path, 0));
 		},
 		stop: clear,
-		update(deltaSeconds) {
+		docked() {
+			if (!flight || flight.phase !== "docked") {
+				return null;
+			}
+			return { id: flight.plan.arrive.id, position: ship.position.clone(), turn: flight.turn };
+		},
+		update(deltaSeconds, centerOf) {
 			if (!flight) {
 				return;
 			}
-			flight.elapsed += deltaSeconds;
-			const linear = Math.min(1, flight.elapsed / journeySeconds(flight.route.total));
-			const progress = linear * linear * (3 - 2 * linear);
-			if (linear >= 1) {
-				const done = flight.onDone;
-				clear();
-				done();
+			if (flight.phase !== "transit") {
+				const current = flight;
+				settle(current, deltaSeconds, centerOf(current.plan.arrive.id));
+				if (current.phase === "approach" && current.approach && current.since >= current.approach.seconds) {
+					current.phase = "docked";
+					current.onDone();
+				}
 				return;
 			}
-			const resolution = new Vector2(engine.getRenderWidth(), engine.getRenderHeight());
-			for (const line of [flight.ahead, flight.behind]) {
-				const material = line.greasedLineMaterial as IGreasedLineMaterial;
-				if (!material.resolution.equals(resolution)) {
-					material.resolution = resolution;
+
+			flight.elapsed += deltaSeconds;
+			const distance = distanceAt(flight);
+			if (flight.elapsed >= flight.climbSeconds + flight.cruiseSeconds) {
+				const current = flight;
+				arrive(current, centerOf(current.plan.arrive.id));
+				settle(current, 0, centerOf(current.plan.arrive.id));
+				if (current.phase === "docked") {
+					current.onDone();
 				}
+				return;
 			}
-			(flight.behind.greasedLineMaterial as IGreasedLineMaterial).visibility = progress;
-			(flight.ahead.greasedLineMaterial as IGreasedLineMaterial).visibility = 1 - progress;
-			placeShip(flight.route, progress * flight.route.total);
+
+			const resolution = new Vector2(engine.getRenderWidth(), engine.getRenderHeight());
+			const material = flight.ahead.greasedLineMaterial as IGreasedLineMaterial;
+			if (!material.resolution.equals(resolution)) {
+				material.resolution = resolution;
+			}
+			const span = Math.max(flight.path.total, 1e-6);
+			material.visibility = 1 - Math.min(1, distance / span);
+			placeShip(pointAt(flight.path, Math.min(distance, flight.path.total)), headingAt(flight.path, Math.min(distance, flight.path.total)));
 		},
 	};
+}
+
+function distanceAt(flight: Flight): number {
+	if (flight.elapsed <= flight.climbSeconds) {
+		return CLIMB_PACE * flight.elapsed;
+	}
+	return flight.climbLength + cruiseDistance(flight.elapsed - flight.climbSeconds, flight.cruiseLength, flight.cruiseSeconds);
+}
+
+/**
+ * Picks the dock the ship reaches by swinging forward the least, but at least `APPROACH_MIN_SWEEP`,
+ * and plans the drop to it. `from` is where the ship met the outer orbit, relative to the body, and
+ * `turn` the way it was circling. Null when the body has nothing to dock with.
+ */
+export function planApproach(from: Vector3, turn: number, harbor: Harbor): Approach | null {
+	const radius = Math.hypot(from.x, from.z);
+	const shipRate = (turn * CLIMB_PACE) / Math.max(radius, 1e-6);
+	const fromAngle = Math.atan2(from.z, from.x);
+	let best: { dock: Dock; at: Vector3; gap: number; closingRate: number } | null = null;
+	for (const dock of harbor.docks) {
+		const at = dock.position();
+		const closingRate = shipRate - dock.rate;
+		const direction = Math.sign(closingRate) || turn;
+		let gap = positiveAngle(direction * (Math.atan2(at.z, at.x) - fromAngle));
+		if (gap < APPROACH_MIN_SWEEP) {
+			gap += Math.PI * 2;
+		}
+		if (!best || gap < best.gap) {
+			best = { dock, at, gap, closingRate: direction * Math.abs(closingRate) };
+		}
+	}
+	if (!best) {
+		return null;
+	}
+	const direction = Math.sign(best.closingRate) || turn;
+	const dockRadius = Math.hypot(best.at.x, best.at.z);
+	const length = Math.hypot(radius - dockRadius, ((radius + dockRadius) / 2) * best.gap, from.y - best.at.y);
+	const seconds = Math.max(APPROACH_MIN_SECONDS, length / APPROACH_PACE);
+	// A cubic that ends still stays on one side of the dock only while its starting slope is under three times the gap.
+	const closing = direction * Math.min(Math.abs(best.closingRate) * seconds, 3 * best.gap);
+	const approach: Approach = { dock: best.dock, from: from.clone(), lead: -direction * best.gap, closing, seconds, side: 1 };
+	if (harbor.ring) {
+		approach.ring = harbor.ring;
+		approach.side = ringSide(approach, best.at);
+	}
+	return approach;
+}
+
+/**
+ * Where the ship is `elapsed` seconds into an approach, relative to the body, given where the dock
+ * is right now. Past the end it sits on the dock.
+ */
+export function approachPoint(approach: Approach, elapsed: number, dock: Vector3): Vector3 {
+	const u = Math.min(1, Math.max(0, elapsed / approach.seconds));
+	const ease = u * u * (3 - 2 * u);
+	const from = approach.from;
+	const fromRadius = Math.hypot(from.x, from.z);
+	const dockRadius = Math.hypot(dock.x, dock.z);
+	const radius = fromRadius + (dockRadius - fromRadius) * ease;
+	// Cubic Hermite from `lead` to 0: it leaves at the arrival's closing rate and ends at rest beside the dock.
+	const offset = approach.lead * (2 * u * u * u - 3 * u * u + 1) + approach.closing * (u * u * u - 2 * u * u + u);
+	const angle = Math.atan2(dock.z, dock.x) + offset;
+	const point = new Vector3(Math.cos(angle) * radius, from.y + (dock.y - from.y) * ease, Math.sin(angle) * radius);
+	return approach.ring ? liftOverRing(point, approach.ring, approach.side, dockRadius) : point;
+}
+
+/**
+ * Moves a point along the ring's normal until it clears the ring plane, but only where it sits over
+ * the ring itself. Moving along the normal leaves the distance from the ring's axis alone, so the
+ * lift fades in and out without ever touching the ring.
+ */
+function liftOverRing(point: Vector3, ring: HarborRing, side: number, dockRadius: number): Vector3 {
+	const normal = ring.normal.normalizeToNew();
+	const height = Vector3.Dot(point, normal);
+	const across = Math.sqrt(Math.max(0, point.lengthSquared() - height * height));
+	const innerMargin = Math.max(1e-3, Math.min(RING_LIFT_MARGIN, (ring.inner - dockRadius) * 0.6));
+	const over =
+		smoothstep(ring.inner - innerMargin, ring.inner, across) * (1 - smoothstep(ring.outer, ring.outer + RING_LIFT_MARGIN, across));
+	if (over <= 0) {
+		return point;
+	}
+	const clear = ring.halfHeight * RING_LIFT;
+	const lifted = side * softMax(side * height, clear, ring.halfHeight);
+	return point.add(normal.scale((lifted - height) * over));
+}
+
+/** The side of the ring plane the unlifted path mostly crosses on, so the lift is as small as it can be. */
+function ringSide(approach: Approach, dockNow: Vector3): number {
+	const ring = approach.ring!;
+	const normal = ring.normal.normalizeToNew();
+	const flat = { ...approach, ring: undefined };
+	let sum = 0;
+	for (let i = 0; i <= 48; i++) {
+		const elapsed = (i / 48) * approach.seconds;
+		const turn = approach.dock.rate * elapsed;
+		const dock = new Vector3(
+			dockNow.x * Math.cos(turn) - dockNow.z * Math.sin(turn),
+			dockNow.y,
+			dockNow.x * Math.sin(turn) + dockNow.z * Math.cos(turn)
+		);
+		const point = approachPoint(flat, elapsed, dock);
+		const height = Vector3.Dot(point, normal);
+		const across = Math.sqrt(Math.max(0, point.lengthSquared() - height * height));
+		if (across >= ring.inner && across <= ring.outer) {
+			sum += height;
+		}
+	}
+	return sum < 0 ? -1 : 1;
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+	const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+	return t * t * (3 - 2 * t);
+}
+
+/** A max with its corner rounded over `soft`, so the lifted path has no kink. */
+function softMax(a: number, b: number, soft: number): number {
+	return 0.5 * (a + b + Math.sqrt((a - b) * (a - b) + soft * soft));
+}
+
+/** An angle wrapped into [0, 2π). */
+function positiveAngle(angle: number): number {
+	const full = Math.PI * 2;
+	return ((angle % full) + full) % full;
+}
+
+/** The climb and the burn as one line. The shared point where they meet is kept once. */
+function stitch(plan: JourneyPlan): Route {
+	const points: Vector3[] = [];
+	const kinds: RouteKind[] = [];
+	const push = (point: Vector3, kind: RouteKind | null) => {
+		if (points.length > 0 && Vector3.DistanceSquared(point, points[points.length - 1]) <= 1e-8) {
+			return;
+		}
+		if (points.length > 0) {
+			kinds.push(kind ?? "burn");
+		}
+		points.push(point.clone());
+	};
+	for (let i = 0; i < plan.climb.length; i++) {
+		push(plan.climb[i], i === 0 ? null : "burn");
+	}
+	for (let i = 0; i < plan.cruise.points.length; i++) {
+		push(plan.cruise.points[i], i === 0 ? "burn" : plan.cruise.kinds[i - 1]);
+	}
+	if (points.length < 2) {
+		const origin = (points[0] ?? Vector3.Zero()).clone();
+		points.splice(0, points.length, origin, new Vector3(origin.x + 0.01, origin.y, origin.z));
+		kinds.splice(0, kinds.length, "burn");
+	}
+	const cumulative = [0];
+	for (let i = 1; i < points.length; i++) {
+		cumulative.push(cumulative[i - 1] + Vector3.Distance(points[i - 1], points[i]));
+	}
+	return {
+		points,
+		kinds,
+		cumulative,
+		total: cumulative[cumulative.length - 1],
+		assists: plan.cruise.assists,
+		startTurn: plan.cruise.startTurn,
+		endTurn: plan.cruise.endTurn,
+	};
+}
+
+function polylineLength(points: Vector3[]): number {
+	let length = 0;
+	for (let i = 1; i < points.length; i++) {
+		length += Vector3.Distance(points[i - 1], points[i]);
+	}
+	return length;
 }
 
 /**
@@ -158,26 +511,6 @@ function buildAhead(scene: Scene, route: Route, pixelRatio: number): GreasedLine
 			colors,
 			colorDistributionType: GreasedLineMeshColorDistributionType.COLOR_DISTRIBUTION_TYPE_SEGMENT,
 			visibility: 1,
-		},
-		scene
-	);
-	line.isPickable = false;
-	return line;
-}
-
-function buildBehind(scene: Scene, route: Route, pixelRatio: number): GreasedLineBaseMesh {
-	const line = CreateGreasedLine(
-		"journey-behind",
-		{ points: route.points },
-		{
-			materialType: GreasedLineMeshMaterialType.MATERIAL_TYPE_SIMPLE,
-			sizeAttenuation: true,
-			width: BEHIND_WIDTH * pixelRatio,
-			color: BEHIND,
-			useDash: true,
-			dashCount: Math.max(MIN_DASHES, Math.round(route.total / DASH_LENGTH)),
-			dashRatio: 0.5,
-			visibility: 0,
 		},
 		scene
 	);

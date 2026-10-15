@@ -24,7 +24,7 @@ export const STORY: StoryChapter[] = [
 		title: "The source...of everything.",
 		paragraphs: [
 			"Humanity can now cross a distance near the speed of light, and it can store more energy than ever before. Humanity is pre-stellar, but not yet interstellar. They have not yet left the solar system, but they are close, having populated bases in orbit around the celestial bodies in the solar system.",
-			"The inter-planetary energy business is booming. Satellites hang in the inner orbit and fill until a pilot drains one. Then they wait on the Sun, and the pilots move on. That orbit is not a home. It is the only place the energy comes from, and it is where a full ship can be taken. A haul that cannot be fought for is not a haul.",
+			"The inter-planetary energy business is booming. Satellites hang in the inner orbit and fill until a pilot drains one. Then they wait on the Sun, and the pilots move on. That orbit is not a home. It is the only place the energy comes from. A full ship is taken in the outer orbit. A haul that cannot be fought for is not a haul.",
 		],
 	},
 	{
@@ -62,7 +62,7 @@ export const STORY: StoryChapter[] = [
 		paragraphs: [
 			"A base can orbit any planet or moon besides Earth or the Sun. The Sun has harvesting satellites and no bases. Sol does not permit pilot bases in Earth's orbit either. The base contains the warehouse, the repair bay, and the space dock. The ship is improved there, and only there.",
 			"Where it sits is a choice about how much of the haul a direct burn will eat. Mercury is the cheap hop to the Sun. The Moon is the cheap hop to Earth's market, and the Moon is not a combat zone. Venus sits between them. A base from Mars outward pays more for the same burn.",
-			"Battles happen where ships are most vulnerable. Any ship sitting in inner orbit of any planet or moon is an attack target. The only defense is a cloak. Cloaks cause a ship to consume energy faster while away from base, but they also make a ship impossible to detect by other ships. Cloaked ships can be detected by scan, but they cannot be attacked. Energy burn must account for the amount of cloak needed to perform a trip.",
+			"Battles happen in the outer orbit, where a ship is sitting with its cargo and not yet traveling. A ship on a mine can be pulled out to that orbit to fight. The only defense is a cloak. Cloaks cause a ship to consume energy faster while away from base, but they also make a ship impossible to detect by other ships. Cloaked ships can be detected by scan, but they cannot be attacked. Energy burn must account for the amount of cloak needed to perform a trip.",
 			"A pilot mines the home world's yield to have it. The base does not hand it over. The same material from another world is the same material. The planets keep moving. The one that can bend a course this month is what makes a long trip possible, and a close pass wears the ship down. A pass in the wrong month saves nothing. Next month it is a different planet.",
 		],
 	},

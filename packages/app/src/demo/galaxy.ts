@@ -130,11 +130,12 @@ const GLIDE_SECONDS = 3.4;
 /** Pressing or scrolling during the glide hurries it to an end in this long. */
 const HURRY_SECONDS = 0.6;
 /**
- * The range fills this share of the screen's shorter side once the camera settles. A phone gives it more,
- * since the names need the room more than they need a margin around the range.
+ * How much of the screen's shorter side the range spans once the camera settles. Above 1, the far side of
+ * the range leaves the frame; turning or zooming brings it back. A phone gives it more, since the names
+ * need the room more than they need a margin around the range.
  */
-const RING_FILL = 0.52;
-const RING_FILL_NARROW = 0.86;
+const RING_FILL = 1.7;
+const RING_FILL_NARROW = 1.9;
 /** Below this many CSS pixels across, the screen's shorter side counts as narrow. */
 const NARROW_PIXELS = 520;
 const RING_MIN_PIXELS = 70;

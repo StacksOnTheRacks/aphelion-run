@@ -122,15 +122,15 @@ export default function RulesPage() {
 						<h3 className="text-lg">Harvest</h3>
 						<p className="mt-3 text-sm leading-relaxed text-white/75">
 							Dock at an empty or allied collector and siphon until it is empty, or until another load would drop the
-							ship under the reserve for today&apos;s departure. When the siphon stops, the ship is idle in the inner
-							orbit with its haul aboard. A departure plotted from the terminal is flown when the siphon stops. A ship
-							with no departure plotted stays on the empty collector.
+							ship under the reserve for today&apos;s departure. When the siphon stops, the ship undocks to the outer
+							orbit with its haul. A departure plotted from the terminal is flown from there. A ship with no departure
+							plotted stays in the outer orbit.
 						</p>
 					</article>
 					<article className="rounded-2xl border border-amber-300/30 p-5">
 						<h3 className="text-lg">Attack</h3>
 						<p className="mt-3 text-sm leading-relaxed text-white/75">
-							The inner orbit is a combat zone. Ships fight with their stats. The player does not steer the shots. A dry ship cannot attack. It can be attacked. If
+							The outer orbit is the combat zone. Ships fight with their stats. The player does not steer the shots. A dry ship cannot attack. It can be attacked. If
 							the attacker wins, they take the energy and the cash that were aboard, plus scrap from the wreck. The
 							defender is sent home to the repair bay. The recall does not deliver a cargo. Ships are never permanently
 							destroyed.
@@ -156,7 +156,7 @@ export default function RulesPage() {
 						premium disappears.
 					</p>
 					<p>
-						Cash stays on the ship until it is banked at home. A ship in the inner orbit of any planet or moon can be
+						Cash stays on the ship until it is banked at home. A ship in the outer orbit of any planet or moon can be
 						attacked. The Moon is not a combat zone. A cloak is the only defense: away from base it burns energy
 						faster, other ships cannot see it, a scan can, and a cloaked ship cannot be attacked. The Moon is where a
 						pilot lives beside Earth&apos;s market. That location is the home&apos;s only advantage.

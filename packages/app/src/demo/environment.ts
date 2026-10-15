@@ -32,19 +32,24 @@ import {
 } from "./camera-path";
 import {
 	EARTH_STATION_RADIUS,
+	EARTH_WAREHOUSE_RADIUS,
 	SATURN_RING_INNER_SCALE,
 	SATURN_RING_OUTER_SCALE,
+	SUN_OUTER_ORBIT,
 	moonBases,
+	moonOuterOrbitRadius,
+	outerOrbitRadius,
 	planetBases,
 	type BaseSlot,
 	type Faction,
+	type PlanetBaseInput,
 } from "./bases";
 import { daysSinceJ2000, greenwichAngle, moonLongitude, planetLongitude, type EphemerisPlanet } from "./ephemeris";
-import { createJourney } from "./journey";
+import { createJourney, type Dock, type Harbor, type JourneyPlan } from "./journey";
 import { awayFrom, type LabelFrame, type LabelSource } from "./labels";
 import { createMoonTerrain } from "./moon-terrain";
 import { trackPicks } from "./pointer";
-import { FLYBY_SCALE, planRoute, type Route } from "./route";
+import { departureSpiral, planRoute, reversalPenalty } from "./route";
 
 type PlanetName = EphemerisPlanet;
 
@@ -328,7 +333,7 @@ export const PLANETS: PlanetSpec[] = [
 	},
 ];
 
-/** The whole system from nearly overhead, as close as the outermost planet's orbit allows. */
+/** The whole system from nearly overhead, close enough that the outer orbit can leave the frame. */
 SHOTS.system = {
 	focus: "sun",
 	alpha: -Math.PI / 2,
@@ -337,8 +342,8 @@ SHOTS.system = {
 	fitOrbit: Math.max(...PLANETS.map((spec) => spec.orbit + spec.diameter / 2)),
 	corona: 3,
 };
-/** Share of the screen the system shot's outermost orbit may span, on each axis. */
-const ORBIT_FIT_FILL = 0.94;
+/** Share of each screen axis the outermost orbit is framed to. Above 1, that orbit can leave the frame. */
+const ORBIT_FIT_FILL = 1.35;
 
 const PLANET_LABEL: Record<PlanetName, string> = {
 	mercury: "Mercury",
@@ -418,7 +423,6 @@ const CORONA_SCALE = 2.2;
 /** The Sun turns once in about 25 days, in radians per second. */
 const SUN_SPIN = (Math.PI * 2) / (25.38 * 86_400);
 const SUNLIGHT_COLOR = new Color3(1, 0.95, 0.86);
-const SUN_OUTER_RING = 44;
 export const SUN_INNER_RING = 24;
 SHOTS["sun-inner"] = {
 	focus: "sun",
@@ -430,6 +434,14 @@ SHOTS["sun-inner"] = {
 	closeUp: true,
 };
 const OUTER_RING_COLOR = new Color3(0.55, 0.62, 0.75);
+/** Earth's Moon is not a combat zone, so its shell is the neutral bone instead of the battle tint. */
+const ZONE_BONE = Color3.FromHexString("#E8E4D9");
+/** How far outside a zone the outer-orbit camera stands, so the shell reads as a boundary. */
+const OUTER_VIEW_MARGIN = 1.25;
+const ZONE_FADE_SECONDS = 0.35;
+/** Grid cells around and from pole to pole on a zone shell. */
+const ZONE_MERIDIANS = 24;
+const ZONE_PARALLELS = 12;
 const INNER_RING_COLOR = new Color3(0.85, 0.55, 0.25);
 
 const SATELLITE_COUNT = 300;
@@ -477,8 +489,6 @@ const CAMERA_RADIUS_MIN = 3;
 const CAMERA_RADIUS_MAX = 7000;
 /** Clearance off Saturn's ring plane. The mesh is flat, so this is what "missing the rings" means. */
 const RING_HALF_HEIGHT = 0.7;
-/** A pass by Saturn stays this far outside the rings. */
-const SATURN_FLYBY_MARGIN = 3;
 
 export function saturnRing(center: Vector3): RingBody {
 	const planetRadius = PLANETS.find((spec) => spec.name === "saturn")!.diameter / 2;
@@ -491,12 +501,37 @@ export function saturnRing(center: Vector3): RingBody {
 	};
 }
 
-export function flybyRadius(spec: PlanetSpec): number {
-	const radius = spec.diameter / 2;
-	if (spec.name === "saturn") {
-		return radius * SATURN_RING_OUTER_SCALE + SATURN_FLYBY_MARGIN;
+function baseInput(spec: PlanetSpec): PlanetBaseInput {
+	return {
+		diameter: spec.diameter,
+		moons: spec.moons.map((moon) => ({ orbit: moon.orbit, diameter: moon.diameter })),
+		stationRadius: spec.name === "earth" ? EARTH_STATION_RADIUS : undefined,
+		warehouseRadius: spec.name === "earth" ? EARTH_WAREHOUSE_RADIUS : undefined,
+		homes: spec.name !== "earth",
+		ringInnerScale: spec.name === "saturn" ? SATURN_RING_INNER_SCALE : undefined,
+	};
+}
+
+/** Outer-orbit radius of the Sun, a planet, or a moon. An assist skims this same circle. */
+export function bodyOuterRadius(id: string): number {
+	if (id === "sun") {
+		return SUN_OUTER_ORBIT;
 	}
-	return radius * FLYBY_SCALE;
+	for (const spec of PLANETS) {
+		if (spec.name === id) {
+			return outerOrbitRadius(baseInput(spec));
+		}
+		for (const moon of spec.moons) {
+			if (moon.name === id) {
+				return moonOuterOrbitRadius(moon.diameter);
+			}
+		}
+	}
+	throw new Error(`No outer orbit for ${id}.`);
+}
+
+export function flybyRadius(spec: PlanetSpec): number {
+	return bodyOuterRadius(spec.name);
 }
 
 /** A body a journey can leave from or fly to. `id` is "sun", a planet name, or a moon name. */
@@ -565,8 +600,10 @@ export type JourneyBody = {
 	id: string;
 	center: Vector3;
 	radius: number;
-	/** Radius of the orbit its bases ride, or the Sun's inner orbit. A ship arrives on it. */
+	/** Radius of the orbit its bases ride, or the Sun's inner orbit. A climb starts here when the body has no bases. */
 	halo: number;
+	/** Outer-orbit radius. The burn leaves and arrives on this circle. */
+	outer: number;
 	/** World positions of its bases right now. A ship leaves from the one nearest its destination. */
 	bases: Vector3[];
 };
@@ -574,12 +611,24 @@ export type JourneyBody = {
 /** Every body where it is at one moment: the Sun, each planet, and each moon. */
 export type JourneyLayout = { bodies: JourneyBody[] };
 
+/** Where a docked ship is, and which way its satellite circles: +1 counterclockwise. */
+export type Departure = { at: Vector3; turn: number };
+
 /**
- * From a base on one body to the base orbit of another. The ship leaves from the base nearest the
- * destination and arrives on the side of the orbit that faces where it came from. Every planet that
- * is not an end of the trip may give an assist.
+ * From one body to another, in three parts. The ship climbs slowly from the base nearest the
+ * destination out to a tangent on the origin's outer orbit, burns fast along that tangent to a
+ * tangent on the destination's outer orbit, and then drops inward to dock there. When `depart` is
+ * set the ship is already docked at the origin, and the climb starts from there instead.
+ *
+ * The climb leaves with the orbit. It eases outward while it keeps turning the way the satellite
+ * circles, and meets the burn along the outer orbit. Heading back against the orbit is taken only
+ * when that way out is shorter by more than half a lap, since reversing throws away the speed the
+ * ship already has. A ship that is not docked circles the way the bases do, counterclockwise.
+ *
+ * Every planet that is not an end of the trip may give an assist. An assist skims that planet's
+ * outer orbit, and the ship is still burning, so the pass is not a place it can be attacked.
  */
-export function planJourney(layout: JourneyLayout, fromId: string, toId: string): Route {
+export function planJourney(layout: JourneyLayout, fromId: string, toId: string, depart?: Departure): JourneyPlan {
 	const byId = new Map(layout.bodies.map((body) => [body.id, body]));
 	const from = byId.get(fromId);
 	const to = byId.get(toId);
@@ -588,25 +637,54 @@ export function planJourney(layout: JourneyLayout, fromId: string, toId: string)
 		throw new Error(`No journey from ${fromId} to ${toId}.`);
 	}
 
-	const start =
-		from.bases.length > 0
-			? from.bases.reduce((best, base) =>
-					Vector3.DistanceSquared(base, to.center) < Vector3.DistanceSquared(best, to.center) ? base : best
-				).clone()
-			: from.center.add(flatToward(from.center, to.center).scale(from.halo));
-	const end = to.center.add(flatToward(to.center, start).scale(to.halo));
-
+	const spheres = layout.bodies.map((body) => ({ center: body.center, radius: body.radius }));
+	const rings = [saturnRing(saturnBody.center)];
 	const candidates = PLANETS.filter((spec) => spec.name !== fromId && spec.name !== toId).flatMap((spec) => {
 		const body = byId.get(spec.name);
 		return body ? [{ name: PLANET_LABEL[spec.name], center: body.center, flyby: flybyRadius(spec) }] : [];
 	});
-	return planRoute({
-		start,
-		end,
-		candidates,
-		spheres: layout.bodies.map((body) => ({ center: body.center, radius: body.radius })),
-		rings: [saturnRing(saturnBody.center)],
-	});
+
+	const nearestBase = () =>
+		from.bases.reduce((best, base) =>
+			Vector3.DistanceSquared(base, to.center) < Vector3.DistanceSquared(best, to.center) ? base : best
+		);
+	const origin =
+		depart?.at ??
+		(from.bases.length > 0 ? nearestBase() : from.center.add(flatToward(from.center, to.center).scale(from.halo)));
+	const orbitTurn = depart?.turn || 1;
+	const radius = Math.hypot(origin.x - from.center.x, origin.z - from.center.z);
+
+	const option = (turn: number) => {
+		const cruise = planRoute({
+			start: from.center,
+			end: to.center,
+			startRadius: from.outer,
+			endRadius: to.outer,
+			startTurn: turn,
+			candidates,
+			spheres,
+			rings,
+		});
+		return { cruise, climb: departureSpiral(from.center, origin, cruise.points[0], turn, rings) };
+	};
+	const withOrbit = option(orbitTurn);
+	const againstOrbit = option(-orbitTurn);
+	const chosen =
+		pathLength(againstOrbit.climb) + reversalPenalty(radius) < pathLength(withOrbit.climb) ? againstOrbit : withOrbit;
+
+	return {
+		climb: chosen.climb,
+		cruise: chosen.cruise,
+		arrive: { id: toId, turn: chosen.cruise.endTurn || 1 },
+	};
+}
+
+function pathLength(points: Vector3[]): number {
+	let length = 0;
+	for (let i = 1; i < points.length; i++) {
+		length += Vector3.Distance(points[i - 1], points[i]);
+	}
+	return length;
 }
 
 /** Unit direction from `from` toward `to`, flattened into the planets' plane. */
@@ -650,7 +728,10 @@ export type EnvironmentDemo = LabelSource & {
 	go: (view: DemoView) => void;
 	/** Calls back when a body is clicked or tapped. Returns a stop function. */
 	onSelect: (listener: (target: BodyTarget) => void) => () => void;
-	/** Flies a ship from a base on one body to another, by `JourneyStop` id. `onDone` runs when it arrives. */
+	/**
+	 * Flies a ship to another body's outer orbit, by `JourneyStop` id, and docks it there. A ship
+	 * already docked at the origin leaves from its dock. `onDone` runs once it has docked.
+	 */
 	fly: (fromId: string, toId: string, onDone: () => void) => void;
 	/** Ends the flight early and clears it. */
 	land: () => void;
@@ -687,6 +768,7 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		line.rotation.x = tilt;
 		glow.addExcludedMesh(line);
 		orbitLines.push(line);
+		return line;
 	};
 
 	for (const sky of buildStarfield(scene)) {
@@ -694,7 +776,7 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 	}
 	const sun = buildSun(scene);
 	glow.addExcludedMesh(sun.corona);
-	addOrbit("sun-outer-ring", SUN_OUTER_RING, OUTER_RING_COLOR);
+	const sunOuterRing = addOrbit("sun-outer-ring", SUN_OUTER_ORBIT, OUTER_RING_COLOR);
 	addOrbit("sun-inner-ring", SUN_INNER_RING, INNER_RING_COLOR);
 
 	const terrain = createMoonTerrain(scene, { color: SUNLIGHT_COLOR, strength: SUNLIGHT, night: NIGHT_SIDE });
@@ -749,7 +831,24 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 
 	const swarm = buildSatelliteSwarm(scene);
 
-	const journey = createJourney(scene, camera, glow);
+	/** The Sun's satellites, or the bases and stations circling a planet or moon. */
+	const harborOf = (id: string): Harbor => {
+		if (id === "sun") {
+			return { docks: swarm.docks };
+		}
+		const planet = bodies.find((body) => body.spec.name === id);
+		const anchor = planet?.anchor ?? moonByName.get(id)?.baseAnchor;
+		const docks = spinningBases
+			.filter((base) => base.mesh.parent === anchor)
+			.map((base): Dock => ({ position: () => base.mesh.position.clone(), rate: BASE_SPIN * ORBIT_PACE }));
+		if (planet === saturn) {
+			const { normal, inner, outer, halfHeight } = saturnRing(Vector3.Zero());
+			return { docks, ring: { normal, inner, outer, halfHeight } };
+		}
+		return { docks };
+	};
+
+	const journey = createJourney(scene, camera, glow, harborOf);
 
 	const journeyBody = (id: string, center: Vector3, radius: number, anchor: TransformNode): JourneyBody => {
 		const riding = spinningBases.filter((base) => base.mesh.parent === anchor);
@@ -758,6 +857,7 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 			center: center.clone(),
 			radius,
 			halo: riding[0]?.radius ?? radius * 1.5,
+			outer: bodyOuterRadius(id),
 			// World matrices refresh at render, so add the anchor's position by hand.
 			bases: riding.map((base) => anchor.position.add(base.mesh.position)),
 		};
@@ -765,7 +865,14 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 
 	const journeyLayout = (): JourneyLayout => {
 		const layout: JourneyBody[] = [
-			{ id: "sun", center: Vector3.Zero(), radius: SUN_DIAMETER / 2, halo: SUN_INNER_RING, bases: [] },
+			{
+				id: "sun",
+				center: Vector3.Zero(),
+				radius: SUN_DIAMETER / 2,
+				halo: SUN_INNER_RING,
+				outer: SUN_OUTER_ORBIT,
+				bases: [],
+			},
 		];
 		for (const body of bodies) {
 			layout.push(journeyBody(body.spec.name, body.mesh.position, body.spec.diameter / 2, body.anchor));
@@ -793,14 +900,63 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 	const setOrbitLines = (amount: number) => {
 		linesNow = amount;
 		for (const line of orbitLines) {
-			line.alpha = amount;
-			line.isVisible = amount > 0.01;
+			line.alpha = line === sunOuterRing ? amount * (1 - (zones[0]?.fade ?? 0)) : amount;
+			line.isVisible = line.alpha > 0.01;
 		}
 	};
 
 	const setCorona = (size: number) => {
 		coronaNow = size;
 		sun.setCorona(size);
+	};
+
+	const zones: ZoneShell[] = [];
+	const addZone = (name: string, view: DemoView, radius: number, color: Color3, parent: TransformNode | null) => {
+		const zone = buildZone(scene, name, view, radius, color, zones.length);
+		zone.shell.parent = parent;
+		glow.addExcludedMesh(zone.shell);
+		zones.push(zone);
+	};
+	addZone("sun", "sun-outer", SUN_OUTER_ORBIT, OUTER_RING_COLOR, null);
+	for (const body of bodies) {
+		addZone(
+			body.spec.name,
+			planetOrbitView(body.spec.name, "outer"),
+			bodyOuterRadius(body.spec.name),
+			OUTER_RING_COLOR,
+			body.anchor
+		);
+		body.moons.forEach((orbiter, index) => {
+			const moon = body.spec.moons[index];
+			addZone(
+				moon.name,
+				moonView(body.spec.name, moon.name, "outer"),
+				moonOuterOrbitRadius(moon.diameter),
+				moon.name === "moon" ? ZONE_BONE : OUTER_RING_COLOR,
+				orbiter.baseAnchor
+			);
+		});
+	}
+
+	/**
+	 * The shell of the body whose outer orbit is on screen, and only once the camera has arrived. The
+	 * Sun's outer-orbit line gives way to its shell, so the boundary is never a hard circle.
+	 */
+	let zoneClock = 0;
+	const fadeZones = (deltaSeconds: number) => {
+		zoneClock += deltaSeconds;
+		const step = deltaSeconds / ZONE_FADE_SECONDS;
+		for (const zone of zones) {
+			const target = travel >= 1 && active === zone.view ? 1 : 0;
+			zone.fade = zone.fade < target ? Math.min(target, zone.fade + step) : Math.max(target, zone.fade - step);
+			const shown = zone.fade > 0.01;
+			zone.shell.setEnabled(shown);
+			if (shown) {
+				zone.material.setFloat("fade", zone.fade);
+				zone.material.setFloat("time", zoneClock);
+			}
+		}
+		setOrbitLines(linesNow);
 	};
 
 	const planetNamed = (name: PlanetName): PlanetBody => {
@@ -891,12 +1047,18 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		if (shot.reach) {
 			radius = Math.max(radius, fillDistance(shot.reach, MOON_REACH_FILL));
 		}
+		// The arrival framing stays outside the zone, so the shell reads as a boundary around the body.
+		if (view.endsWith("-outer")) {
+			radius = Math.max(radius, bodyOuterRadius(shot.focus) * OUTER_VIEW_MARGIN);
+		}
 		if (shot.fitOrbit) {
 			radius = fitDistance(shot.fitOrbit, alpha, shot.beta, ORBIT_FIT_FILL);
 		}
 		return { alpha, beta: shot.beta, radius, target };
 	};
 	camera.radius = goalFor("system").radius;
+	// The overview is as close as scrolling gets. A click opens a body's outer orbit.
+	camera.lowerRadiusLimit = camera.radius;
 
 	const moonTurn = new Matrix();
 	const earthSpin = new Matrix();
@@ -983,7 +1145,11 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 	const restoreCamera = (focus: Focus) => {
 		camera.lowerBetaLimit = CAMERA_BETA_MIN;
 		camera.upperBetaLimit = CAMERA_BETA_MAX;
-		camera.lowerRadiusLimit = Math.min(CAMERA_RADIUS_MIN, focusRadius(focus) * 1.15);
+		const close = Math.min(CAMERA_RADIUS_MIN, focusRadius(focus) * 1.15);
+		camera.lowerRadiusLimit = active === "system" ? goalFor("system").radius : close;
+		if (active === "system" && camera.radius < camera.lowerRadiusLimit) {
+			camera.radius = camera.lowerRadiusLimit;
+		}
 		camera.upperRadiusLimit = CAMERA_RADIUS_MAX;
 	};
 
@@ -1025,7 +1191,8 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		const shot = SHOTS[active];
 		const before = sunAngle(focusPosition(shot.focus));
 		placeBodies(deltaSeconds);
-		journey.update(deltaSeconds);
+		journey.update(deltaSeconds, focusPosition);
+		fadeZones(deltaSeconds);
 
 		if (travel >= 1) {
 			camera.minZ = 0.1;
@@ -1176,7 +1343,9 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		},
 		fly(fromId, toId, onDone) {
 			placeBodies(0);
-			journey.start(planJourney(journeyLayout(), fromId, toId), onDone);
+			const docked = journey.docked();
+			const depart = docked && docked.id === fromId ? { at: docked.position, turn: docked.turn } : undefined;
+			journey.start(planJourney(journeyLayout(), fromId, toId, depart), onDone);
 		},
 		land: journey.stop,
 	};
@@ -1677,6 +1846,13 @@ class NightLightsPlugin extends MaterialPluginBase {
 	}
 }
 
+type ZoneShell = {
+	view: DemoView;
+	shell: Mesh;
+	material: ShaderMaterial;
+	fade: number;
+};
+
 function buildOrbit(scene: Scene, name: string, radius: number, color: Color3): LinesMesh {
 	const points: Vector3[] = [];
 	const steps = 180;
@@ -1685,9 +1861,112 @@ function buildOrbit(scene: Scene, name: string, radius: number, color: Color3): 
 		points.push(new Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
 	}
 	const ring = MeshBuilder.CreateLines(name, { points }, scene);
-	ring.color = color.scale(0.45);
+	ring.color = color.clone().scale(0.45);
 	ring.isPickable = false;
 	return ring;
+}
+
+/**
+ * A see-through grid over the outer orbit, so the boundary reads from any angle without fogging the
+ * body inside. Mostly faint: a sweep circles the pole leaving a fading wake, and a broad glow drifts
+ * over the sphere, so some part of the grid is always brightening and another dimming. The far side
+ * shows through, dimmer, and the silhouette glows faintly so the outline holds.
+ */
+function buildZone(scene: Scene, name: string, view: DemoView, radius: number, color: Color3, seed: number): ZoneShell {
+	const material = new ShaderMaterial(
+		`${name}-zone`,
+		scene,
+		{
+			vertexSource: `
+				precision highp float;
+				attribute vec3 position;
+				attribute vec3 normal;
+				uniform mat4 world;
+				uniform mat4 worldViewProjection;
+				varying vec3 vLocal;
+				varying vec3 vWorld;
+				varying vec3 vNormal;
+				void main() {
+					gl_Position = worldViewProjection * vec4(position, 1.0);
+					vLocal = position;
+					vWorld = (world * vec4(position, 1.0)).xyz;
+					vNormal = mat3(world) * normal;
+				}
+			`,
+			fragmentSource: `
+				#extension GL_OES_standard_derivatives : enable
+				precision highp float;
+				uniform vec3 cameraPosition;
+				uniform vec3 tint;
+				uniform float time;
+				uniform float fade;
+				uniform float seed;
+				uniform float pixelRatio;
+				varying vec3 vLocal;
+				varying vec3 vWorld;
+				varying vec3 vNormal;
+				const float TAU = 6.2831853;
+
+				// 1 on a grid line about one CSS pixel wide, 0 between. width is how fast the cell count
+				// changes across a pixel, passed in so the longitude seam does not widen its line.
+				float line(float cells, float width) {
+					float off = abs(fract(cells - 0.5) - 0.5);
+					return 1.0 - smoothstep(0.0, width * pixelRatio, off);
+				}
+
+				void main() {
+					vec3 direction = normalize(vLocal);
+					float around = atan(direction.z, direction.x) / TAU + 0.5;
+					float up = asin(clamp(direction.y, -1.0, 1.0)) / 3.1415927 + 0.5;
+					float aroundCells = around * ${ZONE_MERIDIANS.toFixed(1)};
+					float aroundWidth = min(fwidth(aroundCells), fwidth(fract(around + 0.5) * ${ZONE_MERIDIANS.toFixed(1)}));
+					float upCells = up * ${ZONE_PARALLELS.toFixed(1)};
+					// Meridians crowd together at the poles, so they fade out before they meet.
+					float meridians = line(aroundCells, aroundWidth) * (1.0 - smoothstep(0.86, 0.97, abs(direction.y)));
+					float parallels = line(upCells, fwidth(upCells));
+					float grid = max(meridians, parallels);
+
+					// The sweep: a bright edge circling the pole with a wake that fades behind it.
+					float t = time + seed * 17.0;
+					float behind = fract(t * 0.05 - around);
+					float sweep = max(exp(-behind * 6.0), exp(-(1.0 - behind) * 90.0));
+					sweep *= 0.55 + 0.45 * cos(direction.y * 2.2 + t * 0.4);
+
+					// The drift: a broad glow wandering over the sphere on a tilted path.
+					vec3 toward = normalize(vec3(cos(t * 0.17), 0.55 * sin(t * 0.11), sin(t * 0.17)));
+					float drift = pow(max(dot(direction, toward), 0.0), 4.0);
+
+					vec3 view = normalize(cameraPosition - vWorld);
+					float facing = abs(dot(normalize(vNormal), view));
+					float rim = pow(1.0 - facing, 3.0);
+
+					float near = gl_FrontFacing ? 1.0 : 0.3;
+					float lit = 0.07 + 0.7 * drift + 0.85 * sweep;
+					vec3 color = tint * (grid * lit + rim * (0.18 + 0.35 * drift) + sweep * 0.035);
+					color += vec3(0.35) * grid * sweep * sweep;
+					gl_FragColor = vec4(color * near * fade, 1.0);
+				}
+			`,
+		},
+		{
+			attributes: ["position", "normal"],
+			uniforms: ["world", "worldViewProjection", "cameraPosition", "tint", "time", "fade", "seed", "pixelRatio"],
+			needAlphaBlending: true,
+		}
+	);
+	material.setColor3("tint", color);
+	material.setFloat("seed", seed);
+	material.setFloat("fade", 0);
+	material.setFloat("time", 0);
+	material.setFloat("pixelRatio", 1 / scene.getEngine().getHardwareScalingLevel());
+	material.backFaceCulling = false;
+	material.alphaMode = Constants.ALPHA_ADD;
+	material.disableDepthWrite = true;
+	const shell = MeshBuilder.CreateSphere(`${name}-zone`, { diameter: radius * 2, segments: 48 }, scene);
+	shell.material = material;
+	shell.isPickable = false;
+	shell.setEnabled(false);
+	return { view, shell, material, fade: 0 };
 }
 
 /**
@@ -1834,7 +2113,7 @@ type SatelliteOrbit = {
  * Every satellite of one owner is a thin instance of a single box, so hundreds cost three draw calls.
  * Their matrices are rewritten each frame as they orbit.
  */
-function buildSatelliteSwarm(scene: Scene): { update: (deltaSeconds: number) => void } {
+function buildSatelliteSwarm(scene: Scene): { update: (deltaSeconds: number) => void; docks: Dock[] } {
 	const random = seededRandom(7);
 	const owners = Object.keys(SATELLITE_LOOK) as SatelliteOwner[];
 	const groups = owners.map((owner) => {
@@ -1872,15 +2151,18 @@ function buildSatelliteSwarm(scene: Scene): { update: (deltaSeconds: number) => 
 	const position = new Vector3();
 	const matrix = new Matrix();
 
+	const place = (orbit: SatelliteOrbit, out: Vector3) =>
+		out.set(
+			Math.cos(orbit.angle) * orbit.radius,
+			Math.sin(orbit.angle + orbit.phase) * orbit.radius * orbit.tilt,
+			Math.sin(orbit.angle) * orbit.radius
+		);
+
 	const update = (deltaSeconds: number) => {
 		for (const group of groups) {
 			group.orbits.forEach((orbit, index) => {
 				orbit.angle += orbit.speed * deltaSeconds;
-				position.set(
-					Math.cos(orbit.angle) * orbit.radius,
-					Math.sin(orbit.angle + orbit.phase) * orbit.radius * orbit.tilt,
-					Math.sin(orbit.angle) * orbit.radius
-				);
+				place(orbit, position);
 				Quaternion.RotationYawPitchRollToRef(-orbit.angle, 0, 0, rotation);
 				Matrix.ComposeToRef(scale, rotation, position, matrix);
 				matrix.copyToArray(group.matrices, index * 16);
@@ -1890,7 +2172,10 @@ function buildSatelliteSwarm(scene: Scene): { update: (deltaSeconds: number) => 
 	};
 
 	update(0);
-	return { update };
+	const docks = groups.flatMap((group) =>
+		group.orbits.map((orbit): Dock => ({ position: () => place(orbit, new Vector3()), rate: orbit.speed * ORBIT_PACE }))
+	);
+	return { update, docks };
 }
 
 function seededRandom(seed: number): () => number {

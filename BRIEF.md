@@ -13,7 +13,7 @@ Product brief. This is the current description of the game. How this version is 
 
 Seven hundred years from now, what remains of humanity after the 3rd world war is split between two classes that share a sky and nothing else. The wealthy live in city-size domes of luxury and pay the legal market price. They run energy-based economies inside those domes. The Ashlands are the slums outside: polluted, forgotten, and full of people. Medical bays and factories there run on the same energy as the domes. Advanced energy has raised the technology. It has not changed the greed or the need for control. Energy is the lifeblood.
 
-Humanity can cross a distance near the speed of light, and it can store more energy than ever before. It is pre-stellar, not yet interstellar. It has not left the solar system. It has populated bases in orbit around the bodies there. The Sun's inner orbit is not one of those homes. Satellites hang there and fill until a pilot drains one. That harvest is the inter-planetary energy business, and it is where a full ship can be taken.
+Humanity can cross a distance near the speed of light, and it can store more energy than ever before. It is pre-stellar, not yet interstellar. It has not left the solar system. It has populated bases in orbit around the bodies there. The Sun's inner orbit is not one of those homes. Satellites hang there and fill until a pilot drains one. That harvest is the inter-planetary energy business. A full ship is taken in the outer orbit.
 
 Sol Systems will not pay for a ship while pirates exist, and it will not defend one. It does provide the blueprints. Every pilot in both factions is an independent contractor, risking their own capital and their own life.
 
@@ -66,7 +66,7 @@ The home base drinks water at one rate, whether or not the pilot is online. The 
 
 A pilot mines a yield at the body that offers it. The ship goes there. Materials are not bought, and they are not traded. The Earth station pays cash for energy. It does not sell materials.
 
-Materials go aboard the ship. They have weight. A body does not hand over energy. A ship is not loaded past what it can lift home on the wide path today, so it can always leave. If the return grows more expensive after the load, the ship waits in that orbit until the alignment cheapens it. A wait in an inner orbit can be attacked, unless the ship is cloaked. The Moon is not a combat zone.
+Materials go aboard the ship. They have weight. A body does not hand over energy. A ship is not loaded past what it can lift home on the wide path today, so it can always leave. If the return grows more expensive after the load, the ship waits in the outer orbit until the alignment cheapens it. A wait there can be attacked, unless the ship is cloaked. The Moon is not a combat zone.
 
 Cash comes from energy sold at Earth, or from cash taken off a beaten ship. It is banked at home. It does not buy materials. Banked cash can be spent to finish an improvement sooner. It does not supply a missing material, and it does not shorten a repair.
 
@@ -87,27 +87,33 @@ A ship cannot depart unless the energy aboard covers the route it is about to fl
 
 Cash has no weight. The drive still needs energy to leave. The Earth station buys only the surplus above the burn home. A ship that arrives with nothing above that reserve can leave, and it has nothing to sell.
 
-- **Stuck:** Below the reserve, the ship stays in its current orbit. At the Sun, if the satellite still holds energy, the ship keeps siphoning until it can leave. If the satellite is empty, the ship stays idle and can be attacked until the alignment makes the departure cheap enough. At home, the ship waits until the warehouse can cover the departure, or until the alignment makes it cheaper. At a body, the ship was not loaded past what it can lift, and it waits out a bad alignment there.
+- **Stuck:** Below the reserve, the ship stays in its current orbit. At the Sun, if the satellite still holds energy, the ship keeps siphoning until it can leave. If the satellite is empty, the ship undocks to the outer orbit and can be attacked until the alignment makes the departure cheap enough. At home, the ship waits until the warehouse can cover the departure, or until the alignment makes it cheaper. At a body, the ship was not loaded past what it can lift, and it waits out a bad alignment in the outer orbit.
 - **Heavier costs more:** The same change in speed takes more energy when the ship is carrying more energy or more materials. Past a point the cargo is so heavy that what is left cannot buy the trip. Siphoning stops before that point even if the satellite still holds energy. That is why a drained satellite is not always a full ship.
 - **Assist:** A gravity assist is the efficient burn. The ship is already moving at orbital speed, and a close pass lets a planet's gravity change that speed, so the engines spend less stored energy to reach the next orbit. Any planet can be that pass. It works only when the planet is in the part of its orbit that bends the ship toward the destination. A course can use more than one planet. Venus and the other inner planets bend courses toward the Sun and across the inner system. Jupiter, Saturn, Uranus, and Neptune bend courses outward, including the course in to that planet's own moons. A pilot bound the other way uses the same pass. A close pass in the wrong month saves nothing. A wide path stays clear of the planet, spends the full reserve, and leaves the hull alone. A close path on a good alignment spends less energy, arrives sooner, and wears the shields and hull down.
 - **Recall:** A defeated ship is still sent home to the repair bay. The victor takes the energy and the cash that were aboard. The recall does not deliver a cargo.
 
 ### Outer orbit and inner orbit
 
-At the Sun, space is split in two:
+Every body has the same two orbits. A moon's outer orbit is its own battle surface, not the planet's.
 
-- **Outer orbit:** A stable staging area. The player can scan the inner orbit and see which satellites are occupied, and by whom.
-- **Inner orbit:** The low zone beside the Sun, where the harvesting satellites are.
+- **Outer orbit:** The battle surface. A ship sitting here can be attacked. A ship burning between bodies cannot. From here the player can scan the inner orbit.
+- **Inner orbit:** The work. Mining, docking, and siphoning happen here. The fight is not fought here.
 
-The same split exists at the planets and moons. A ship sitting in the inner orbit of any planet or moon is an attack target. The Moon is the exception: it is not a combat zone.
+Travel between bodies is a fast burn from outer orbit to outer orbit. Moving between the inner orbit and the outer orbit is slow.
+
+A mine that runs empty undocks the ship to the outer orbit. If the ship was sent home, it leaves from there. If it was not, it stays in the outer orbit with the cargo, and it can be attacked. Undocking before the mine is empty does the same: the ship comes out with whatever it has.
+
+A ship on a mine can still be attacked. It comes out to the outer orbit for the fight, and the mine pauses. If the ship wins, it goes back and continues. If it loses, it goes home to the repair bay. A siphon and a station transfer work the same way.
+
+The Moon is the exception: it is not a combat zone.
 
 A cloak is the only defense. While a ship is away from base, a cloak makes it consume energy faster. Other ships cannot detect it. A scan can. A cloaked ship cannot be attacked. The energy a trip costs has to include the cloak the pilot means to run.
 
 ### The Earth sale
 
-Earth has no mineable resources and no pilot bases. Its satellites are trading stations. The outer orbit is the approach. The inner orbit holds the faction stations. A player sells only at their own faction's station. The transfer takes time. If the ship is defeated before the transfer finishes, the cargo is still energy, and the victor takes it. When the transfer finishes, the station pays cash onto the ship for the surplus above the burn home and undocks it into the inner orbit. The station does not store energy, and it does not bank cash.
+Earth has no mineable resources and no pilot bases. Its satellites are trading stations. The outer orbit is where a ship can be attacked. The inner orbit holds the faction stations. A player sells only at their own faction's station. The transfer takes time. An attack pulls the ship out to the outer orbit. If the ship wins, it goes back and the transfer continues. If it loses before the transfer finishes, the cargo is still energy, and the victor takes it. When the transfer finishes, the station pays cash onto the ship for the surplus above the burn home and undocks it into the outer orbit. The station does not store energy, and it does not bank cash.
 
-That cash stays on the ship until the ship reaches its home base and banks it. Until then, the other faction can take it wherever an attack is allowed: the inner orbit of a planet or moon, and not the Moon. A defeat sends the loser home to repair and gives the victor whatever unbanked cash or energy was aboard. Stolen cash is not banked either. The thief has to carry it to their own home. The Moon is the cheap hop to Earth's market, and it is not a combat zone, which is why a pilot who means to stay near the market lives there.
+That cash stays on the ship until the ship reaches its home base and banks it. Until then, the other faction can take it wherever an attack is allowed: the outer orbit of a planet or moon, and not the Moon. A defeat sends the loser home to repair and gives the victor whatever unbanked cash or energy was aboard. Stolen cash is not banked either. The thief has to carry it to their own home. The Moon is the cheap hop to Earth's market, and it is not a combat zone, which is why a pilot who means to stay near the market lives there.
 
 ### Satellites
 
@@ -115,8 +121,8 @@ Each satellite holds a finite pool of solar energy. When it is drained, it must 
 
 Ships fight with their stats. The player does not steer the shots. A battle can finish while the player is away.
 
-- **Harvest:** Dock at an empty or allied satellite and siphon until it is empty, or until another load would drop the ship under the reserve for today's departure. When the siphon stops, the ship is idle in the inner orbit with its haul aboard, and it can be attacked. A departure plotted from the terminal is flown when the siphon stops. The ship stays exposed while it siphons and until it leaves the inner orbit. A ship with no departure plotted stays on the empty satellite.
-- **Attack:** Drop onto a satellite held by the other faction, or onto a ship idle there. If the attacker wins, they take the energy and the cash that were aboard, plus scrap from the wreck. The defender is sent home to the repair bay. The recall does not deliver a cargo.
+- **Harvest:** Dock at an empty or allied satellite and siphon until it is empty, or until another load would drop the ship under the reserve for today's departure. When the siphon stops, the ship undocks to the outer orbit with its haul. A departure plotted from the terminal is flown from there. A ship with no departure plotted stays in the outer orbit and can be attacked. An attack during the siphon pulls the ship out to the outer orbit, and the siphon pauses. If the ship wins, it goes back and continues. If it loses, it goes home. Undocking early brings the ship out with whatever it has.
+- **Attack:** The fight is in the outer orbit, including a ship pulled out from a mine, a collector, or a station. If the attacker wins, they take the energy and the cash that were aboard, plus scrap from the wreck. The defender is sent home to the repair bay. The recall does not deliver a cargo.
 
 ## 4. Payload penalty
 

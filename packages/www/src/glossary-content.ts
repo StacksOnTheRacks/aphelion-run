@@ -80,7 +80,7 @@ export const GLOSSARY: GlossarySection[] = [
 			{
 				term: "Combat zone",
 				id: "combat-zone",
-				body: "The inner orbit of any planet or moon, except the Moon. A ship sitting there can be attacked. A cloaked ship cannot. A dry ship cannot attack. It can be attacked.",
+				body: "The outer orbit of any planet or moon, except the Moon. A ship sitting there can be attacked. A ship burning between bodies cannot. A ship on a mine can be pulled out to that orbit to fight, and it goes back if it wins. A cloaked ship cannot be attacked. A dry ship cannot attack. It can be attacked.",
 			},
 			{
 				term: "Gravity boom",
@@ -96,12 +96,12 @@ export const GLOSSARY: GlossarySection[] = [
 			{
 				term: "Inner orbit",
 				id: "inner-orbit",
-				body: "The low zone beside a body. At the Sun, this is where the collectors sit. At Earth, this is where the two stations sit. At any other planet or moon, a ship sitting here can be attacked, except at the Moon.",
+				body: "The low zone beside a body, where the work is. At the Sun, this is where the collectors sit. At Earth, this is where the two stations sit. At a planet or moon, this is where a ship mines. The fight is not fought here.",
 			},
 			{
 				term: "Outer orbit",
 				id: "outer-orbit",
-				body: "The staging ring. At the Sun, a ship arrives here and scans inward. At Earth, ships come in here on the way to the stations. At a planet or moon, it is the approach.",
+				body: "The battle surface. The same ring at every body a ship can fight at. A moon's outer orbit is its own, not the planet's. A ship sitting here can be attacked. A ship that finishes a mine, or undocks early, comes out here. At the Sun, a ship arrives here and scans inward. Travel between bodies is a fast burn from outer orbit to outer orbit. Moving between the inner orbit and the outer orbit is slow.",
 			},
 			{
 				term: "Repair bay",
@@ -150,7 +150,7 @@ export const GLOSSARY: GlossarySection[] = [
 			{
 				term: "Burn",
 				id: "burn",
-				body: "The energy a route spends. That energy is the same store the ship hauls and sells. A ship cannot depart unless the energy aboard covers the route. Heavier cargo makes the same route cost more.",
+				body: "The energy a route spends. That energy is the same store the ship hauls and sells. A ship cannot depart unless the energy aboard covers the route. Heavier cargo makes the same route cost more. Travel between bodies is a fast burn from outer orbit to outer orbit. Moving between the inner orbit and the outer orbit is slow.",
 				also: ["delta-v"],
 			},
 			{
@@ -202,7 +202,7 @@ export const GLOSSARY: GlossarySection[] = [
 			{
 				term: "Supply",
 				id: "supply",
-				body: "The route home → a world, to mine → home. A planet and its moons share one yield. The ship mines it at the planet or at any of its moons, including the home world. Materials have weight. A ship is not loaded past what it can lift home on the wide path today.",
+				body: "The route home → a world, to mine → home. A planet and its moons share one yield. The ship mines it at the planet or at any of its moons, including the home world. Materials have weight. A ship is not loaded past what it can lift home on the wide path today. An empty mine undocks the ship to the outer orbit. If it was not sent home, it stays there with the cargo.",
 			},
 			{
 				term: "Terminal",
@@ -212,7 +212,7 @@ export const GLOSSARY: GlossarySection[] = [
 			{
 				term: "Transfer",
 				id: "transfer",
-				body: "The sale at a station. It takes time. If the ship is beaten before it finishes, the cargo is still energy, and the victor takes it. When it finishes, the station pays cash onto the ship and undocks it into the inner orbit.",
+				body: "The sale at a station. It takes time. An attack pulls the ship out to the outer orbit. If the ship wins, it goes back and the transfer continues. If it loses before the transfer finishes, the cargo is still energy, and the victor takes it. When it finishes, the station pays cash onto the ship and undocks it into the outer orbit.",
 			},
 			{
 				term: "Wide path",
