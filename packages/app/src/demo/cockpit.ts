@@ -1,5 +1,6 @@
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import { TargetCamera } from "@babylonjs/core/Cameras/targetCamera";
+import { Engine } from "@babylonjs/core/Engines/engine";
 import type { GlowLayer } from "@babylonjs/core/Layers/glowLayer";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Viewport } from "@babylonjs/core/Maths/math.viewport";
@@ -183,7 +184,8 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 	scene.onBeforeCameraRenderObservable.add((current) => {
 		glow.isEnabled = glowing.has(current);
 		engine.cullBackFaces = mirrored.has(current) ? false : null;
-		if (aftWorld.has(current)) {
+		// scissorClear lives on the WebGL engine. The scene's engine handle is the wider base type.
+		if (aftWorld.has(current) && engine instanceof Engine) {
 			const view = current.viewport;
 			const width = engine.getRenderWidth();
 			const height = engine.getRenderHeight();
