@@ -1,0 +1,82 @@
+import {
+	DEPARTURE_SECONDS,
+	bodyScan,
+	destinationName,
+	scanCard,
+	scanLabel,
+	secondsLeft,
+	travelAction,
+	viewAction,
+	type ScanTarget,
+} from "./scan";
+
+const failures: string[] = [];
+
+function expect(condition: boolean, message: string): void {
+	if (!condition) {
+		failures.push(message);
+	}
+}
+
+const mars = bodyScan("mars");
+const titan = bodyScan("titan");
+const sun = bodyScan("sun");
+const marsHome: ScanTarget = { id: "mars-warehouse-corporate-0", host: "mars", kind: "home", owner: "corporate" };
+const earthStation: ScanTarget = { id: "earth-station-marauder-1", host: "earth", kind: "station", owner: "marauder" };
+const collector: ScanTarget = { id: "satellites-empty-4", host: "sun", kind: "collector", owner: "empty" };
+
+expect(sun.kind === "star" && mars.kind === "planet" && titan.kind === "moon", "a body's kind follows from its id");
+expect(mars.host === "mars", "a body is its own host");
+
+expect(scanCard(mars).label === "Mars" && scanCard(mars).kind === "Planet", "a planet's card names it");
+expect(scanCard(titan).text.includes("Saturn"), "a moon's card names its planet");
+expect(scanCard(marsHome).label === "Mars home base", "a home base is named for its body");
+expect(scanCard(marsHome).owner === "Corporate", "a craft's card shows who holds it");
+expect(scanCard(earthStation).label === "Earth station", "Earth's station is named for Earth");
+expect(scanCard(collector).owner === "Unoccupied", "an empty collector reads as unoccupied");
+expect(scanCard(mars).owner === undefined, "a body has no owner");
+
+expect(destinationName(sun) === "the Sun", "the Sun reads with its article");
+expect(destinationName(collector) === "a collector at the Sun", "a collector reads with the body it circles");
+expect(destinationName(earthStation) === "Earth's station", "the station reads as Earth's");
+
+const idleAtEarth = { at: "earth", departing: false };
+expect(travelAction(mars, idleAtEarth).enabled, "a ship at Earth can travel to Mars");
+expect(travelAction(mars, idleAtEarth).label === "Travel To", "the action is Travel To");
+expect(travelAction(marsHome, idleAtEarth).enabled, "a ship at Earth can travel to a craft at Mars");
+expect(!travelAction(bodyScan("earth"), idleAtEarth).enabled, "a ship cannot travel to the body it is at");
+expect(!travelAction(earthStation, idleAtEarth).enabled, "a trip within one body's orbit is not offered");
+expect(!travelAction(mars, { at: null, departing: false }).enabled, "a ship in flight is not re-routed");
+expect(travelAction(mars, { at: null, departing: false }).label === "En route", "a ship in flight says it is en route");
+expect(!travelAction(mars, { at: "earth", departing: true }).enabled, "a second course cannot be set during the countdown");
+expect(travelAction(bodyScan("earth"), { at: "titan", departing: false }).enabled, "a ship docked at Titan can head home");
+
+expect(scanLabel(mars) === "Mars", "a scanned body is named on the scene");
+expect(scanLabel(collector) === "Unoccupied collector", "a scanned collector reads by who holds it");
+expect(scanLabel(marsHome) === "Corporate home base", "a scanned home base reads by who holds it");
+expect(scanLabel(earthStation) === "Marauder station", "a scanned station reads by who holds it");
+
+expect(viewAction(mars, "system").enabled, "a body can be viewed from the whole system");
+expect(!viewAction(mars, "mars-outer").enabled, "a body already in view is not viewed again");
+expect(viewAction(mars, "mars-inner").enabled, "from a body's inner orbit, View steps back out to its outer orbit");
+expect(viewAction(collector, "sun-inner").enabled, "a craft can always be ridden alongside");
+
+const start = 1_000_000;
+const ends = start + DEPARTURE_SECONDS * 1000;
+expect(DEPARTURE_SECONDS === 5, "the countdown is five seconds");
+expect(secondsLeft(ends, start) === 5, "the countdown starts at five");
+expect(secondsLeft(ends, start + 1) === 5, "five holds until a whole second has gone");
+expect(secondsLeft(ends, start + 4_100) === 1, "the last second reads one");
+expect(secondsLeft(ends, ends) === 0, "the countdown ends at zero");
+expect(secondsLeft(ends, ends + 500) === 0, "a late tick still reads zero");
+
+if (failures.length > 0) {
+	for (const failure of failures) {
+		console.error(failure);
+	}
+	process.exit(1);
+}
+
+console.log(
+	"scan cards name what was picked, View goes where the camera is not, Travel To leaves only from a dock or Earth, and the countdown runs five seconds"
+);

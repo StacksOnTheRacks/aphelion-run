@@ -1,6 +1,6 @@
 # Aphelion Run
 
-An asynchronous space strategy game. The description of the game is in [BRIEF.md](BRIEF.md). How this version is built is in [STRATEGY.md](STRATEGY.md). Sources and licenses for the planet maps are in [CREDITS.md](CREDITS.md).
+An asynchronous space strategy game. The description of the game is in [BRIEF.md](BRIEF.md). How this version is built is in [STRATEGY.md](STRATEGY.md). Sources and licenses for the planet maps are in [CREDITS.md](CREDITS.md). Design notes tracked as markdown are in [docs/](docs/): [minerals](docs/solar-system-minerals.md), [play surfaces](docs/surfaces.md), [core mechanics](docs/core-mechanics.md), and [what still has to be decided](docs/planning.md).
 
 ## Packages
 

@@ -38,6 +38,7 @@ import {
 	SUN_OUTER_ORBIT,
 	moonBases,
 	moonOuterOrbitRadius,
+	nearBody,
 	outerOrbitRadius,
 	planetBases,
 	type BaseSlot,
@@ -46,7 +47,11 @@ import {
 } from "./bases";
 import { daysSinceJ2000, greenwichAngle, moonLongitude, planetLongitude, type EphemerisPlanet } from "./ephemeris";
 import { createJourney, type Dock, type Harbor, type JourneyPlan } from "./journey";
+import { CHART_LAYER, createCockpit } from "./cockpit";
+import { HULL_LENGTH, loadRanger } from "./ranger";
 import { awayFrom, type LabelFrame, type LabelSource } from "./labels";
+import type { NavBody, NavFix, NavPoint } from "./nav";
+import type { ScanKind, ScanTarget } from "./scan";
 import { createMoonTerrain } from "./moon-terrain";
 import { trackPicks } from "./pointer";
 import { departureSpiral, planRoute, reversalPenalty } from "./route";
@@ -85,9 +90,9 @@ type Shot = {
 	/** Orbit lines fade out on the way in, because up close they cut across the body's face. */
 	closeUp?: boolean;
 	/**
-	 * After arrival, alpha advances at this body's satellite angular speed, so those satellites hold
-	 * still. The shot stays outside their orbit. Dragging still changes alpha, and the ride continues
-	 * from there.
+	 * After arrival, alpha advances with the craft the camera is following, so that craft holds still.
+	 * With no craft chosen, it advances at this body's own satellite speed. The shot stays outside their
+	 * orbit. Dragging still changes alpha, and the ride continues from there.
 	 */
 	ride?: boolean;
 	/** Corona size relative to its close-up size. From far out the Sun is a dot without a bigger halo. */
@@ -439,9 +444,6 @@ const ZONE_BONE = Color3.FromHexString("#E8E4D9");
 /** How far outside a zone the outer-orbit camera stands, so the shell reads as a boundary. */
 const OUTER_VIEW_MARGIN = 1.25;
 const ZONE_FADE_SECONDS = 0.35;
-/** Grid cells around and from pole to pole on a zone shell. */
-const ZONE_MERIDIANS = 24;
-const ZONE_PARALLELS = 12;
 const INNER_RING_COLOR = new Color3(0.85, 0.55, 0.25);
 
 const SATELLITE_COUNT = 300;
@@ -512,7 +514,7 @@ function baseInput(spec: PlanetSpec): PlanetBaseInput {
 	};
 }
 
-/** Outer-orbit radius of the Sun, a planet, or a moon. An assist skims this same circle. */
+/** Outer-orbit radius of the Sun, a planet, or a moon. The honeycomb sits on this circle. */
 export function bodyOuterRadius(id: string): number {
 	if (id === "sun") {
 		return SUN_OUTER_ORBIT;
@@ -530,8 +532,14 @@ export function bodyOuterRadius(id: string): number {
 	throw new Error(`No outer orbit for ${id}.`);
 }
 
+/**
+ * A gravity assist passes this far outside the outer-orbit shell, as a multiple of that radius.
+ * On the shell the curve and the honeycomb are the same line, and the grid fills the cockpit.
+ */
+const FLYBY_OUTSIDE = 1.1;
+
 export function flybyRadius(spec: PlanetSpec): number {
-	return bodyOuterRadius(spec.name);
+	return bodyOuterRadius(spec.name) * FLYBY_OUTSIDE;
 }
 
 /** A body a journey can leave from or fly to. `id` is "sun", a planet name, or a moon name. */
@@ -545,6 +553,38 @@ export const JOURNEY_STOPS: JourneyStop[] = [
 		...spec.moons.map((moon) => ({ id: moon.name, label: title(moon.name), group: PLANET_LABEL[spec.name] })),
 	]),
 ];
+
+function orbitView(id: string, level: "outer" | "inner"): DemoView {
+	if (id === "sun") {
+		return level === "outer" ? "sun-outer" : "sun-inner";
+	}
+	for (const spec of PLANETS) {
+		if (spec.name === id) {
+			return planetOrbitView(spec.name, level);
+		}
+		const moon = spec.moons.find((candidate) => candidate.name === id);
+		if (moon) {
+			return moonView(spec.name, moon.name, level);
+		}
+	}
+	throw new Error(`No ${level} orbit view for ${id}.`);
+}
+
+/** The outer orbit of a journey stop, by `JourneyStop` id. */
+export function stopView(id: string): DemoView {
+	return orbitView(id, "outer");
+}
+
+/**
+ * Which id a click names. A craft usually wins, so a station opens the inner orbit it circles.
+ * A craft that belongs to the body under the pointer does not: the click is on that body.
+ */
+export function choosePick(craft: { id: string; host: string } | null, bodyId: string | null): string | null {
+	if (craft && bodyId && craft.host === bodyId) {
+		return bodyId;
+	}
+	return craft?.id ?? bodyId;
+}
 
 /** A body the pointer can pick, and the view a click on it opens: that body's outer orbit. */
 export type BodyTarget = { id: string; label: string; view: DemoView };
@@ -570,18 +610,51 @@ export function bodyTargets(view: DemoView): BodyTarget[] {
 	return spec ? spec.moons.map((moon) => moonTarget(spec, moon)) : [];
 }
 
+/** A body by id, and the view a click on it opens. */
+export function bodyTarget(id: string): BodyTarget {
+	if (id === "sun") {
+		return SUN_TARGET;
+	}
+	for (const spec of PLANETS) {
+		if (spec.name === id) {
+			return planetTarget(spec);
+		}
+		const moon = spec.moons.find((candidate) => candidate.name === id);
+		if (moon) {
+			return moonTarget(spec, moon);
+		}
+	}
+	throw new Error(`No body named ${id}.`);
+}
+
+/** The bodies a scan can name from this view: the bodies a click would open, and the body the view is on. */
+export function scanTargets(view: DemoView): BodyTarget[] {
+	const targets = bodyTargets(view);
+	const here = viewTrail(view).filter((body) => !body.id.endsWith("-stop")).at(-1);
+	return here && !targets.some((target) => target.id === here.id) ? [here, ...targets] : targets;
+}
+
+function bodyKind(id: string): ScanKind {
+	if (id === "sun") {
+		return "star";
+	}
+	return PLANETS.some((spec) => spec.name === id) ? "planet" : "moon";
+}
+
 /** The bodies between the whole system and this view, outermost first: the planet, then its moon. */
 export function viewTrail(view: DemoView): BodyTarget[] {
+	const here = (trail: BodyTarget[]): BodyTarget[] =>
+		view.endsWith("-inner") ? [...trail, { id: `${view}-stop`, label: "Inner orbit", view }] : trail;
 	if (view === "sun-outer" || view === "sun-inner") {
-		return [SUN_TARGET];
+		return here([SUN_TARGET]);
 	}
 	for (const spec of PLANETS) {
 		if (view === planetOrbitView(spec.name, "outer") || view === planetOrbitView(spec.name, "inner")) {
-			return [planetTarget(spec)];
+			return here([planetTarget(spec)]);
 		}
 		for (const moon of spec.moons) {
 			if (view === moonView(spec.name, moon.name, "outer") || view === moonView(spec.name, moon.name, "inner")) {
-				return [planetTarget(spec), moonTarget(spec, moon)];
+				return here([planetTarget(spec), moonTarget(spec, moon)]);
 			}
 		}
 	}
@@ -590,6 +663,28 @@ export function viewTrail(view: DemoView): BodyTarget[] {
 
 /** A body and where it is on screen, in CSS pixels from the canvas's top left. */
 type BodySpot = { target: BodyTarget; x: number; y: number; radius: number };
+
+/** A scan names no more than this many things, the nearest to the camera. */
+export const SCAN_LIMIT = 10;
+
+function bodyFound(id: string): ScanTarget {
+	return { id, host: id, kind: bodyKind(id) };
+}
+
+/** Whether the straight line between two points passes through a sphere. */
+export function blocked(from: Vector3, to: Vector3, center: Vector3, radius: number): boolean {
+	const line = to.subtract(from);
+	const length = line.length();
+	if (length < 1e-9) {
+		return false;
+	}
+	const along = Vector3.Dot(center.subtract(from), line) / length;
+	if (along <= 0 || along >= length) {
+		return false;
+	}
+	const nearest = from.add(line.scale(along / length));
+	return Vector3.DistanceSquared(nearest, center) < radius * radius;
+}
 
 /** Bodies smaller than this on screen still catch the pointer this far from their center. */
 const MIN_HIT_PIXELS = 14;
@@ -625,8 +720,8 @@ export type Departure = { at: Vector3; turn: number };
  * when that way out is shorter by more than half a lap, since reversing throws away the speed the
  * ship already has. A ship that is not docked circles the way the bases do, counterclockwise.
  *
- * Every planet that is not an end of the trip may give an assist. An assist skims that planet's
- * outer orbit, and the ship is still burning, so the pass is not a place it can be attacked.
+ * Every planet that is not an end of the trip may give an assist. An assist passes just outside that
+ * planet's outer orbit, and the ship is still burning, so the pass is not a place it can be attacked.
  */
 export function planJourney(layout: JourneyLayout, fromId: string, toId: string, depart?: Departure): JourneyPlan {
 	const byId = new Map(layout.bodies.map((body) => [body.id, body]));
@@ -729,15 +824,34 @@ export type EnvironmentDemo = LabelSource & {
 	/** Calls back when a body is clicked or tapped. Returns a stop function. */
 	onSelect: (listener: (target: BodyTarget) => void) => () => void;
 	/**
-	 * Flies a ship to another body's outer orbit, by `JourneyStop` id, and docks it there. A ship
-	 * already docked at the origin leaves from its dock. `onDone` runs once it has docked.
+	 * While on, the scene finds what is near the camera and names it to `onScanFound`, and a click names
+	 * what it lands on to `onScan` instead of opening a view. Only what the scan found can be picked.
 	 */
-	fly: (fromId: string, toId: string, onDone: () => void) => void;
+	setScanning: (on: boolean) => void;
+	onScan: (listener: (target: ScanTarget) => void) => () => void;
+	/**
+	 * Calls back with what a scan found: the bodies this view offers, the body it is on, and the craft
+	 * circling any of them, nearest the camera first and at most `SCAN_LIMIT`. It is found once the camera
+	 * settles on a view, and again on the next, so names stay on their objects as craft move. Empty while
+	 * not scanning or while the camera moves.
+	 */
+	onScanFound: (listener: (found: ScanTarget[]) => void) => () => void;
+	/** Takes the camera to a scanned body's outer orbit, or rides alongside a scanned craft. */
+	visit: (target: ScanTarget) => void;
+	/**
+	 * Flies the ship from where it sits, its dock or its orbit at Earth, to the target's body and docks
+	 * it there: with the target itself when that is a craft. `onDone` runs once it has docked.
+	 */
+	travel: (target: ScanTarget, onDone: () => void) => void;
 	/** Ends the flight early and clears it. */
 	land: () => void;
+	/** Puts the camera in the ranger's cockpit, with both aft views, or back on the chart where it left. */
+	setPiloting: (on: boolean) => void;
+	/** Calls back every frame while piloting with where the ship is in the system. Returns a stop function. */
+	onNav: (listener: (fix: NavFix) => void) => () => void;
 };
 
-export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanvasElement): EnvironmentDemo {
+export async function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanvasElement): Promise<EnvironmentDemo> {
 	scene.clearColor = new Color4(0.02, 0.03, 0.07, 1);
 
 	const start = SHOTS.system;
@@ -825,11 +939,26 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 	glow.addExcludedMesh(buildSaturnRing(scene, saturn.mesh, saturn.spec.diameter / 2));
 	addOrbit("earth-inner-ring", EARTH_STATION_RADIUS, INNER_RING_COLOR, earth.anchor);
 
-	const spinningBases = buildHabitats(scene, bodies);
-	const ship = buildShip(scene);
+	const crafts: Craft[] = [];
+	const spinningBases = buildHabitats(scene, bodies, crafts);
+	const ranger = await loadRanger(scene, camera);
 	let shipAngle = 1.2;
+	const idlePoint = new Vector3();
+	const idleHeading = new Vector3();
+	const player: Craft = {
+		id: "player-ship",
+		host: "earth",
+		view: planetOrbitView("earth", "inner"),
+		kind: "ship",
+		reach: HULL_LENGTH / 2,
+		marker: () => ranger.beacon(),
+		rate: 0.35 * ORBIT_PACE,
+		angle: () => shipAngle,
+		position: (out) => out.copyFrom(ranger.position),
+	};
+	crafts.push(player);
 
-	const swarm = buildSatelliteSwarm(scene);
+	const swarm = buildSatelliteSwarm(scene, crafts);
 
 	/** The Sun's satellites, or the bases and stations circling a planet or moon. */
 	const harborOf = (id: string): Harbor => {
@@ -848,7 +977,20 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		return { docks };
 	};
 
-	const journey = createJourney(scene, camera, glow, harborOf);
+	/** One craft to dock with, by craft id: a base, a station, or a collector. */
+	const dockById = new Map(swarm.dockById);
+	for (const base of spinningBases) {
+		dockById.set(base.mesh.name, { position: () => base.mesh.position.clone(), rate: BASE_SPIN * ORBIT_PACE });
+	}
+
+	const journey = createJourney(scene, camera, glow, harborOf, ranger);
+	const cockpit = createCockpit(scene, ranger.mounts, camera, glow);
+	// The ship is Earth's until it docks somewhere else. A click on it then opens that body's inner orbit.
+	const berthPlayer = () => {
+		const docked = journey.docked();
+		player.host = docked?.id ?? "earth";
+		player.view = docked ? orbitView(docked.id, "inner") : planetOrbitView("earth", "inner");
+	};
 
 	const journeyBody = (id: string, center: Vector3, radius: number, anchor: TransformNode): JourneyBody => {
 		const riding = spinningBases.filter((base) => base.mesh.parent === anchor);
@@ -889,6 +1031,13 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 	let active: DemoView = "system";
 	let travel = 1;
 	let moveSeconds = TRAVEL_SECONDS;
+	/** The screen shows the cockpit. The chart camera keeps its place, so it is where it was on the way back. */
+	let piloting = false;
+	/** Names what is near and makes the next click name what it lands on instead of opening a view. */
+	let scanning = false;
+	/** What the scan found, and the view it was found from. Null until the camera settles. */
+	let scanFor: DemoView | null = null;
+	let found: ScanTarget[] = [];
 	/** How visible the names are. They drop out the moment the camera leaves and fade back in on arrival. */
 	let labelFade = 0;
 	let linesFrom = 1;
@@ -939,15 +1088,19 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 	}
 
 	/**
-	 * The shell of the body whose outer orbit is on screen, and only once the camera has arrived. The
-	 * Sun's outer-orbit line gives way to its shell, so the boundary is never a hard circle.
+	 * On the chart, the shell of the body whose outer orbit is on screen, and only once the camera has
+	 * arrived. The Sun's outer-orbit line gives way to its shell, so the boundary is never a hard circle.
+	 * In the cockpit the shells follow the ship: a pilot sees the honeycomb of each body they are near.
 	 */
+	const origin = Vector3.Zero();
 	let zoneClock = 0;
 	const fadeZones = (deltaSeconds: number) => {
 		zoneClock += deltaSeconds;
 		const step = deltaSeconds / ZONE_FADE_SECONDS;
 		for (const zone of zones) {
-			const target = travel >= 1 && active === zone.view ? 1 : 0;
+			const center = (zone.shell.parent as TransformNode | null)?.position ?? origin;
+			const showing = piloting ? nearBody(ranger.position, center, zone.radius) : travel >= 1 && active === zone.view;
+			const target = showing ? 1 : 0;
 			zone.fade = zone.fade < target ? Math.min(target, zone.fade + step) : Math.max(target, zone.fade - step);
 			const shown = zone.fade > 0.01;
 			zone.shell.setEnabled(shown);
@@ -1057,8 +1210,6 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		return { alpha, beta: shot.beta, radius, target };
 	};
 	camera.radius = goalFor("system").radius;
-	// The overview is as close as scrolling gets. A click opens a body's outer orbit.
-	camera.lowerRadiusLimit = camera.radius;
 
 	const moonTurn = new Matrix();
 	const earthSpin = new Matrix();
@@ -1098,13 +1249,17 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 			}
 		}
 
-		shipAngle += deltaSeconds * 0.35 * ORBIT_PACE;
-		ship.position.set(
-			earth.mesh.position.x + Math.cos(shipAngle) * EARTH_STATION_RADIUS,
-			0,
-			earth.mesh.position.z + Math.sin(shipAngle) * EARTH_STATION_RADIUS
-		);
-		ship.lookAt(earth.mesh.position);
+		if (!journey.ship()) {
+			shipAngle += deltaSeconds * 0.35 * ORBIT_PACE;
+			idlePoint.set(
+				earth.mesh.position.x + Math.cos(shipAngle) * EARTH_STATION_RADIUS,
+				0,
+				earth.mesh.position.z + Math.sin(shipAngle) * EARTH_STATION_RADIUS
+			);
+			idleHeading.set(-Math.sin(shipAngle), 0, Math.cos(shipAngle));
+			ranger.drive("impulse", 0);
+			ranger.place(idlePoint, idleHeading, deltaSeconds);
+		}
 
 		for (const base of spinningBases) {
 			base.angle += deltaSeconds * BASE_SPIN * ORBIT_PACE;
@@ -1142,13 +1297,35 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		camera.inertialPanningY = 0;
 	};
 
-	const restoreCamera = (focus: Focus) => {
+	/** The inner-orbit shot of a body view. */
+	const innerViewOf = (view: DemoView): DemoView =>
+		view.endsWith("-inner") ? view : (view.replace(/-outer$/, "-inner") as DemoView);
+
+	/**
+	 * Closest a scroll may bring the camera, and no closer than the shot it arrived on.
+	 * From the system the camera stays outside every planet, so an outer orbit is a click.
+	 * From a body it stops at that body's inner orbit, short of the surface.
+	 */
+	const closestRadius = (view: DemoView): number => {
+		const arrived = goalFor(view).radius;
+		if (view === "system") {
+			let outside = goalFor("sun-outer").radius;
+			for (const spec of PLANETS) {
+				outside = Math.max(outside, spec.orbit + goalFor(planetOrbitView(spec.name, "outer")).radius);
+			}
+			return Math.min(arrived, outside);
+		}
+		return Math.min(arrived, goalFor(innerViewOf(view)).radius);
+	};
+	camera.lowerRadiusLimit = closestRadius("system");
+
+	const restoreCamera = () => {
 		camera.lowerBetaLimit = CAMERA_BETA_MIN;
 		camera.upperBetaLimit = CAMERA_BETA_MAX;
-		const close = Math.min(CAMERA_RADIUS_MIN, focusRadius(focus) * 1.15);
-		camera.lowerRadiusLimit = active === "system" ? goalFor("system").radius : close;
-		if (active === "system" && camera.radius < camera.lowerRadiusLimit) {
-			camera.radius = camera.lowerRadiusLimit;
+		const close = closestRadius(active);
+		camera.lowerRadiusLimit = close;
+		if (camera.radius < close) {
+			camera.radius = close;
 		}
 		camera.upperRadiusLimit = CAMERA_RADIUS_MAX;
 	};
@@ -1186,20 +1363,27 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		};
 	};
 
+	/** The craft a click chose. While its inner orbit is on screen, the camera keeps its azimuth. */
+	let riding: Craft | null = null;
+	/** Set by a click, then taken by the next camera move when that move opens the craft's view. */
+	let chosen: Craft | null = null;
+
 	scene.onBeforeRenderObservable.add(() => {
 		const deltaSeconds = engine.getDeltaTime() / 1000;
-		const shot = SHOTS[active];
-		const before = sunAngle(focusPosition(shot.focus));
+		const before = sunAngle(focusPosition(SHOTS[active].focus));
 		placeBodies(deltaSeconds);
 		journey.update(deltaSeconds, focusPosition);
+		cockpit.update();
+		// An arrival can open another view from inside the update, so the shot is read after it.
+		const shot = SHOTS[active];
 		fadeZones(deltaSeconds);
 
 		if (travel >= 1) {
 			camera.minZ = 0.1;
-			restoreCamera(shot.focus);
+			restoreCamera();
 			if (shot.ride) {
 				camera.target.copyFrom(focusPosition(shot.focus));
-				camera.alpha += rideSpeed(shot.focus) * deltaSeconds;
+				camera.alpha += (riding?.view === active ? riding.rate : rideSpeed(shot.focus)) * deltaSeconds;
 				return;
 			}
 			if (shot.focus !== "sun") {
@@ -1212,6 +1396,10 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		}
 
 		const goal = goalFor(active);
+		// Arrive on the craft's own azimuth, which keeps moving during the flight.
+		if (riding?.view === active) {
+			goal.alpha = riding.angle();
+		}
 		travel = Math.min(1, travel + deltaSeconds / moveSeconds);
 		const eased = travel * travel * (3 - 2 * travel);
 		if (travel >= 1 || !flight) {
@@ -1220,8 +1408,10 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 			camera.radius = goal.radius;
 			camera.target.copyFrom(goal.target);
 			camera.minZ = 0.1;
-			restoreCamera(shot.focus);
-			camera.attachControl(canvas, true);
+			restoreCamera();
+			if (!piloting) {
+				camera.attachControl(canvas, true);
+			}
 		} else {
 			widenCamera();
 			const liveEnd = cameraWorldPosition(goal.alpha, goal.beta, goal.radius, goal.target);
@@ -1235,6 +1425,9 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 	});
 
 	const animateTo = (view: DemoView) => {
+		riding = chosen?.view === view ? chosen : null;
+		chosen = null;
+		clearScan();
 		camera.detachControl();
 		widenCamera();
 		from = snapshot(camera);
@@ -1265,14 +1458,124 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		return { target, x: projected.x, y: projected.y, radius };
 	};
 
-	/** The pickable body nearest the point, measured against how big each one is on screen. */
-	const hitAt = (x: number, y: number): BodySpot | null => {
-		if (travel < 1) {
+	/** Below this many pixels across, a craft is a speck and a click belongs to the body behind it. */
+	const CRAFT_MIN_PIXELS = 1.2;
+	/** Extra pixels around a visible craft, so a small dot can still be clicked. */
+	const CRAFT_HIT_PAD = 10;
+	const craftById = new Map(crafts.map((craft) => [craft.id, craft]));
+	const craftPoint = new Vector3();
+
+	/** A craft on screen, with its radius in CSS pixels. Null when it is behind the camera. */
+	const craftSpot = (craft: Craft): { x: number; y: number; radius: number } | null => {
+		const viewport = camera.viewport.toGlobal(canvas.clientWidth, canvas.clientHeight);
+		const world = craft.position(craftPoint);
+		Vector3.ProjectToRef(world, Matrix.IdentityReadOnly, scene.getTransformMatrix(), viewport, projected);
+		if (projected.z < 0 || projected.z > 1) {
 			return null;
 		}
+		const depth = Vector3.Distance(camera.globalPosition, world);
+		const radius = craft.marker?.() ?? (craft.reach / (depth * Math.tan(camera.fov / 2))) * (canvas.clientHeight / 2);
+		return { x: projected.x, y: projected.y, radius };
+	};
+
+	const craftFound = (craft: Craft): ScanTarget => ({
+		id: craft.id,
+		host: craft.host,
+		kind: craft.kind as ScanKind,
+		owner: craft.owner,
+	});
+
+	const clearScan = () => {
+		scanFor = null;
+		if (found.length > 0) {
+			found = [];
+			for (const listener of foundListeners) {
+				listener(found);
+			}
+		}
+	};
+
+	/**
+	 * Everything the scan can name from here that is on screen and not behind a body, nearest the camera
+	 * first. A body counts from its surface. The whole system names bodies only: a craft there is too
+	 * far off to visit except through its body.
+	 */
+	const runScan = (): ScanTarget[] => {
+		const eye = camera.globalPosition;
+		const width = canvas.clientWidth;
+		const height = canvas.clientHeight;
+		const viewport = camera.viewport.toGlobal(width, height);
+		const onScreen = (world: Vector3) => {
+			Vector3.ProjectToRef(world, Matrix.IdentityReadOnly, scene.getTransformMatrix(), viewport, projected);
+			return projected.z >= 0 && projected.z <= 1 && projected.x >= 0 && projected.x <= width && projected.y >= 0 && projected.y <= height;
+		};
+		const bodies = scanTargets(active).map((target) => ({
+			id: target.id,
+			center: focusPosition(target.id),
+			radius: focusRadius(target.id),
+		}));
+		const seen: { target: ScanTarget; distance: number }[] = [];
+		for (const body of bodies) {
+			if (onScreen(body.center)) {
+				seen.push({ target: bodyFound(body.id), distance: Math.max(0, Vector3.Distance(eye, body.center) - body.radius) });
+			}
+		}
+		if (active !== "system") {
+			const hosts = new Set(bodies.map((body) => body.id));
+			for (const craft of crafts) {
+				if (craft === player || !hosts.has(craft.host)) {
+					continue;
+				}
+				const at = craft.position(craftPoint);
+				if (!onScreen(at) || bodies.some((body) => blocked(eye, at, body.center, body.radius))) {
+					continue;
+				}
+				seen.push({ target: craftFound(craft), distance: Vector3.Distance(eye, at) });
+			}
+		}
+		return seen
+			.sort((a, b) => a.distance - b.distance)
+			.slice(0, SCAN_LIMIT)
+			.map((entry) => entry.target);
+	};
+
+	/**
+	 * The craft nearest the point. Ignored on the whole-system map, where the bodies are the targets. A
+	 * craft too small to see is passed over, unless a scan found it.
+	 */
+	const craftAt = (x: number, y: number): Craft | null => {
+		if (piloting || travel < 1 || active === "system") {
+			return null;
+		}
+		const candidates = scanning
+			? found.flatMap((target) => craftById.get(target.id) ?? [])
+			: crafts;
+		let best: Craft | null = null;
+		let bestScore = 1;
+		for (const craft of candidates) {
+			const spot = craftSpot(craft);
+			if (!spot || (!scanning && spot.radius < CRAFT_MIN_PIXELS)) {
+				continue;
+			}
+			const score = Math.hypot(spot.x - x, spot.y - y) / (spot.radius + CRAFT_HIT_PAD);
+			if (score <= bestScore) {
+				best = craft;
+				bestScore = score;
+			}
+		}
+		return best;
+	};
+
+	/** The pickable body nearest the point, measured against how big each one is on screen. */
+	const hitAt = (x: number, y: number): BodySpot | null => {
+		if (piloting || travel < 1) {
+			return null;
+		}
+		const scanned = new Set(found.map((target) => target.id));
+		const targets = scanning ? scanTargets(active).filter((target) => scanned.has(target.id)) : bodyTargets(active);
 		let best: BodySpot | null = null;
 		let bestScore = 1;
-		for (const target of bodyTargets(active)) {
+		for (const target of targets) {
 			const spot = spotFor(target);
 			if (!spot) {
 				continue;
@@ -1287,16 +1590,37 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 	};
 
 	const selectListeners = new Set<(target: BodyTarget) => void>();
+	const scanListeners = new Set<(target: ScanTarget) => void>();
+	const foundListeners = new Set<(found: ScanTarget[]) => void>();
 	const picker = trackPicks(
 		canvas,
 		scene,
-		(x, y) => hitAt(x, y)?.target.id ?? null,
+		(x, y) => {
+			berthPlayer();
+			const craft = craftAt(x, y);
+			const body = hitAt(x, y)?.target.id ?? null;
+			// A scan includes the body the view is on, which every craft here circles, so the craft wins.
+			return scanning ? (craft?.id ?? body) : choosePick(craft, body);
+		},
 		(id) => {
-			const target = bodyTargets(active).find((candidate) => candidate.id === id);
-			if (target) {
-				for (const listener of selectListeners) {
+			const craft = craftById.get(id);
+			if (scanning) {
+				const target = craft ? craftFound(craft) : bodyFound(id);
+				for (const listener of scanListeners) {
 					listener(target);
 				}
+				return;
+			}
+			const target = craft
+				? { id: craft.host, label: craft.host, view: craft.view }
+				: bodyTargets(active).find((candidate) => candidate.id === id);
+			if (!target) {
+				return;
+			}
+			// The listener starts the camera move, which takes the craft chosen here.
+			chosen = craft ?? null;
+			for (const listener of selectListeners) {
+				listener(target);
 			}
 		}
 	);
@@ -1307,7 +1631,14 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 	scene.onAfterRenderObservable.add(() => {
 		const hovered = picker.update();
 		const step = engine.getDeltaTime() / 1000 / LABEL_FADE_SECONDS;
-		labelFade = travel >= 1 ? Math.min(1, labelFade + step) : 0;
+		labelFade = !piloting && travel >= 1 ? Math.min(1, labelFade + step) : 0;
+		if (scanning && !piloting && travel >= 1 && scanFor !== active) {
+			scanFor = active;
+			found = runScan();
+			for (const listener of foundListeners) {
+				listener(found);
+			}
+		}
 		if (labelListeners.size === 0) {
 			return;
 		}
@@ -1315,8 +1646,9 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 		Vector3.ProjectToRef(focusPosition(SHOTS[active].focus), Matrix.IdentityReadOnly, scene.getTransformMatrix(), viewport, projected);
 		center.x = projected.x;
 		center.y = projected.y;
-		const anchors = bodyTargets(active).flatMap((target) => {
-			const spot = spotFor(target);
+		const anchors = (scanning ? found : []).flatMap((target) => {
+			const craft = craftById.get(target.id);
+			const spot = craft ? craftSpot(craft) : spotFor(bodyTarget(target.id));
 			return spot
 				? [{ id: target.id, x: spot.x, y: spot.y, radius: spot.radius, away: awayFrom(center, spot.x, spot.y) }]
 				: [];
@@ -1326,6 +1658,44 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 			listener(frame);
 		}
 	});
+
+	const navListeners = new Set<(fix: NavFix) => void>();
+	const navEdge = Math.max(...PLANETS.map((spec) => spec.orbit));
+	/** The course in the plane, made once per flight. */
+	const navCourse: { from: readonly Vector3[] | null; points: NavPoint[] } = { from: null, points: [] };
+	scene.onAfterRenderObservable.add(() => {
+		if (!piloting || navListeners.size === 0) {
+			return;
+		}
+		const navBodies: NavBody[] = [{ id: "sun", x: 0, z: 0, radius: SUN_DIAMETER / 2, outer: SUN_OUTER_ORBIT, parent: null }];
+		for (const body of bodies) {
+			const id = body.spec.name;
+			const at = body.mesh.position;
+			navBodies.push({ id, x: at.x, z: at.z, radius: body.spec.diameter / 2, outer: bodyOuterRadius(id), parent: null });
+			body.moons.forEach((orbiter, index) => {
+				const moonId = body.spec.moons[index].name;
+				const moonAt = orbiter.mesh.position;
+				navBodies.push({ id: moonId, x: moonAt.x, z: moonAt.z, radius: orbiter.radius, outer: bodyOuterRadius(moonId), parent: id });
+			});
+		}
+		const heading = journey.ship()?.heading ?? idleHeading;
+		const course = journey.course();
+		if (course && course.points !== navCourse.from) {
+			navCourse.from = course.points;
+			navCourse.points = course.points.map((point) => ({ x: point.x, z: point.z }));
+		}
+		const fix: NavFix = {
+			ship: { x: ranger.position.x, z: ranger.position.z, hx: heading.x, hz: heading.z },
+			bodies: navBodies,
+			edge: navEdge,
+			course: course ? { points: navCourse.points, progress: course.progress } : null,
+		};
+		for (const listener of navListeners) {
+			listener(fix);
+		}
+	});
+
+	placeBodies(0);
 
 	return {
 		go: animateTo,
@@ -1341,13 +1711,62 @@ export function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanv
 				selectListeners.delete(listener);
 			};
 		},
-		fly(fromId, toId, onDone) {
+		setScanning(on) {
+			scanning = on;
+			picker.setIdleCursor(on ? "crosshair" : "");
+			clearScan();
+		},
+		onScan(listener) {
+			scanListeners.add(listener);
+			return () => {
+				scanListeners.delete(listener);
+			};
+		},
+		onScanFound(listener) {
+			foundListeners.add(listener);
+			return () => {
+				foundListeners.delete(listener);
+			};
+		},
+		visit(target) {
+			const craft = craftById.get(target.id);
+			const place = craft ? { id: craft.host, label: craft.host, view: craft.view } : bodyTarget(target.id);
+			// The listener starts the camera move, which takes the craft chosen here.
+			chosen = craft ?? null;
+			for (const listener of selectListeners) {
+				listener(place);
+			}
+		},
+		travel(target, onDone) {
 			placeBodies(0);
+			// Undocked and not flying, the ship is circling Earth, the way the bases turn.
 			const docked = journey.docked();
-			const depart = docked && docked.id === fromId ? { at: docked.position, turn: docked.turn } : undefined;
-			journey.start(planJourney(journeyLayout(), fromId, toId, depart), onDone);
+			const fromId = docked?.id ?? "earth";
+			const depart = { at: docked?.position ?? ranger.position.clone(), turn: docked?.turn ?? 1 };
+			const plan = planJourney(journeyLayout(), fromId, target.host, depart);
+			const dock = target.id === target.host ? undefined : dockById.get(target.id);
+			journey.start({ ...plan, arrive: { ...plan.arrive, dock } }, onDone);
 		},
 		land: journey.stop,
+		setPiloting(on) {
+			if (piloting === on) {
+				return;
+			}
+			piloting = on;
+			ranger.setPiloted(on);
+			cockpit.setActive(on);
+			if (on) {
+				camera.detachControl();
+			} else if (travel >= 1) {
+				camera.attachControl(canvas, true);
+			}
+		},
+		onNav(listener) {
+			navListeners.add(listener);
+			return () => {
+				navListeners.delete(listener);
+			};
+		},
 	};
 }
 
@@ -1851,6 +2270,8 @@ type ZoneShell = {
 	shell: Mesh;
 	material: ShaderMaterial;
 	fade: number;
+	/** Outer-orbit radius. A pilot inside `LOCAL_REACH` of this sees the honeycomb. */
+	radius: number;
 };
 
 function buildOrbit(scene: Scene, name: string, radius: number, color: Color3): LinesMesh {
@@ -1863,14 +2284,56 @@ function buildOrbit(scene: Scene, name: string, radius: number, color: Color3): 
 	const ring = MeshBuilder.CreateLines(name, { points }, scene);
 	ring.color = color.clone().scale(0.45);
 	ring.isPickable = false;
+	// The chart draws these. Cockpit cameras leave this layer out, so a pilot never sees an orbit line.
+	ring.layerMask = CHART_LAYER;
 	return ring;
 }
 
+/** Hexagons along each edge of the icosahedron the zone honeycomb is folded over. */
+const ZONE_HEX_FREQUENCY = 5;
+
+/** GLSL that keeps whichever of the icosahedron's 20 faces a direction falls on. */
+function icosahedronFacePicks(): string {
+	const phi = (1 + Math.sqrt(5)) / 2;
+	const raw = [
+		[-1, phi, 0],
+		[1, phi, 0],
+		[-1, -phi, 0],
+		[1, -phi, 0],
+		[0, -1, phi],
+		[0, 1, phi],
+		[0, -1, -phi],
+		[0, 1, -phi],
+		[phi, 0, -1],
+		[phi, 0, 1],
+		[-phi, 0, -1],
+		[-phi, 0, 1],
+	];
+	// Neighbors on the unnormalized icosahedron are exactly 2 apart.
+	const touching = (a: number[], b: number[]) => Math.abs(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) - 2) < 1e-6;
+	const vec = (v: number[]) => {
+		const length = Math.hypot(v[0], v[1], v[2]);
+		return `vec3(${v.map((c) => (c / length).toFixed(6)).join(", ")})`;
+	};
+	const picks: string[] = [];
+	for (let i = 0; i < raw.length; i++) {
+		for (let j = i + 1; j < raw.length; j++) {
+			for (let k = j + 1; k < raw.length; k++) {
+				if (touching(raw[i], raw[j]) && touching(raw[j], raw[k]) && touching(raw[i], raw[k])) {
+					picks.push(`face(direction, ${vec(raw[i])}, ${vec(raw[j])}, ${vec(raw[k])}, best, a, b, c);`);
+				}
+			}
+		}
+	}
+	return picks.join("\n");
+}
+
 /**
- * A see-through grid over the outer orbit, so the boundary reads from any angle without fogging the
- * body inside. Mostly faint: a sweep circles the pole leaving a fading wake, and a broad glow drifts
- * over the sphere, so some part of the grid is always brightening and another dimming. The far side
- * shows through, dimmer, and the silhouette glows faintly so the outline holds.
+ * A see-through honeycomb over the outer orbit, so the boundary reads from any angle without fogging the
+ * body inside. The hexagons are folded over an icosahedron, so they stay even across the whole sphere;
+ * its twelve corners close as pentagons. Mostly faint: a sweep circles the pole leaving a fading wake,
+ * and a broad glow drifts over the sphere, so some part of the honeycomb is always brightening and
+ * another dimming. The far side shows through, dimmer, and the silhouette glows faintly so the outline holds.
  */
 function buildZone(scene: Scene, name: string, view: DemoView, radius: number, color: Color3, seed: number): ZoneShell {
 	const material = new ShaderMaterial(
@@ -1896,7 +2359,7 @@ function buildZone(scene: Scene, name: string, view: DemoView, radius: number, c
 			fragmentSource: `
 				#extension GL_OES_standard_derivatives : enable
 				precision highp float;
-				uniform vec3 cameraPosition;
+				uniform vec3 eye;
 				uniform vec3 tint;
 				uniform float time;
 				uniform float fade;
@@ -1907,24 +2370,45 @@ function buildZone(scene: Scene, name: string, view: DemoView, radius: number, c
 				varying vec3 vNormal;
 				const float TAU = 6.2831853;
 
-				// 1 on a grid line about one CSS pixel wide, 0 between. width is how fast the cell count
-				// changes across a pixel, passed in so the longitude seam does not widen its line.
-				float line(float cells, float width) {
-					float off = abs(fract(cells - 0.5) - 0.5);
-					return 1.0 - smoothstep(0.0, width * pixelRatio, off);
+				void face(vec3 d, vec3 p0, vec3 p1, vec3 p2, inout float best, inout vec3 a, inout vec3 b, inout vec3 c) {
+					float facing = dot(d, normalize(p0 + p1 + p2));
+					if (facing > best) {
+						best = facing;
+						a = p0;
+						b = p1;
+						c = p2;
+					}
 				}
 
 				void main() {
 					vec3 direction = normalize(vLocal);
 					float around = atan(direction.z, direction.x) / TAU + 0.5;
-					float up = asin(clamp(direction.y, -1.0, 1.0)) / 3.1415927 + 0.5;
-					float aroundCells = around * ${ZONE_MERIDIANS.toFixed(1)};
-					float aroundWidth = min(fwidth(aroundCells), fwidth(fract(around + 0.5) * ${ZONE_MERIDIANS.toFixed(1)}));
-					float upCells = up * ${ZONE_PARALLELS.toFixed(1)};
-					// Meridians crowd together at the poles, so they fade out before they meet.
-					float meridians = line(aroundCells, aroundWidth) * (1.0 - smoothstep(0.86, 0.97, abs(direction.y)));
-					float parallels = line(upCells, fwidth(upCells));
-					float grid = max(meridians, parallels);
+
+					// The face this direction falls on, flattened onto that face's plane. Hexagon centers sit
+					// on a triangular lattice that shares its points along every edge with the next face.
+					float best = -2.0;
+					vec3 a = vec3(0.0);
+					vec3 b = vec3(0.0);
+					vec3 c = vec3(0.0);
+					${icosahedronFacePicks()}
+					vec3 n = normalize(a + b + c);
+					vec3 onFace = direction * (dot(a, n) / dot(direction, n));
+					vec3 xAxis = normalize(b - a);
+					vec3 yAxis = normalize(c - a - dot(c - a, xAxis) * xAxis);
+					float cellsPerUnit = ${ZONE_HEX_FREQUENCY.toFixed(1)} / length(b - a);
+					vec2 cell = vec2(dot(onFace - a, xAxis), dot(onFace - a, yAxis)) * cellsPerUnit;
+
+					// The nearest hexagon center, from the two rectangular halves of the triangular lattice.
+					const vec2 ROW = vec2(1.0, 1.7320508);
+					vec2 even = cell - ROW * floor(cell / ROW + 0.5);
+					vec2 odd = cell - ROW * (floor(cell / ROW) + 0.5);
+					vec2 local = abs(dot(even, even) < dot(odd, odd) ? even : odd);
+					float toEdge = 0.5 - max(local.x, dot(local, vec2(0.5, 0.8660254)));
+
+					// 1 on a cell wall about one CSS pixel wide. The scale comes from the sphere, not the
+					// face, so it does not jump at a fold. Walls fade before they crowd at the silhouette.
+					float perPixel = length(fwidth(direction)) * cellsPerUnit * pixelRatio;
+					float lattice = (1.0 - smoothstep(0.0, perPixel, toEdge)) * (1.0 - smoothstep(0.25, 0.5, perPixel));
 
 					// The sweep: a bright edge circling the pole with a wake that fades behind it.
 					float t = time + seed * 17.0;
@@ -1936,24 +2420,33 @@ function buildZone(scene: Scene, name: string, view: DemoView, radius: number, c
 					vec3 toward = normalize(vec3(cos(t * 0.17), 0.55 * sin(t * 0.11), sin(t * 0.17)));
 					float drift = pow(max(dot(direction, toward), 0.0), 4.0);
 
-					vec3 view = normalize(cameraPosition - vWorld);
+					vec3 view = normalize(eye - vWorld);
 					float facing = abs(dot(normalize(vNormal), view));
 					float rim = pow(1.0 - facing, 3.0);
 
 					float near = gl_FrontFacing ? 1.0 : 0.3;
-					float lit = 0.07 + 0.7 * drift + 0.85 * sweep;
-					vec3 color = tint * (grid * lit + rim * (0.18 + 0.35 * drift) + sweep * 0.035);
-					color += vec3(0.35) * grid * sweep * sweep;
+					// The sweep and the drift are a hint of where the border is, so neither reaches a glow
+					// bright enough to read as a surface.
+					float lit = 0.05 + 0.4 * drift + 0.45 * sweep;
+					vec3 color = tint * (lattice * lit + rim * (0.08 + 0.16 * drift) + sweep * 0.012);
+					color += vec3(0.1) * lattice * sweep * sweep;
 					gl_FragColor = vec4(color * near * fade, 1.0);
 				}
 			`,
 		},
 		{
 			attributes: ["position", "normal"],
-			uniforms: ["world", "worldViewProjection", "cameraPosition", "tint", "time", "fade", "seed", "pixelRatio"],
+			uniforms: ["world", "worldViewProjection", "eye", "tint", "time", "fade", "seed", "pixelRatio"],
 			needAlphaBlending: true,
 		}
 	);
+	// The scene is drawn around the camera, and `world` arrives shifted with it. The eye has to be shifted to match.
+	material.onBindObservable.add(() => {
+		const effect = material.getEffect();
+		if (effect) {
+			scene.bindEyePosition(effect, "eye", true);
+		}
+	});
 	material.setColor3("tint", color);
 	material.setFloat("seed", seed);
 	material.setFloat("fade", 0);
@@ -1966,7 +2459,7 @@ function buildZone(scene: Scene, name: string, view: DemoView, radius: number, c
 	shell.material = material;
 	shell.isPickable = false;
 	shell.setEnabled(false);
-	return { view, shell, material, fade: 0 };
+	return { view, shell, material, fade: 0, radius };
 }
 
 /**
@@ -2040,7 +2533,25 @@ type SpinningBase = {
 	radius: number;
 };
 
-function buildHabitats(scene: Scene, bodies: PlanetBody[]): SpinningBase[] {
+/** A craft circling a body. A click opens that body's inner orbit and the camera rides with this craft. */
+type Craft = {
+	id: string;
+	host: string;
+	view: DemoView;
+	kind: Exclude<ScanKind, "star" | "planet" | "moon"> | "ship";
+	owner?: SatelliteOwner;
+	/** Half the craft's longest side, in world units, for the pointer. */
+	reach: number;
+	/** Radius of a screen-space marker in CSS pixels. Used instead of `reach` while that marker is drawn. */
+	marker?: () => number | null;
+	/** Radians per second the craft advances around its host. */
+	rate: number;
+	/** Azimuth around the host, in the same convention as the camera's alpha. */
+	angle: () => number;
+	position: (out: Vector3) => Vector3;
+};
+
+function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[]): SpinningBase[] {
 	const materials = factionMaterials(scene);
 	const spinning: SpinningBase[] = [];
 	for (const body of bodies) {
@@ -2051,10 +2562,22 @@ function buildHabitats(scene: Scene, bodies: PlanetBody[]): SpinningBase[] {
 			homes: body.spec.name !== "earth",
 			ringInnerScale: body.spec.name === "saturn" ? SATURN_RING_INNER_SCALE : undefined,
 		});
-		addBaseSlots(scene, body.anchor, placed.warehouses, materials, `${body.spec.name}-warehouse`, spinning);
-		addBaseSlots(scene, body.anchor, placed.stations, materials, `${body.spec.name}-station`, spinning);
+		const inner = planetOrbitView(body.spec.name, "inner");
+		addBaseSlots(scene, body.anchor, placed.warehouses, materials, `${body.spec.name}-warehouse`, spinning, crafts, body.spec.name, inner, "home");
+		addBaseSlots(scene, body.anchor, placed.stations, materials, `${body.spec.name}-station`, spinning, crafts, body.spec.name, inner, "station");
 		for (const moon of body.moons) {
-			addBaseSlots(scene, moon.baseAnchor, moonBases(moon.radius * 2), materials, `${moon.mesh.name}-base`, spinning);
+			addBaseSlots(
+				scene,
+				moon.baseAnchor,
+				moonBases(moon.radius * 2),
+				materials,
+				`${moon.mesh.name}-base`,
+				spinning,
+				crafts,
+				moon.mesh.name,
+				moonView(body.spec.name, moon.mesh.name, "inner"),
+				"home"
+			);
 		}
 	}
 	return spinning;
@@ -2079,7 +2602,11 @@ function addBaseSlots(
 	slots: BaseSlot[],
 	materials: Record<Faction, StandardMaterial>,
 	name: string,
-	spinning: SpinningBase[]
+	spinning: SpinningBase[],
+	crafts: Craft[],
+	host: string,
+	view: DemoView,
+	kind: "home" | "station"
 ): void {
 	slots.forEach((slot, index) => {
 		const mesh = MeshBuilder.CreateBox(`${name}-${slot.faction}-${index}`, slot.size, scene);
@@ -2088,17 +2615,20 @@ function addBaseSlots(
 		mesh.isPickable = false;
 		mesh.position.set(Math.cos(slot.angle) * slot.radius, 0, Math.sin(slot.angle) * slot.radius);
 		mesh.rotation.y = -slot.angle;
-		spinning.push({ mesh, angle: slot.angle, radius: slot.radius });
+		const craft: SpinningBase = { mesh, angle: slot.angle, radius: slot.radius };
+		spinning.push(craft);
+		crafts.push({
+			id: mesh.name,
+			host,
+			view,
+			kind,
+			owner: slot.faction,
+			reach: Math.max(slot.size.width, slot.size.depth) / 2,
+			rate: BASE_SPIN * ORBIT_PACE,
+			angle: () => craft.angle,
+			position: (out) => out.copyFrom(mesh.getAbsolutePosition()),
+		});
 	});
-}
-
-function buildShip(scene: Scene): Mesh {
-	const material = new StandardMaterial("player-ship", scene);
-	material.emissiveColor = new Color3(1, 0.82, 0.35);
-	material.diffuseColor = new Color3(1, 0.82, 0.35);
-	const ship = MeshBuilder.CreateBox("player-ship", { width: 0.2, height: 0.06, depth: 0.36 }, scene);
-	ship.material = material;
-	return ship;
 }
 
 type SatelliteOrbit = {
@@ -2113,7 +2643,10 @@ type SatelliteOrbit = {
  * Every satellite of one owner is a thin instance of a single box, so hundreds cost three draw calls.
  * Their matrices are rewritten each frame as they orbit.
  */
-function buildSatelliteSwarm(scene: Scene): { update: (deltaSeconds: number) => void; docks: Dock[] } {
+function buildSatelliteSwarm(
+	scene: Scene,
+	crafts: Craft[]
+): { update: (deltaSeconds: number) => void; docks: Dock[]; dockById: Map<string, Dock> } {
 	const random = seededRandom(7);
 	const owners = Object.keys(SATELLITE_LOOK) as SatelliteOwner[];
 	const groups = owners.map((owner) => {
@@ -2143,6 +2676,24 @@ function buildSatelliteSwarm(scene: Scene): { update: (deltaSeconds: number) => 
 
 		const matrices = new Float32Array(count * 16);
 		mesh.thinInstanceSetBuffer("matrix", matrices, 16, false);
+		orbits.forEach((orbit, index) => {
+			crafts.push({
+				id: `${mesh.name}-${index}`,
+				host: "sun",
+				view: "sun-inner",
+				kind: "collector",
+				owner,
+				reach: Math.max(SATELLITE_SIZE.width, SATELLITE_SIZE.depth) / 2,
+				rate: orbit.speed * ORBIT_PACE,
+				angle: () => orbit.angle,
+				position: (out) =>
+					out.set(
+						Math.cos(orbit.angle) * orbit.radius,
+						Math.sin(orbit.angle + orbit.phase) * orbit.radius * orbit.tilt,
+						Math.sin(orbit.angle) * orbit.radius
+					),
+			});
+		});
 		return { mesh, orbits, matrices };
 	});
 
@@ -2172,10 +2723,16 @@ function buildSatelliteSwarm(scene: Scene): { update: (deltaSeconds: number) => 
 	};
 
 	update(0);
-	const docks = groups.flatMap((group) =>
-		group.orbits.map((orbit): Dock => ({ position: () => place(orbit, new Vector3()), rate: orbit.speed * ORBIT_PACE }))
-	);
-	return { update, docks };
+	const dockById = new Map<string, Dock>();
+	for (const group of groups) {
+		group.orbits.forEach((orbit, index) => {
+			dockById.set(`${group.mesh.name}-${index}`, {
+				position: () => place(orbit, new Vector3()),
+				rate: orbit.speed * ORBIT_PACE,
+			});
+		});
+	}
+	return { update, docks: [...dockById.values()], dockById };
 }
 
 function seededRandom(seed: number): () => number {

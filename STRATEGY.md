@@ -12,7 +12,8 @@ The server owns the ships, the burns, and the fights. The client shows the place
 
 This version runs on AWS serverless. The rules stay in TypeScript, shared with the client, and run inside Lambda.
 
-- **Lambda** takes commands, serves a place, and resolves a due event.
+- **Lambda** takes commands, serves a place, and resolves a due event. It is unlikely to be the game's clock. An invocation does not keep time between calls.
+- **Server clock.** The game needs a durable clock that travel, mining, siphoning, repair, and the market can read while the player is away. It may not exist yet. EventBridge can fire a moment that is already due. It does not keep that clock.
 - **EventBridge Scheduler** holds one-time schedules for arrivals and the other moments that must resolve with nobody watching. A recall deletes the schedule. A resolver is safe to run twice, because a schedule can fire again.
 - **DynamoDB** stores the world: ships, orders, and places. A fight writes both ships in one transaction.
 - **ElastiCache Serverless** caches a place snapshot so many open clients read one copy.
@@ -31,7 +32,7 @@ The game is larger than one view. Only the place on screen is held on the device
 
 ## Scale
 
-Another body, station, or system is another place that can be loaded on its own. It does not have to sit in memory beside the one on screen. The setting remains the one solar system in the brief until the brief says otherwise.
+Another body, station, or system is another place that can be loaded on its own. It does not have to sit in memory beside the one on screen. Play still loads Sol. The brief allows a wormhole departure to another system. That system is another load when it can be entered. It cannot be entered yet.
 
 ## Success
 

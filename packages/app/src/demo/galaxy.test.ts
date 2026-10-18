@@ -10,6 +10,8 @@ import {
 	SOL_POSITION,
 	neighborPosition,
 	spiralPhase,
+	systemCard,
+	systemCardAction,
 } from "./galaxy";
 import { placeLabels, type LabelAnchor } from "./labels";
 
@@ -101,6 +103,18 @@ const outward = SOL_POSITION.scale(1.2);
 const inward = SOL_POSITION.scale(1 / 1.2);
 expect(arms(outward.x, outward.z) > 0.9, "the Perseus arm, a major arm, lies just outside Sol");
 expect(arms(inward.x, inward.z) < -0.9, "the Sagittarius arm, a minor arm, lies just inside Sol");
+
+const solCard = systemCard(SOL_ID);
+expect(solCard?.charted === true && solCard.text.length > 0, "Sol has a charted card");
+const solAction = solCard ? systemCardAction(solCard) : null;
+expect(solAction?.label === "Enter System" && solAction.enabled === true, "Sol's card can enter the system");
+for (const neighbor of NEIGHBORS) {
+	const card = systemCard(neighbor.id);
+	const action = card ? systemCardAction(card) : null;
+	expect(card?.charted === false && (card?.text.length ?? 0) > 0, `${neighbor.label} has an uncharted card`);
+	expect(action?.label === "Uncharted Space" && action.enabled === false, `${neighbor.label} cannot be entered`);
+}
+expect(systemCard("missing") === null, "an unknown id has no card");
 
 if (failures.length > 0) {
 	for (const failure of failures) {

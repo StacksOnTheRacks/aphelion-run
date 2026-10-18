@@ -119,14 +119,44 @@ export function pointAt(route: Route, distance: number): Vector3 {
 	return Vector3.Lerp(route.points[index], route.points[index + 1], Math.min(1, Math.max(0, local)));
 }
 
-/** Unit direction of travel, `distance` along the course. */
+/**
+ * Unit direction of travel, `distance` along the course. Arcs are runs of short straight segments, so
+ * the heading turns across each corner instead of snapping there: from halfway along the shorter
+ * neighbor before the corner to halfway along it after. A long straight beside a corner only bends at its end.
+ */
 export function headingAt(route: Route, distance: number): Vector3 {
 	const index = segmentAt(route, distance);
+	const along = clampDistance(route, distance);
+	const here = segmentDirection(route, index);
+	const start = route.cumulative[index];
+	const end = route.cumulative[index + 1];
+	if (index > 0) {
+		const half = Math.min(end - start, start - route.cumulative[index - 1]) / 2;
+		if (half > 1e-9 && along < start + half) {
+			return turnBetween(segmentDirection(route, index - 1), here, 0.5 + (along - start) / (2 * half));
+		}
+	}
+	if (index < route.kinds.length - 1) {
+		const half = Math.min(end - start, route.cumulative[index + 2] - end) / 2;
+		if (half > 1e-9 && along > end - half) {
+			return turnBetween(here, segmentDirection(route, index + 1), (along - end + half) / (2 * half));
+		}
+	}
+	return here;
+}
+
+function segmentDirection(route: Route, index: number): Vector3 {
 	const direction = route.points[index + 1].subtract(route.points[index]);
 	if (direction.lengthSquared() < 1e-12) {
 		return new Vector3(1, 0, 0);
 	}
 	return direction.normalize();
+}
+
+/** `from` turned toward `to` by `share`, kept a unit vector. A full reversal does not blend and takes `to`. */
+function turnBetween(from: Vector3, to: Vector3, share: number): Vector3 {
+	const blended = Vector3.Lerp(from, to, Math.min(1, Math.max(0, share)));
+	return blended.lengthSquared() < 1e-12 ? to.clone() : blended.normalize();
 }
 
 /** Index of the segment that holds `distance`. */

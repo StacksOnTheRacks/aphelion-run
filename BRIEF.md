@@ -4,51 +4,66 @@ Product brief. This is the current description of the game. How this version is 
 
 ## 1. Executive summary
 
-- **Logline:** A cross-platform, asynchronous space strategy game where players navigate a live, moving solar system to contest a dwindling network of solar harvesting satellites — either to secure corporate profits or deliver a stolen lifeline to Earth's slums.
+- **Logline:** A cross-platform, asynchronous space strategy game where a human in space flies one ship through a live solar system, siphons solar satellites, mines the worlds, sells energy for Solscrip on Earth's black market, and can be attacked in outer orbit.
 - **Genre:** Asynchronous space strategy, with economy and fleet management.
 - **Platform:** The same game on a wide PC screen and a tall phone screen.
-- **Setting:** 700 years in the future, after the 3rd world war. Humanity has not left the solar system. Bases orbit its planets and moons.
+- **Setting:** Far in the future. How far is not set. The player lives in space.
 
-## 2. World and factions
+## 2. World
 
-Seven hundred years from now, what remains of humanity after the 3rd world war is split between two classes that share a sky and nothing else. The wealthy live in city-size domes of luxury and pay the legal market price. They run energy-based economies inside those domes. The Ashlands are the slums outside: polluted, forgotten, and full of people. Medical bays and factories there run on the same energy as the domes. Advanced energy has raised the technology. It has not changed the greed or the need for control. Energy is the lifeblood.
+The time is far ahead. How far is not set. The player is a human who lives in space and starts with one ship. The ship mines, and it fights.
 
-Humanity can cross a distance near the speed of light, and it can store more energy than ever before. It is pre-stellar, not yet interstellar. It has not left the solar system. It has populated bases in orbit around the bodies there. The Sun's inner orbit is not one of those homes. Satellites hang there and fill until a pilot drains one. That harvest is the inter-planetary energy business. A full ship is taken in the outer orbit.
+Satellites hang in the inner orbit of a system's sun and store solar energy. One galaxy-wide company owns them. The company is not named. Siphoning a satellite is theft, as that company sees it. Energy is spent to travel. It is sold for Solscrip on the black market. Minerals and energy share one cargo unit. One of either takes one space in the hold. Solscrip takes none. A full hold is what makes a ship heavy. This brief sets no amounts.
 
-Sol Systems will not pay for a ship while pirates exist, and it will not defend one. It does provide the blueprints. Every pilot in both factions is an independent contractor, risking their own capital and their own life.
-
-- **Sol Systems:** The mega-corporation that controls the energy trade on Earth and the placement of solar satellites. It owns the satellites in the Sun's inner orbit, and the legal right to the harvest and the harvesting technology. Contractors build their own ships and weapons, and they must use Sol's blueprints. A contractor flies to keep living in the domes. The pilot who brings the energy in is the one who gets paid.
-- **Ashland Marauders:** Pirates, rogue pilots, and outcasts who are not licensed to fly for Sol Systems. They are not legally permitted to mine a Sol satellite, and they do it anyway. Stolen energy is sold on the black market to the Ashlands. Legal energy is sold to the domes. A Marauder flies to keep living in the Ashlands. Their ships are built from the same materials as a contractor's, and not from the same designs. Marauders are engineers, and they have invented their own weapons and defenses.
+Each system has one planet that sells energy and yields nothing else. In Sol, that planet is Earth. Play stays in Sol. Other systems cannot be entered yet.
 
 ## 3. Core gameplay loop
 
-The game is played entirely in space. Each player has one home base. Ships are built and improved at that base, and a pilot can build another. The home base orbits a planet or a moon. It cannot orbit Earth or the Sun. The Sun has harvesting satellites and no bases. Sol does not permit pilot bases in Earth's orbit. Earth's satellites are trading stations.
+The game is played entirely in space. Each player has one home base and starts with one ship. Another ship is bought with Solscrip at Earth's black market. Minerals are not the way a new hull is obtained. Ships are improved and repaired at the home base, and only there. The home base orbits a planet or a moon. It cannot orbit Earth or the Sun. The Sun has harvesting satellites and no bases. Earth's satellite is the black market.
 
-The ship runs three routes. It fills at the Sun and unloads into the home warehouse. It hauls energy from that warehouse to an Earth station and brings the cash home to the bank. It mines at a body, including the home body, and hauls those materials home. Every one of those burns is paid in energy taken from the home warehouse, so a pilot who wants materials still has to keep going to the Sun.
+The ship runs three routes. It fills at the Sun and unloads into the home warehouse. It hauls energy from that warehouse to Earth's black market and brings the Solscrip home to the bank. It mines at a body, including the home body, and hauls those minerals home. Every one of those burns is paid in energy taken from the home warehouse, so a pilot who wants minerals still has to keep going to the Sun.
 
 Home → Sun → home warehouse. Home warehouse → Earth station → home bank. Home → a body, to mine → home warehouse.
 
-A surplus of energy is worth more as cash when that pilot's price on Earth is high. Materials are not bought with that cash. A pilot mines them at the body, and the load still has to be flown home. The energy spent flying it is gone.
+A surplus of energy can be sold for Solscrip. Minerals are not bought with that Solscrip. A pilot mines them at the body, and the load still has to be flown home. The energy spent flying it is gone.
+
+### Ships
+
+The classes are Miner, Warship, Explorer, and Hauler. Each class has five variants. The variants are siblings: different numbers, close to the others in that class. The names are not locked here.
+
+Each variant is read on five axes, and on hull strength apart from the weapons. This brief sets no numbers.
+
+- Storage capacity
+- Siphon speed
+- Weapon strength
+- Speed, adjusted by weight
+- Energy burn rate
+
+Weighted strength is the hull's starting strength, plus what leveling the ship adds, plus the strength of the weapons, minus the weight of the cargo.
+
+A ship carries one siphon, one thruster, one drill, and one cloak. Any of those can be replaced with a newer part. The new part does not keep the old part's levels. Each part can be upgraded to level 10.
 
 ### Home base
 
-The home base is the energy warehouse, the repair bay, the bank, and the space dock. Ships are improved there, and built there, and only there. It can orbit any planet or moon except Earth. It cannot orbit the Sun.
+The home base is the energy warehouse, the repair bay, the bank, and the space dock. Ships are improved there, and repaired there, and only there. It can orbit any planet or moon except Earth. It cannot orbit the Sun.
 
-Energy hauled from the Sun can be stored in the warehouse and spent on later trips. The pilot does not have to sell on Earth after every harvest. When the warehouse is full, the energy has to be sold at an Earth market to make room for more. Water is stored apart from that energy. A full energy store does not block a water unload.
+Energy hauled from the Sun can be stored in the warehouse and spent on later trips. The pilot does not have to sell on Earth after every harvest. When the warehouse is full, the energy has to be sold at Earth's black market to make room for more. Water is stored apart from that energy. A full energy store does not block a water unload.
 
 A gravity boom on the base works the pull along its length as the base orbits, and feeds a slow stream of energy into the warehouse. Every home gets the same rate, so where the home sits does not change it. The stream can cover a departure if the pilot waits. It does not replace a haul from the Sun.
 
-A base does not receive materials on its own. The pilot mines the home world's yield the same as any other world's. The Sun and Earth are the only exceptions, and neither can hold a pilot base. The Sun is where energy is mined. Earth is where energy is sold. The giant planets are mined from orbit, and their gravity still makes a close pass cheaper when they sit in the right part of their orbit.
+Base equipment is static. A piece is built, then upgraded, and it is not swapped for a different piece. The pieces are the gravity boom, the warehouse, the repair bay, the dock, and the water store. Each can be upgraded to level 100. The base itself advances only when every piece has reached the same step of ten. Base level 2 requires every piece at level 10. Base level 3 requires every piece at level 20. That continues until every piece is at level 100.
 
-No faction owns a material. Two pilots of either faction can base on the same body. Each mines it. Neither is given it.
+A base does not receive minerals on its own. The pilot mines the home world's yield the same as any other world's. The Sun and Earth are the only exceptions, and neither can hold a pilot base. The Sun is where energy is mined. Earth is where energy is sold. The giant planets are mined from orbit, and their gravity still makes a close pass cheaper when they sit in the right part of their orbit.
+
+Two pilots can base on the same body. Each mines it. Neither is given it.
 
 Where the home sits is a choice about distance, and that location is the home's only advantage. A direct burn costs less stored energy between closer orbits, so Mercury is the cheap hop to the Sun and the Moon is the cheap hop to Earth's market. The Moon is not a combat zone. Venus sits between them. A base from Mars outward pays more for the same direct burn. The inner bases stay ahead on a direct burn. They still mine their own world's yield. It is not given to them. The planet that can bend the course this month is what makes a given trip affordable, and that planet changes as the orbits move.
 
-### Materials
+### Minerals
 
-A world is a planet and its moons. They share one yield. A pilot mines that yield at the planet or at any of its moons and gets the same materials either way.
+A world is a planet and its moons. They share one yield. A pilot mines that yield at the planet or at any of its moons and gets the same minerals either way.
 
-The materials are hydrogen, ore, nitrogen, carbon, and water. Ships are built and improved from hydrogen, ore, nitrogen, and carbon. Water is consumed. The same material is the same wherever it is mined. This brief sets no amounts.
+The minerals are hydrogen, ore, nitrogen, carbon, and water. Ships are improved and repaired from hydrogen, ore, nitrogen, and carbon. Water is consumed. The same mineral is the same wherever it is mined. This brief sets no amounts.
 
 - **Mercury** yields ore and water.
 - **Venus** yields ore, nitrogen, and carbon.
@@ -64,11 +79,11 @@ The home base drinks water at one rate, whether or not the pilot is online. The 
 
 ### Mining
 
-A pilot mines a yield at the body that offers it. The ship goes there. Materials are not bought, and they are not traded. The Earth station pays cash for energy. It does not sell materials.
+A pilot mines a yield at the body that offers it. The ship goes there. Minerals are not bought, and they are not traded. The Earth station pays Solscrip for energy. It does not sell minerals.
 
-Materials go aboard the ship. They have weight. A body does not hand over energy. A ship is not loaded past what it can lift home on the wide path today, so it can always leave. If the return grows more expensive after the load, the ship waits in the outer orbit until the alignment cheapens it. A wait there can be attacked, unless the ship is cloaked. The Moon is not a combat zone.
+Minerals go aboard the ship. They have weight. A body does not hand over energy. A ship is not loaded past what it can lift home on the wide path today, so it can always leave. If the return grows more expensive after the load, the ship waits in the outer orbit until the alignment cheapens it. A wait there can be attacked, unless the ship is cloaked. The Moon is not a combat zone.
 
-Cash comes from energy sold at Earth, or from cash taken off a beaten ship. It is banked at home. It does not buy materials. Banked cash can be spent to finish an improvement sooner. It does not supply a missing material, and it does not shorten a repair.
+Solscrip comes from energy sold at Earth, or from Solscrip taken off a beaten ship. It is banked at home. It does not buy minerals. Banked Solscrip can be spent to finish an improvement sooner. It does not supply a missing mineral, and it does not shorten a repair. It can buy another ship at the black market.
 
 ### Launch and orbital alignment
 
@@ -76,34 +91,39 @@ The board is a top-down map of the solar system. Planets orbit the Sun at realis
 
 - The player reads the current alignment and plots a trajectory.
 - Once a ship is sent, it moves along that line on the map.
+- Before a departure, the player always sees what the trip costs and what the return costs.
 
 ### Delta-v
 
-Delta-v is the change in speed a route demands. The ship pays it by burning stored energy. That energy is the same store it hauls and sells, so a burn spends cargo.
+Delta-v is the change in speed a route demands. The ship pays it by burning stored energy. That energy is the same store it hauls and sells, so a burn spends cargo. One energy takes one space in the hold, the same as one mineral.
 
-These runs are orbital transfers. The planets already move at tens of kilometers per second, and a contractor's burn is a change on that order. Spending the cargo to cross the system near the speed of light would burn the profit, so these haulers do not fly that way.
+These runs are orbital transfers. The planets already move at tens of kilometers per second. Within the inner orbit the ship moves on a slow impulse rocket. Once the path out of that orbit is done, a photon rocket carries the ship between bodies. Alignment and a gravity assist still change what that burn costs.
 
 A ship cannot depart unless the energy aboard covers the route it is about to fly. The cost depends on the orbit it is in, the orbit it is going to, how much energy it is carrying, and whether a planet on the path can bend the course. The cost of a direct transfer is set by the two orbits, which is why an inner base stays cheaper. Where the planets sit decides whether that direct path is open today, and whether a third body can cheapen it.
 
-Cash has no weight. The drive still needs energy to leave. The Earth station buys only the surplus above the burn home. A ship that arrives with nothing above that reserve can leave, and it has nothing to sell.
+Solscrip has no weight. The drive still needs energy to leave. The Earth station buys only the surplus above the burn home. A ship that arrives with nothing above that reserve can leave, and it has nothing to sell.
 
 - **Stuck:** Below the reserve, the ship stays in its current orbit. At the Sun, if the satellite still holds energy, the ship keeps siphoning until it can leave. If the satellite is empty, the ship undocks to the outer orbit and can be attacked until the alignment makes the departure cheap enough. At home, the ship waits until the warehouse can cover the departure, or until the alignment makes it cheaper. At a body, the ship was not loaded past what it can lift, and it waits out a bad alignment in the outer orbit.
-- **Heavier costs more:** The same change in speed takes more energy when the ship is carrying more energy or more materials. Past a point the cargo is so heavy that what is left cannot buy the trip. Siphoning stops before that point even if the satellite still holds energy. That is why a drained satellite is not always a full ship.
+- **Heavier costs more:** The same change in speed takes more energy when the ship is carrying more energy or more minerals. Past a point the cargo is so heavy that what is left cannot buy the trip. Siphoning stops before that point even if the satellite still holds energy. That is why a drained satellite is not always a full ship.
 - **Assist:** A gravity assist is the efficient burn. The ship is already moving at orbital speed, and a close pass lets a planet's gravity change that speed, so the engines spend less stored energy to reach the next orbit. Any planet can be that pass. It works only when the planet is in the part of its orbit that bends the ship toward the destination. A course can use more than one planet. Venus and the other inner planets bend courses toward the Sun and across the inner system. Jupiter, Saturn, Uranus, and Neptune bend courses outward, including the course in to that planet's own moons. A pilot bound the other way uses the same pass. A close pass in the wrong month saves nothing. A wide path stays clear of the planet, spends the full reserve, and leaves the hull alone. A close path on a good alignment spends less energy, arrives sooner, and wears the shields and hull down.
-- **Recall:** A defeated ship is still sent home to the repair bay. The victor takes the energy and the cash that were aboard. The recall does not deliver a cargo.
+- **Recall:** A defeated ship is still sent home to the repair bay. The victor takes the energy and the Solscrip that were aboard. The recall does not deliver a cargo.
+
+Each system has a wormhole at its edge. A ship leaving for another system travels to that wormhole and arrives at the wormhole of the target system. Other systems cannot be entered yet. What that hop costs is not set.
 
 ### Outer orbit and inner orbit
 
 Every body has the same two orbits. A moon's outer orbit is its own battle surface, not the planet's.
 
-- **Outer orbit:** The battle surface. A ship sitting here can be attacked. A ship burning between bodies cannot. From here the player can scan the inner orbit.
-- **Inner orbit:** The work. Mining, docking, and siphoning happen here. The fight is not fought here.
+- **Outer orbit:** The battle surface. A ship sitting here can be attacked. A ship on a photon burn between bodies cannot. From here the player can scan the inner orbit.
+- **Inner orbit:** The work. Mining, docking, and siphoning happen here. The fight is not fought here. Travel inside it is the slow impulse rocket.
 
-Travel between bodies is a fast burn from outer orbit to outer orbit. Moving between the inner orbit and the outer orbit is slow.
+Travel between bodies is a photon burn from outer orbit to outer orbit. Moving between the inner orbit and the outer orbit is the slow impulse.
 
-A mine that runs empty undocks the ship to the outer orbit. If the ship was sent home, it leaves from there. If it was not, it stays in the outer orbit with the cargo, and it can be attacked. Undocking before the mine is empty does the same: the ship comes out with whatever it has.
+A ship in an outer orbit can challenge a ship that is mining that body, or a ship sitting idle in that outer orbit. The challenge pulls a mining ship out to the outer orbit, and the work pauses. If the ship wins, it goes back and continues. If it loses, it goes home to the repair bay.
 
-A ship on a mine can still be attacked. It comes out to the outer orbit for the fight, and the mine pauses. If the ship wins, it goes back and continues. If it loses, it goes home to the repair bay. A siphon and a station transfer work the same way.
+A mine that runs empty undocks the ship to the outer orbit. If the ship was sent home, it leaves from there. If it was not, it stays in the outer orbit with the cargo, and it can be attacked. Undocking before the mine is empty does the same: the ship comes out with whatever it has. A finished sale at Earth does the same: the ship undocks into the outer orbit and can be attacked.
+
+A siphon works the same way as a mine. An attack pulls the ship out to the outer orbit, and the siphon pauses. If the ship wins, it goes back and continues. If it loses, it goes home.
 
 The Moon is the exception: it is not a combat zone.
 
@@ -111,18 +131,18 @@ A cloak is the only defense. While a ship is away from base, a cloak makes it co
 
 ### The Earth sale
 
-Earth has no mineable resources and no pilot bases. Its satellites are trading stations. The outer orbit is where a ship can be attacked. The inner orbit holds the faction stations. A player sells only at their own faction's station. The transfer takes time. An attack pulls the ship out to the outer orbit. If the ship wins, it goes back and the transfer continues. If it loses before the transfer finishes, the cargo is still energy, and the victor takes it. When the transfer finishes, the station pays cash onto the ship for the surplus above the burn home and undocks it into the outer orbit. The station does not store energy, and it does not bank cash.
+Earth has no mineable resources and no pilot bases. Its satellite is the black market. The outer orbit is where a ship can be attacked. The inner orbit holds the station. The transfer takes time. An attack pulls the ship out to the outer orbit. If the ship wins, it goes back and the transfer continues. If it loses before the transfer finishes, the cargo is still energy, and the victor takes it. When the transfer finishes, the station pays Solscrip onto the ship for the surplus above the burn home and undocks it into the outer orbit. The station does not store energy, and it does not bank Solscrip.
 
-That cash stays on the ship until the ship reaches its home base and banks it. Until then, the other faction can take it wherever an attack is allowed: the outer orbit of a planet or moon, and not the Moon. A defeat sends the loser home to repair and gives the victor whatever unbanked cash or energy was aboard. Stolen cash is not banked either. The thief has to carry it to their own home. The Moon is the cheap hop to Earth's market, and it is not a combat zone, which is why a pilot who means to stay near the market lives there.
+That Solscrip stays on the ship until the ship reaches its home base and banks it. Until then, another pilot can take it wherever an attack is allowed: the outer orbit of a planet or moon, and not the Moon. A defeat sends the loser home to repair and gives the victor whatever unbanked Solscrip or energy was aboard. Stolen Solscrip is not banked either. The thief has to carry it to their own home. The Moon is the cheap hop to Earth's market, and it is not a combat zone, which is why a pilot who means to stay near the market lives there.
 
 ### Satellites
 
-Each satellite holds a finite pool of solar energy. When it is drained, it must recharge from the Sun, and players move on to another.
+Each satellite holds a finite pool of solar energy, counted in the same cargo units as a mineral. The satellites belong to one galaxy-wide company. The company is not named. Siphoning one is theft, as that company sees it. When a satellite is drained, it must recharge from the Sun, and players move on to another.
 
 Ships fight with their stats. The player does not steer the shots. A battle can finish while the player is away.
 
-- **Harvest:** Dock at an empty or allied satellite and siphon until it is empty, or until another load would drop the ship under the reserve for today's departure. When the siphon stops, the ship undocks to the outer orbit with its haul. A departure plotted from the terminal is flown from there. A ship with no departure plotted stays in the outer orbit and can be attacked. An attack during the siphon pulls the ship out to the outer orbit, and the siphon pauses. If the ship wins, it goes back and continues. If it loses, it goes home. Undocking early brings the ship out with whatever it has.
-- **Attack:** The fight is in the outer orbit, including a ship pulled out from a mine, a collector, or a station. If the attacker wins, they take the energy and the cash that were aboard, plus scrap from the wreck. The defender is sent home to the repair bay. The recall does not deliver a cargo.
+- **Harvest:** Dock at a collector and siphon until it is empty, or until another load would drop the ship under the reserve for today's departure. When the siphon stops, the ship undocks to the outer orbit with its haul. A departure plotted from the terminal is flown from there. A ship with no departure plotted stays in the outer orbit and can be attacked. An attack during the siphon pulls the ship out to the outer orbit, and the siphon pauses. If the ship wins, it goes back and continues. If it loses, it goes home. Undocking early brings the ship out with whatever it has.
+- **Attack:** The fight is in the outer orbit, including a ship pulled out from a mine, a collector, or the station. A ship in that outer orbit can challenge a ship that is mining, or a ship sitting idle there after a mine runs empty or a sale finishes. A ship on a photon burn cannot be attacked. If the attacker wins, they take the energy and the Solscrip that were aboard, plus scrap from the wreck. The defender is sent home to the repair bay. The recall does not deliver a cargo.
 
 ## 4. Payload penalty
 
@@ -130,43 +150,44 @@ Combat power falls as cargo weight rises, so a full hauler is weaker than an emp
 
 Active combat power = hull strength + component bonuses + crew skills − payload weight.
 
-Energy has weight. Materials have weight. Cash does not. The same weight raises the energy a burn consumes.
+Energy and minerals take the same space and the same weight, one cargo unit each. Solscrip does not. More units aboard raise the energy a burn consumes. Speed is adjusted by that weight.
 
-- **Light:** A ship carrying little saleable energy, and few materials, is fast and fires quickly. The run out to the Sun, and the run home from Earth with cash, are light. The drive still keeps a reserve for the burn. With an empty tank, the ship cannot depart. The cash ship fights at full strength, and it is carrying the whole payout.
-- **Heavy:** Siphoned energy makes the ship heavy. So does a hold full of materials. It turns slowly and its guns cycle slowly, on the way home to the warehouse, on the way to an Earth station, and on the way home from a mine. The player has to leave the Sun while the leftover energy can still pay for the trip.
+- **Light:** A ship carrying little saleable energy, and few minerals, is fast and fires quickly. The run out to the Sun, and the run home from Earth with Solscrip, are light. The drive still keeps a reserve for the burn. With an empty tank, the ship cannot depart. The Solscrip ship fights at full strength, and it is carrying the whole payout.
+- **Heavy:** Siphoned energy makes the ship heavy. So does a hold full of minerals. It turns slowly and its guns cycle slowly, on the way home to the warehouse, on the way to Earth's station, and on the way home from a mine. The player has to leave the Sun while the leftover energy can still pay for the trip.
 
 ## 5. Repair and recovery
 
 Ships are never permanently destroyed.
 
 - A defeated ship is sent back to the player's home base and locked in the repair bay. A home is never in Earth's orbit.
-- Repairs and improvements are made at the home bay. They spend the materials that part is built from. Each material, including what the home world offers, waits on what the ship has mined and brought back. Missing a material delays that work. It does not by itself keep the ship from flying.
-- Banked cash can be spent to finish an improvement sooner. It does not supply a missing material, and it does not shorten a repair.
+- Repairs and improvements are made at the home bay. They spend the minerals that part is built from. Each mineral, including what the home world offers, waits on what the ship has mined and brought back. Missing a mineral delays that work. It does not by itself keep the ship from flying.
+- Banked Solscrip can be spent to finish an improvement sooner. It does not supply a missing mineral, and it does not shorten a repair. Another ship is bought with Solscrip at the black market. Minerals do not buy that hull.
 - Repair time depends on the ship. A big cargo frigate takes longer than a light interceptor.
 - A damaged ship that won, or survived, can be sent home early to repair before the next run.
 
 ## 6. The market
 
-Only a completed transfer at an Earth station changes the price of energy on Earth. Energy sitting in a home warehouse does not.
+Earth is the black market in Sol. It is the one planet in this system that sells energy and yields nothing a ship can mine. Each other system has one such planet. Those systems cannot be entered yet.
 
-- A player sells at their own faction's station. Sol Systems deliveries move the legal price. Marauder deliveries move the black-market price.
-- If Sol Systems contractors deliver a flood of energy, the legal price drops and corporate payouts fall.
-- When the legal price drops, the domes buy up the surplus and the slums go without power. Black-market demand spikes.
-- Stolen energy then pays more, so more players run as Marauders. Legal supply falls, the legal price rises, and the cycle starts again.
-- A fight that steals energy before the transfer finishes is not a delivery, so it does not move the price.
-- The station pays cash onto the ship. That cash is banked only at the home base. Banked cash can finish an improvement sooner. It does not buy materials. Materials are mined at the body that yields them. Materials are not bought or sold at Earth. This brief sets no amounts.
-- Players hold energy in the home warehouse and sell when their side's price is high. That high price is the premium. Selling into a flood is how the premium disappears.
+Energy is sold at Earth's station for Solscrip. Solscrip is the currency. It is not cargo. This brief sets no prices. Whether a completed sale moves the price is not decided. Energy sitting in a home warehouse is not a sale.
+
+- The transfer takes time. An attack pulls the ship out to the outer orbit. If the ship wins, it goes back and the transfer continues. If it loses before the transfer finishes, the cargo is still energy, and the victor takes it. That theft is not a completed sale.
+- When the transfer finishes, the station pays Solscrip onto the ship for the surplus above the burn home and undocks the ship into the outer orbit. The ship can be attacked there. The station does not store energy, and it does not bank Solscrip.
+- That Solscrip is banked only at the home base. Until then another pilot can take it. Stolen Solscrip is not banked either. The thief has to carry it home.
+- Banked Solscrip can finish an improvement sooner, and it can buy another ship. It does not buy minerals. Minerals are mined at the body that yields them. Minerals are not bought or sold at Earth.
+- Players hold energy in the home warehouse and sell when they choose. When the warehouse is full, the energy has to be sold to make room.
 
 ## 7. Screens
 
 The phone and the PC play the same game. A tall layout and a wide layout are two arrangements of the same places. Flying, trading, repairing, plotting, and watching a fight are all available on both.
 
-A player is in one place at a time. The places are listed below. Which transitions release the current view and load the next one is not settled. [STRATEGY.md](STRATEGY.md) holds that rule.
+A player is in one place at a time. The places are listed below. How a player moves among the map surfaces, and which transitions release the current view and load the next one, is in [docs/surfaces.md](docs/surfaces.md). [STRATEGY.md](STRATEGY.md) holds the load rule.
 
-- **Galaxy:** The Milky Way from above, with Sol among fourteen real star systems within 12 light years. Systems known to have no star, like the brown dwarfs Luhman 16 and WISE 0855−0714, are left out. Only Sol can be entered. The others are real stars whose contents will be mostly invented.
-- **System:** The moving map. Orbits, homes, and the ships readable from here.
-- **Outer orbit:** Staging at a body. The scan inward. The approach.
-- **Inner orbit:** Collectors, stations, and ships close enough to fight or dock.
+- **Galaxy:** The Milky Way from above, with Sol among fourteen real star systems within 12 light years. Systems known to have no star, like the brown dwarfs Luhman 16 and WISE 0855−0714, are left out. Zoom in and zoom out are limited. A tap or a click on a system opens a popup. Only Sol can be entered. The others are real stars whose contents will be mostly invented. Each system has a wormhole at its edge. That hop is not a surface yet.
+- **System:** The whole system. A tap on a planet or the Sun opens that body's outer orbit.
+- **Planet outer orbit:** The planet and its moons. A tap on a moon opens that moon's outer orbit. This is the planet's battle surface.
+- **Moon outer orbit:** The same framing as a planet's outer orbit, for that moon. It is its own battle surface, not the planet's.
+- **Inner orbit:** The work. Mining, docking, and siphoning happen here, on a slow impulse rocket. The fight is not fought here. How a player gets here from an outer orbit is not settled, and zoom is not the way.
 - **Base:** The warehouse, the repair bay, the bank, and the dock.
-- **Terminal:** Flights, sell orders, repairs, and the next path, including the departure from a collector. It shows what that path costs in energy with today's alignment, whether the ship has enough aboard to depart, what the warehouse holds, and whether a load mined at the destination still leaves enough energy to come home.
+- **Terminal:** Flights, sell orders, repairs, and the next path, including the departure from a collector. It shows what that path costs with today's alignment, and what the return costs, whether the ship has enough aboard to depart, what the warehouse holds, and whether a load mined at the destination still leaves enough energy to come home.
 - **Battle:** The playback of a fight, so the player can see how the ship, the shields, and the crew performed.

@@ -5,27 +5,25 @@ import { STORY } from "../src/story-content";
 
 const text = STORY.flatMap((chapter) => [chapter.title, ...chapter.paragraphs]).join("\n");
 
-test("the story says why both factions fly the same route", () => {
-	assert.ok(text.includes("Sol Systems"));
-	assert.ok(text.includes("Ashland Marauders"));
-	assert.ok(text.includes("hydrogen"));
-	assert.ok(text.includes("ore"));
-	assert.ok(text.includes("nitrogen"));
-	assert.ok(text.includes("carbon"));
-	assert.ok(text.includes("water"));
-	assert.ok(text.includes("The Sun is where energy is mined."));
-	assert.ok(text.includes("Earth is where energy is sold."));
-	assert.ok(text.includes("Ships are never destroyed."));
-	assert.match(text, /same materials/);
-	assert.match(text, /not from the same design/);
-	assert.match(text, /must use Sol's blueprints/);
-	assert.match(text, /share one yield/);
-	assert.match(text, /Water is consumed/);
-	assert.equal(text.includes("hydrogen metal"), false);
-	assert.match(text, /besides Earth or the Sun/);
-	assert.match(text, /The only defense is a cloak/);
-	assert.equal(text.includes("jury-rigged"), false);
-	assert.equal(text.includes("Earth's orbit, the ship comes back"), false);
+test("the story is the short setting", () => {
+	assert.match(text, /human who lives in space/);
+	assert.match(text, /starts with one ship/);
+	assert.ok(text.includes("Solscrip"));
+	assert.ok(text.includes("one space in the hold"));
+	assert.ok(text.includes("black market"));
+	assert.ok(text.includes("Earth"));
+	assert.ok(text.includes("Miner"));
+	assert.ok(text.includes("Warship"));
+	assert.ok(text.includes("Explorer"));
+	assert.ok(text.includes("Hauler"));
+	assert.match(text, /impulse rocket/);
+	assert.match(text, /photon rocket/);
+	assert.match(text, /wormhole/);
+	assert.match(text, /company is not named/);
+	assert.match(text, /theft/);
+	assert.equal(text.includes("Sol Systems"), false);
+	assert.equal(text.includes("Ashland"), false);
+	assert.equal(text.includes("Marauder"), false);
 	assert.equal(
 		STORY.some((chapter) => /\$|\bprice of \d/.test(chapter.paragraphs.join(" "))),
 		false,

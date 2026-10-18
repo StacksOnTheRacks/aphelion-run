@@ -11,8 +11,8 @@ export default function StoryPage() {
 				<p className="text-xs tracking-[0.22em] text-white/50 uppercase">The universe</p>
 				<h1 className="mt-3 max-w-3xl text-4xl font-medium tracking-tight sm:text-5xl">The Aphelion Run Universe</h1>
 				<p className="mt-6 max-w-2xl text-lg leading-relaxed text-white/75">
-					Pilots cross a living solar system to contest a dwindling network of solar harvesting satellites. Sol Systems
-					sells the energy to the domes. The Ashland Marauders steal it for the slums.
+					A human lives in space, far ahead of now, and starts with one ship. How a run is flown, bought, and fought is
+					written with the rules.
 				</p>
 			</header>
 

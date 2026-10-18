@@ -150,11 +150,64 @@ const SOL_PIXELS = 11;
 const NEIGHBOR_PIXELS = 6;
 /** Sol catches the pointer this far from its center. */
 const SOL_HIT_PIXELS = 22;
+/** A neighbor catches the pointer this far from its center. */
+const NEIGHBOR_HIT_PIXELS = 16;
 
 export const SOL_ID = "sol";
 
+export type SystemCard = {
+	id: string;
+	label: string;
+	text: string;
+	/** Portrait URL. The modal keeps the frame when this is absent. */
+	image?: string;
+	charted: boolean;
+	/** Spectral class of the stand-in portrait. Sol has none. */
+	star?: StarClass;
+};
+
+const STAR_KIND: Record<StarClass, string> = {
+	A: "A white star",
+	F: "A yellow-white star",
+	G: "A yellow star",
+	K: "An orange star",
+	M: "A red star",
+};
+
+function lightYears(distance: number): string {
+	return `${Number(distance.toFixed(2))} light years`;
+}
+
+/** The card for a system on the map, or null when the id is not one. */
+export function systemCard(id: string): SystemCard | null {
+	if (id === SOL_ID) {
+		return {
+			id: SOL_ID,
+			label: "Sol",
+			text: "Pilots base on its planets and moons, take energy from the Sun, and sell the haul at Earth.",
+			charted: true,
+		};
+	}
+	const neighbor = NEIGHBORS.find((system) => system.id === id);
+	if (!neighbor) {
+		return null;
+	}
+	return {
+		id: neighbor.id,
+		label: neighbor.label,
+		text: `${STAR_KIND[neighbor.star]}, ${lightYears(neighbor.distance)} from Sol. The star is on the map. The worlds around it are not.`,
+		charted: false,
+		star: neighbor.star,
+	};
+}
+
+/** The modal's action. Only a charted system can be entered. */
+export function systemCardAction(card: SystemCard): { label: string; enabled: boolean } {
+	return card.charted ? { label: "Enter System", enabled: true } : { label: "Uncharted Space", enabled: false };
+}
+
 export type GalaxyDemo = LabelSource & {
-	/** Calls back when Sol is clicked or tapped. Returns a stop function. */
+	/** Calls back when a system is clicked or tapped. Returns a stop function. */
 	onSelect: (listener: (id: string) => void) => () => void;
 };
 
@@ -260,16 +313,31 @@ export function createGalaxy(
 	};
 
 	const selectListeners = new Set<(id: string) => void>();
-	const picker = trackPicks(
-		canvas,
-		scene,
-		(x, y) => (glide >= 1 && project(SOL_POSITION) && Math.hypot(projected.x - x, projected.y - y) <= SOL_HIT_PIXELS ? SOL_ID : null),
-		(id) => {
-			for (const listener of selectListeners) {
-				listener(id);
-			}
+	const pickSystem = (x: number, y: number): string | null => {
+		if (glide < 1) {
+			return null;
 		}
-	);
+		let best: string | null = null;
+		let bestDistance = Infinity;
+		const consider = (id: string, world: Vector3, reach: number) => {
+			if (!project(world)) {
+				return;
+			}
+			const distance = Math.hypot(projected.x - x, projected.y - y);
+			if (distance <= reach && distance < bestDistance) {
+				best = id;
+				bestDistance = distance;
+			}
+		};
+		consider(SOL_ID, SOL_POSITION, SOL_HIT_PIXELS);
+		neighborWorld.forEach((world, index) => consider(NEIGHBORS[index].id, world, NEIGHBOR_HIT_PIXELS));
+		return best;
+	};
+	const picker = trackPicks(canvas, scene, pickSystem, (id) => {
+		for (const listener of selectListeners) {
+			listener(id);
+		}
+	});
 
 	const labelListeners = new Set<(frame: LabelFrame) => void>();
 	scene.onAfterRenderObservable.add(() => {

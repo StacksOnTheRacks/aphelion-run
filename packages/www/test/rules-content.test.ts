@@ -4,7 +4,7 @@ import test from "node:test";
 import { EXCEPTIONS, ROUTES, WORLDS } from "../src/rules-content";
 
 test("the rules name each world's yield and the two exceptions", () => {
-	const byName = Object.fromEntries(WORLDS.map((world) => [world.name, world.materials]));
+	const byName = Object.fromEntries(WORLDS.map((world) => [world.name, world.minerals]));
 	assert.deepEqual(byName.Mercury, ["Ore", "Water"]);
 	assert.deepEqual(byName.Venus, ["Ore", "Nitrogen", "Carbon"]);
 	assert.deepEqual(byName.Mars, ["Ore", "Carbon", "Water"]);
@@ -21,4 +21,12 @@ test("the supply route mines a shared world yield", () => {
 	assert.ok(supply);
 	assert.match(supply.body, /share one yield/);
 	assert.equal(ROUTES.length, 3);
+});
+
+test("the sell route is the one black market", () => {
+	const sell = ROUTES.find((route) => route.title === "Sell");
+	assert.ok(sell);
+	assert.match(sell.body, /black market/);
+	assert.match(sell.body, /Solscrip/);
+	assert.equal(sell.body.includes("faction"), false);
 });

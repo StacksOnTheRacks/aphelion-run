@@ -11,15 +11,17 @@ const text = [
 	...READ.map((item) => `${item.must} ${item.how}`),
 ].join("\n");
 
-test("the style bible keeps the two designs and the quiet field", () => {
-	assert.ok(text.includes("Sol Systems"));
-	assert.ok(text.includes("Ashland Marauders"));
-	assert.match(text, /same harvest/i);
-	assert.match(text, /do not have the drawings/);
+test("the style bible keeps the quiet field and unnamed class drawings", () => {
+	assert.match(text, /silhouettes are not designed yet/i);
+	assert.ok(text.includes("Miner"));
 	assert.ok(text.includes("Hydrogen metal"));
 	assert.ok(text.includes("Helium rain"));
 	assert.ok(text.includes("Mantle ice"));
 	assert.ok(text.includes("Storm tar"));
+	assert.ok(text.includes("Solscrip"));
+	assert.equal(text.includes("Sol Systems"), false);
+	assert.equal(text.includes("Ashland"), false);
+	assert.equal(text.includes("Marauder"), false);
 	assert.ok(NEVER.length >= 4);
 	assert.equal(READ.length, 4);
 	assert.ok(PALETTE.some((swatch) => swatch.name === "Field" && swatch.hex === "#000000"));

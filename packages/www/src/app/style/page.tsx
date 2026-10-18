@@ -53,8 +53,8 @@ export default function StylePage() {
 					Palette
 				</h2>
 				<p className="mt-4 max-w-2xl text-sm leading-relaxed text-white/75">
-					On the map, a mark has to be read from the outer orbit. Sol&apos;s mark is gold. A Marauder mark is oxide. The
-					objects themselves stay quiet.
+					On the map, a mark has to be read from the outer orbit. Class silhouettes are not designed yet. The objects
+					themselves stay quiet.
 				</p>
 				<ul className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 					{PALETTE.map((swatch) => (

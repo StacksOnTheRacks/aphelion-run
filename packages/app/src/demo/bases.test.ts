@@ -13,7 +13,9 @@ import {
 	moonBaseRadius,
 	moonBaseSize,
 	moonBases,
+	LOCAL_REACH,
 	moonOuterOrbitRadius,
+	nearBody,
 	outerOrbitRadius,
 	planetBases,
 	radialReach,
@@ -264,6 +266,14 @@ if (!earthInput) {
 		);
 	}
 }
+
+const body = { x: 0, y: 0, z: 0 };
+const outer = 31;
+expect(nearBody(body, body, outer), "a ship on the body is near it");
+expect(nearBody({ x: outer * LOCAL_REACH, y: 0, z: 0 }, body, outer), "a ship at the reach still sees the honeycomb");
+expect(!nearBody({ x: outer * LOCAL_REACH + 0.01, y: 0, z: 0 }, body, outer), "a ship past the reach is in open space");
+expect(!nearBody({ x: 0, y: outer * LOCAL_REACH + 1, z: 0 }, body, outer), "height counts, so a ship far above the shell is not near it");
+expect(!nearBody(body, body, 0), "a body with no outer orbit has no honeycomb");
 
 if (failures.length > 0) {
 	console.error(failures.join("\n"));

@@ -70,13 +70,15 @@ export function GameView() {
 		setLoaded(null);
 		previous?.dispose();
 
-		const scene = new Scene(engine);
+		// Sol is drawn around the camera. The ship is a few thousandths of a unit across and flies
+		// hundreds of units out, where single-precision world positions lose the gaps between hull panels.
+		const scene = new Scene(engine, { useFloatingOrigin: place !== "galaxy" });
 		let next: Loaded;
 		try {
 			next =
 				place === "galaxy"
 					? { place, galaxy: createGalaxy(engine, scene, canvas, { opening: !crossing }) }
-					: { place, system: createEnvironment(engine, scene, canvas) };
+					: { place, system: await createEnvironment(engine, scene, canvas) };
 		} catch (caught) {
 			scene.dispose();
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -119,6 +121,7 @@ export function GameView() {
 			antialias: true,
 			adaptToDeviceRatio: true,
 			powerPreference: "high-performance",
+			useHighPrecisionMatrix: true,
 		});
 		engineRef.current = engine;
 		engine.runRenderLoop(() => {

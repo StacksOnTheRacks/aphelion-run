@@ -2,38 +2,57 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { AFT_VIEWS, type ScreenRect } from "./demo/cockpit";
+import { viewTrail, type DemoView, type EnvironmentDemo } from "./demo/environment";
 import {
-	JOURNEY_STOPS,
-	bodyTargets,
-	viewTrail,
-	type DemoView,
-	type EnvironmentDemo,
-} from "./demo/environment";
+	DEPARTURE_SECONDS,
+	destinationName,
+	placeName,
+	scanCard,
+	scanLabel,
+	secondsLeft,
+	travelAction,
+	viewAction,
+	type ScanTarget,
+} from "./demo/scan";
+import { Dashboard } from "./dashboard";
 import { GameChrome } from "./game-chrome";
+import { ScanModal } from "./scan-card";
 import { SpaceLabels, type LabelItem } from "./space-labels";
 
-const STOP_OPTIONS = JOURNEY_STOPS.map((stop) => ({ value: stop.id, label: stop.label, group: stop.group }));
-
-function stopLabel(id: string): string {
-	const label = JOURNEY_STOPS.find((stop) => stop.id === id)?.label ?? id;
-	return label === "Sun" || label === "Moon" ? `the ${label}` : label;
-}
+type Mode = "chart" | "pilot";
 
 /**
- * Sol: every body in view named on the scene, and the chrome over it. A button bar at the bottom center
- * steps back up the zoom — galaxy, then Sol, then a planet, then its moon. The galaxy itself has no bar.
- * Selecting a body, on the scene or by its name, opens its outer orbit; Escape goes back up one step.
+ * Sol, and the chrome over it. A button bar at the bottom center steps back up the zoom — galaxy, then
+ * Sol, then a planet, then its moon. The name of the place on screen recenters the camera above it.
+ * The galaxy itself has no bar. Selecting a body on the scene opens its outer orbit. Selecting a craft
+ * orbiting a body opens that body's inner orbit, and the camera rides around with the craft. Escape
+ * goes back up one step.
+ *
+ * Nothing on the scene is named until a scan. Scan names the nearest bodies and craft in view, and a
+ * pick, on the scene or by its name, opens a card: View takes the camera there, and Travel To counts
+ * down and then flies the ship there from wherever it sits.
+ *
+ * The lower right switches the camera between the chart and the ranger's cockpit. The cockpit has no
+ * labels, picks, or zoom bar: it is for watching the trip, with a dashboard of where the ship is in
+ * the system. Dragging turns the pilot's head.
  */
 export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLeave: () => void }) {
 	const chromeRef = useRef<HTMLDivElement>(null);
 	const barRef = useRef<HTMLOListElement>(null);
-	const keepOut = useMemo(() => [chromeRef, barRef], []);
+	const controlsRef = useRef<HTMLDivElement>(null);
+	const keepOut = useMemo(() => [chromeRef, barRef, controlsRef], []);
 	const [view, setView] = useState<DemoView>("system");
-	const [from, setFrom] = useState("neptune");
-	const [to, setTo] = useState("sun");
-	const [flight, setFlight] = useState<{ from: string; to: string } | null>(null);
-	const [docked, setDocked] = useState<string | null>(null);
+	const [mode, setMode] = useState<Mode>("chart");
+	const [scanning, setScanning] = useState(false);
+	const [found, setFound] = useState<ScanTarget[]>([]);
+	const [scanned, setScanned] = useState<ScanTarget | null>(null);
+	const [departure, setDeparture] = useState<{ target: ScanTarget; endsAt: number } | null>(null);
+	const [now, setNow] = useState(() => Date.now());
+	const [flight, setFlight] = useState<ScanTarget | null>(null);
+	const [docked, setDocked] = useState<ScanTarget | null>(null);
 	const trail = viewTrail(view);
+	const piloting = mode === "pilot";
 
 	const go = useCallback(
 		(next: DemoView) => {
@@ -44,15 +63,77 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	);
 
 	useEffect(() => system.onSelect((target) => go(target.view)), [system, go]);
-
-	const labels = useMemo<LabelItem[]>(
-		() => bodyTargets(view).map((target) => ({ id: target.id, label: target.label, onSelect: () => go(target.view) })),
-		[view, go]
+	useEffect(
+		() =>
+			system.onScan((target) => {
+				setScanned(target);
+				setScanning(false);
+			}),
+		[system]
 	);
+	useEffect(() => system.onScanFound(setFound), [system]);
+	useEffect(() => system.setScanning(scanning), [system, scanning]);
+	useEffect(() => system.setPiloting(piloting), [system, piloting]);
+
+	const launch = useCallback(
+		(target: ScanTarget) => {
+			setDeparture(null);
+			setFlight(target);
+			setDocked(null);
+			system.travel(target, () => {
+				setFlight(null);
+				setDocked(target);
+			});
+		},
+		[system]
+	);
+
+	useEffect(() => {
+		if (!departure) {
+			return;
+		}
+		const tick = window.setInterval(() => {
+			const time = Date.now();
+			setNow(time);
+			if (secondsLeft(departure.endsAt, time) === 0) {
+				window.clearInterval(tick);
+				launch(departure.target);
+			}
+		}, 100);
+		return () => window.clearInterval(tick);
+	}, [departure, launch]);
+
+	const ship = { at: flight ? null : (docked?.host ?? "earth"), departing: departure !== null };
+	const bound = departure?.target ?? flight;
+
+	const labels = useMemo<LabelItem[]>(() => {
+		if (piloting || !scanning) {
+			return [];
+		}
+		return found.map((target) => {
+			const label = scanLabel(target);
+			return {
+				id: target.id,
+				label,
+				action: `Scan ${label}`,
+				onSelect: () => {
+					setScanned(target);
+					setScanning(false);
+				},
+			};
+		});
+	}, [found, piloting, scanning]);
 
 	const upRef = useRef<() => void>(() => {});
 	upRef.current = () => {
-		if (view !== "system") {
+		if (scanned) {
+			return;
+		}
+		if (scanning) {
+			setScanning(false);
+		} else if (piloting) {
+			setMode("chart");
+		} else if (view !== "system") {
 			go(trail.length > 1 ? trail[trail.length - 2].view : "system");
 		}
 	};
@@ -67,179 +148,216 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		return () => window.removeEventListener("keydown", onKey);
 	}, []);
 
-	const crumbs: { label: string; onSelect?: () => void }[] = [
+	const crumbs: { label: string; onSelect: () => void; current?: boolean }[] = [
 		{ label: "Galaxy", onSelect: onLeave },
-		{ label: "Sol", onSelect: view === "system" ? undefined : () => go("system") },
+		{ label: "Sol", onSelect: () => go("system"), current: view === "system" },
 		...trail.map((body, index) => ({
 			label: body.label,
-			onSelect: index === trail.length - 1 ? undefined : () => go(body.view),
+			onSelect: () => go(body.view),
+			current: index === trail.length - 1,
 		})),
 	];
 
-	const toggleFlight = () => {
-		if (flight) {
-			system.land();
-			setFlight(null);
-			setDocked(null);
-			return;
-		}
-		if (from === to) {
-			return;
-		}
-		const origin = from;
-		const destination = to;
-		system.fly(origin, destination, () => {
-			setFlight(null);
-			setFrom(destination);
-			setDocked(destination);
-		});
-		setFlight({ from: origin, to: destination });
+	const togglePilot = () => {
+		setScanning(false);
+		setScanned(null);
+		setMode(piloting ? "chart" : "pilot");
+	};
+
+	const stop = () => {
+		system.land();
+		setFlight(null);
 		setDocked(null);
 	};
 
 	return (
 		<>
-			<SpaceLabels source={system} items={labels} title="Bodies in view" keepOut={keepOut} />
+			<SpaceLabels source={system} items={labels} title="Scanned" keepOut={keepOut} />
 			<GameChrome ref={chromeRef}>
-				<nav
-					aria-label="Journey"
-					className="pointer-events-auto mt-3 flex w-fit max-w-full flex-wrap items-center gap-1 rounded-2xl border border-white/10 bg-black/50 p-1 text-sm backdrop-blur"
-				>
-					<span className="pl-3 text-white/45">From</span>
-					<Picker label="Journey from" value={from} options={STOP_OPTIONS} onChange={setFrom} />
-					<span className="text-white/45">to</span>
-					<Picker label="Journey to" value={to} options={STOP_OPTIONS} onChange={setTo} />
-					<span aria-hidden className="mx-1 h-5 w-px bg-white/15" />
-					<button
-						type="button"
-						onClick={toggleFlight}
-						disabled={!flight && from === to}
-						aria-label={flight ? "Stop the journey" : `Fly from ${stopLabel(from)} to ${stopLabel(to)}`}
-						title={flight ? "Stop the journey" : from === to ? "Pick two different places" : "Fly"}
-						className={`flex h-8 w-8 items-center justify-center rounded-xl transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
-							flight ? "bg-amber-300 text-black" : "text-amber-300 enabled:hover:bg-white/10"
-						}`}
-					>
-						{flight ? (
-							<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="currentColor" aria-hidden>
-								<rect x="3" y="3" width="10" height="10" rx="1.5" />
-							</svg>
-						) : (
-							<svg viewBox="0 0 16 16" className="h-4 w-4" fill="currentColor" aria-hidden>
-								<path d="M14.5 1.5 1.8 6.6a.5.5 0 0 0 .03.94l5.07 1.56 1.56 5.07a.5.5 0 0 0 .94.03L14.5 1.5Z" />
-							</svg>
-						)}
-					</button>
-				</nav>
-				{flight ? (
-					<p className="mt-3 text-sm leading-relaxed text-white/60">
-						A ship is flying from {stopLabel(flight.from)} to {stopLabel(flight.to)}. It climbs out with the orbit, burns
-						fast along the bright line, then drops slowly inward to dock with a satellite. Where the line runs thin and pale,
-						a planet&apos;s gravity bends the course and the burn costs less.
-					</p>
-				) : docked ? (
-					<p className="mt-3 text-sm leading-relaxed text-white/60">Docked with a satellite of {stopLabel(docked)}.</p>
-				) : null}
+				<ShipStatus
+					departure={departure ? { target: departure.target, seconds: secondsLeft(departure.endsAt, now) } : null}
+					flight={flight}
+					docked={docked}
+					onCancel={() => setDeparture(null)}
+					onStop={stop}
+				/>
 			</GameChrome>
-			<nav
-				aria-label="Breadcrumb"
-				className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-6"
-			>
-				<ol
-					ref={barRef}
-					className="pointer-events-auto flex max-w-full overflow-x-auto rounded-2xl border border-[#E8E4D9]/20 bg-black/60 text-[11px] tracking-[0.22em] uppercase backdrop-blur [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+			{piloting ? <AftFrames /> : null}
+			{piloting ? <Dashboard system={system} course={bound ? scanCard(bound).label : null} /> : null}
+			{piloting ? null : (
+				<nav
+					aria-label="Breadcrumb"
+					className="pointer-events-none absolute inset-x-0 bottom-[4.25rem] z-10 flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-6 lg:bottom-0"
 				>
-					{crumbs.map((crumb, index) => (
-						<li key={crumb.label} className={`flex shrink-0 ${index > 0 ? "border-l border-[#E8E4D9]/20" : ""}`}>
-							{crumb.onSelect ? (
+					<ol
+						ref={barRef}
+						className="pointer-events-auto flex max-w-full overflow-x-auto rounded-2xl border border-[#E8E4D9]/20 bg-black/60 text-[11px] tracking-[0.22em] uppercase backdrop-blur [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+					>
+						{crumbs.map((crumb, index) => (
+							<li key={crumb.label} className={`flex shrink-0 ${index > 0 ? "border-l border-[#E8E4D9]/20" : ""}`}>
 								<button
 									type="button"
 									onClick={crumb.onSelect}
-									className="px-4 py-2.5 whitespace-nowrap text-[#E8E4D9]/70 transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:ring-inset focus-visible:outline-none"
+									aria-current={crumb.current ? "page" : undefined}
+									title={crumb.current ? "Recenter" : undefined}
+									className={`px-4 py-2.5 whitespace-nowrap transition-colors focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:ring-inset focus-visible:outline-none ${
+										crumb.current
+											? "text-amber-300 hover:bg-white/10"
+											: "text-[#E8E4D9]/70 hover:bg-white/10 hover:text-[#E8E4D9]"
+									}`}
 								>
 									{crumb.label}
 								</button>
-							) : (
-								<h2 aria-current="page" className="px-4 py-2.5 whitespace-nowrap text-amber-300">
-									{crumb.label}
-								</h2>
-							)}
-						</li>
-					))}
-				</ol>
-			</nav>
+							</li>
+						))}
+					</ol>
+				</nav>
+			)}
+			<div
+				ref={controlsRef}
+				className="pointer-events-none absolute right-0 bottom-0 z-10 flex flex-col items-end gap-2 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-6"
+			>
+				{scanning ? (
+					<p role="status" className="text-[11px] tracking-[0.22em] text-amber-300 uppercase [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
+						Select a body or craft
+					</p>
+				) : null}
+				<div className="pointer-events-auto flex items-center gap-2 text-[11px] tracking-[0.22em] uppercase">
+					{piloting ? null : (
+						<button
+							type="button"
+							aria-pressed={scanning}
+							onClick={() => setScanning(!scanning)}
+							title={scanning ? "Stop scanning" : "Scan a body or craft"}
+							className={`flex items-center gap-2 rounded-2xl border px-4 py-2.5 backdrop-blur transition-colors focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none ${
+								scanning
+									? "border-amber-300 bg-amber-300 text-black hover:bg-amber-200"
+									: "border-[#E8E4D9]/20 bg-black/60 text-[#E8E4D9]/80 hover:bg-white/10 hover:text-[#E8E4D9]"
+							}`}
+						>
+							<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+								<circle cx="8" cy="8" r="5" />
+								<path d="M8 1v3M8 12v3M1 8h3M12 8h3" strokeLinecap="round" />
+							</svg>
+							Scan
+						</button>
+					)}
+					<button
+						type="button"
+						onClick={togglePilot}
+						aria-label={piloting ? "Switch to chart view" : "Switch to pilot view"}
+						title={piloting ? "Back to the chart" : "Into the cockpit"}
+						className="flex items-center gap-2 rounded-2xl border border-[#E8E4D9]/20 bg-black/60 px-4 py-2.5 text-[#E8E4D9]/80 backdrop-blur transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+					>
+						{piloting ? (
+							<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+								<circle cx="8" cy="8" r="6" />
+								<ellipse cx="8" cy="8" rx="6" ry="2.2" />
+								<circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
+							</svg>
+						) : (
+							<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+								<path d="M2 11.5 4 5h8l2 6.5" strokeLinejoin="round" />
+								<path d="M2 11.5h12M8 5v2.5" strokeLinecap="round" />
+							</svg>
+						)}
+						{piloting ? "Chart" : "Pilot"}
+					</button>
+				</div>
+			</div>
+			{scanned ? (
+				<ScanModal
+					card={scanCard(scanned)}
+					view={viewAction(scanned, view)}
+					travel={travelAction(scanned, ship)}
+					onClose={() => setScanned(null)}
+					onView={() => {
+						system.visit(scanned);
+						setScanned(null);
+					}}
+					onTravel={() => {
+						setDeparture({ target: scanned, endsAt: Date.now() + DEPARTURE_SECONDS * 1000 });
+						setNow(Date.now());
+						setScanned(null);
+					}}
+				/>
+			) : null}
 		</>
 	);
 }
 
-type PickerOption = { value: string; label: string; group?: string };
-
-/** Consecutive options that share a group, so each group renders as one optgroup. */
-function groupOptions(options: PickerOption[]): { group?: string; options: PickerOption[] }[] {
-	const runs: { group?: string; options: PickerOption[] }[] = [];
-	for (const option of options) {
-		const last = runs[runs.length - 1];
-		if (last && last.group === option.group) {
-			last.options.push(option);
-		} else {
-			runs.push({ group: option.group, options: [option] });
-		}
+/** Where the ship is, under the title: holding, counting down to leave, flying, or docked. */
+function ShipStatus({
+	departure,
+	flight,
+	docked,
+	onCancel,
+	onStop,
+}: {
+	departure: { target: ScanTarget; seconds: number } | null;
+	flight: ScanTarget | null;
+	docked: ScanTarget | null;
+	onCancel: () => void;
+	onStop: () => void;
+}) {
+	let text: string;
+	let action: { label: string; onClick: () => void } | null = null;
+	if (departure) {
+		text = `Departing for ${destinationName(departure.target)} in ${departure.seconds}`;
+		action = { label: "Cancel", onClick: onCancel };
+	} else if (flight) {
+		text = `En route to ${destinationName(flight)}.`;
+		action = { label: "Stop", onClick: onStop };
+	} else if (docked) {
+		text =
+			docked.id === docked.host
+				? `Docked with a satellite of ${placeName(docked.host)}.`
+				: `Docked at ${destinationName(docked)}.`;
+	} else {
+		text = "In orbit at Earth.";
 	}
-	return runs;
+	return (
+		<div className="mt-3 flex flex-wrap items-center gap-3">
+			<p role="status" aria-live="polite" className="text-sm leading-relaxed text-white/60">
+				{text}
+			</p>
+			{action ? (
+				<button
+					type="button"
+					onClick={action.onClick}
+					className="pointer-events-auto rounded-xl border border-[#E8E4D9]/20 bg-black/50 px-3 py-1 text-[11px] tracking-[0.22em] text-amber-300 uppercase backdrop-blur transition-colors hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+				>
+					{action.label}
+				</button>
+			) : null}
+		</div>
+	);
 }
 
-/**
- * A native select laid invisibly over its label, so it works with a keyboard and on phones.
- * A visible select is as wide as its longest option.
- */
-function Picker({
-	label,
-	value,
-	options,
-	onChange,
-}: {
-	label: string;
-	value: string;
-	options: PickerOption[];
-	onChange: (value: string) => void;
-}) {
-	const shown = options.find((option) => option.value === value)?.label;
+/** A frame and a name around each aft view. The views themselves are drawn by the scene, under these. */
+function AftFrames() {
+	const frames: { label: string; rect: ScreenRect }[] = [
+		{ label: "Port aft", rect: AFT_VIEWS.port },
+		{ label: "Starboard aft", rect: AFT_VIEWS.starboard },
+	];
 	return (
-		<span className="relative flex items-center rounded-xl text-white transition-colors hover:bg-white/10 [&:has(:focus-visible)]:ring-1 [&:has(:focus-visible)]:ring-white/40">
-			<span aria-hidden className="py-1.5 pr-7 pl-3 whitespace-nowrap">
-				{shown}
-			</span>
-			<select
-				aria-label={label}
-				value={value}
-				onChange={(event) => onChange(event.target.value)}
-				className="absolute inset-0 w-full cursor-pointer appearance-none opacity-0 [color-scheme:dark]"
-			>
-				{groupOptions(options).map((run) => {
-					const items = run.options.map((option) => (
-						<option key={option.value} value={option.value} className="bg-neutral-900 text-white">
-							{option.label}
-						</option>
-					));
-					return run.group ? (
-						<optgroup key={run.group} label={run.group} className="bg-neutral-900 text-white/60">
-							{items}
-						</optgroup>
-					) : (
-						items
-					);
-				})}
-			</select>
-			<svg
-				viewBox="0 0 16 16"
-				className="pointer-events-none absolute right-2 h-3 w-3 text-white/50"
-				fill="none"
-				stroke="currentColor"
-				strokeWidth="2"
-				aria-hidden
-			>
-				<path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-			</svg>
-		</span>
+		<div aria-hidden className="pointer-events-none absolute inset-0">
+			{frames.map((frame) => (
+				<div
+					key={frame.label}
+					className="absolute rounded-md border border-[#E8E4D9]/30 shadow-[0_0_0_1px_rgba(0,0,0,0.6)]"
+					style={{
+						left: `${frame.rect.left * 100}%`,
+						top: `${frame.rect.top * 100}%`,
+						width: `${frame.rect.width * 100}%`,
+						height: `${frame.rect.height * 100}%`,
+					}}
+				>
+					<span className="absolute -top-5 left-0 text-[10px] tracking-[0.22em] text-[#E8E4D9]/70 uppercase [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
+						{frame.label}
+					</span>
+				</div>
+			))}
+		</div>
 	);
 }

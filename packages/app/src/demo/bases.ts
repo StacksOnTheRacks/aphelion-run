@@ -54,6 +54,8 @@ export const EARTH_STATION_RADIUS = 11;
 export const SUN_OUTER_ORBIT = 44;
 /** A moon's outer orbit, in moon radii. Wide enough to clear its bases, narrow enough that neighbors stay apart. */
 export const MOON_OUTER_ORBIT_SCALE = 3;
+/** A ship this many outer-orbit radii from a body or closer is at that body. */
+export const LOCAL_REACH = 1.6;
 /** Mercury and Venus: outer orbit as a multiple of the planet radius. */
 export const NO_MOON_OUTER_SCALE = 2.5;
 /** A pass stays this far outside Saturn's rings. */
@@ -121,6 +123,22 @@ export function moonBaseRadius(diameter: number): number {
 
 export function radialReach(size: BoxSize): number {
 	return size.width / 2;
+}
+
+/** True when `ship` is close enough to a body's center that a pilot there should see its honeycomb. */
+export function nearBody(
+	ship: { x: number; y: number; z: number },
+	center: { x: number; y: number; z: number },
+	outer: number
+): boolean {
+	if (outer <= 0) {
+		return false;
+	}
+	const dx = ship.x - center.x;
+	const dy = ship.y - center.y;
+	const dz = ship.z - center.z;
+	const reach = outer * LOCAL_REACH;
+	return dx * dx + dy * dy + dz * dz <= reach * reach;
 }
 
 export function planetBases(input: PlanetBaseInput): { warehouses: BaseSlot[]; stations: BaseSlot[] } {

@@ -1,6 +1,6 @@
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 
-import { EARTH_STATION_RADIUS, SATURN_RING_INNER_SCALE, moonBases, planetBases } from "./bases";
+import { EARTH_STATION_RADIUS, SATURN_RING_INNER_SCALE, moonBases, moonOuterOrbitRadius, planetBases } from "./bases";
 import { segmentHitsRing, segmentHitsSphere, type RingBody, type SphereBody } from "./camera-path";
 import {
 	JOURNEY_STOPS,
@@ -117,6 +117,14 @@ function checkClear(points: Vector3[], spheres: SphereBody[], rings: RingBody[],
 	expect(Number.isFinite(middle.x) && Number.isFinite(middle.z), "a point halfway along is a real point");
 	const heading = headingAt(route, 0);
 	expect(Math.abs(heading.length() - 1) < 1e-6, "the heading is a unit vector");
+	let sharpest = 0;
+	let previous = headingAt(route, 0);
+	for (let step = 1; step <= 20000; step++) {
+		const next = headingAt(route, (route.total * step) / 20000);
+		sharpest = Math.max(sharpest, Math.acos(Math.min(1, Vector3.Dot(previous, next))));
+		previous = next;
+	}
+	expect(sharpest < (0.5 * Math.PI) / 180, `the heading turns through the arcs without snapping (${sharpest} rad)`);
 	expect(near(pointAt(route, -5), start) && near(pointAt(route, route.total + 5), end), "positions clamp to the ends");
 }
 
@@ -286,9 +294,29 @@ function checkJourney(layout: JourneyLayout, fromId: string, toId: string, name:
 		}
 	}
 	checkClear(flown, spheres, [saturnRing(saturn.center)], name);
+	checkSteady(flown, name);
 	checkArcs(route, candidates, name);
 	expect(route.assists.every((assist) => assist.toLowerCase() !== fromId && assist.toLowerCase() !== toId), `${name}: neither end is an assist`);
 	return route;
+}
+
+/** The view out the windscreen turns through every corner of the climb and the burn, flown as one line. */
+function checkSteady(points: Vector3[], name: string): void {
+	const cumulative = [0];
+	for (let i = 1; i < points.length; i++) {
+		cumulative.push(cumulative[i - 1] + Vector3.Distance(points[i - 1], points[i]));
+	}
+	const total = cumulative[cumulative.length - 1];
+	const kinds = points.slice(1).map(() => "burn" as const);
+	const flown: Route = { points, kinds, cumulative, total, assists: [], startTurn: 0, endTurn: 0 };
+	const nudge = total * 1e-7;
+	let sharpest = 0;
+	for (const corner of cumulative.slice(1, -1)) {
+		const before = headingAt(flown, corner - nudge);
+		const after = headingAt(flown, corner + nudge);
+		sharpest = Math.max(sharpest, Math.acos(Math.min(1, Vector3.Dot(before, after))));
+	}
+	expect(sharpest < 0.05, `${name}: the heading does not snap at a corner (${sharpest.toFixed(3)} rad)`);
 }
 
 const FIRST_DAY = daysSinceJ2000(Date.UTC(2026, 9, 12));
@@ -506,6 +534,16 @@ for (const docks of [8, 2, 1]) {
 	}
 }
 
+for (const spec of PLANETS) {
+	const outer = bodyOuterRadius(spec.name);
+	const flyby = flybyRadius(spec);
+	expect(flyby > outer, `${spec.name} assist stands off the honeycomb`);
+	for (const moon of spec.moons) {
+		const shell = moon.orbit - moonOuterOrbitRadius(moon.diameter);
+		expect(flyby < shell, `${spec.name} assist stays inside ${moon.name}'s honeycomb (flyby ${flyby.toFixed(2)}, shell ${shell.toFixed(2)})`);
+	}
+}
+
 // Saturn's bases sit inside its tilted rings, so the drop to them must pass over the ring, not through it.
 {
 	const saturn = PLANETS.find((spec) => spec.name === "saturn")!;
@@ -542,7 +580,7 @@ for (const docks of [8, 2, 1]) {
 
 {
 	expect(journeySeconds(0) === JOURNEY_MIN_SECONDS, "a short hop still lasts the minimum");
-	expect(Math.abs(journeySeconds(1120) - 40) < 1, "Neptune to the Sun takes about 40 seconds");
+	expect(Math.abs(journeySeconds(1120) - 80) < 1, "Neptune to the Sun takes about 80 seconds");
 	expect(journeySeconds(1e6) === JOURNEY_MAX_SECONDS, "the longest trips are capped");
 }
 

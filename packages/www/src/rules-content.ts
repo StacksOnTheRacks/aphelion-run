@@ -2,18 +2,18 @@ export const EXCEPTIONS = ["Sun", "Earth"] as const;
 
 export type WorldYield = {
 	name: string;
-	materials: string[];
+	minerals: string[];
 };
 
 /** A planet and its moons share one yield. Earth and the Sun are the exceptions. */
 export const WORLDS: WorldYield[] = [
-	{ name: "Mercury", materials: ["Ore", "Water"] },
-	{ name: "Venus", materials: ["Ore", "Nitrogen", "Carbon"] },
-	{ name: "Mars", materials: ["Ore", "Carbon", "Water"] },
-	{ name: "Jupiter", materials: ["Hydrogen", "Ore", "Water"] },
-	{ name: "Saturn", materials: ["Hydrogen", "Nitrogen", "Carbon", "Water"] },
-	{ name: "Uranus", materials: ["Hydrogen", "Nitrogen", "Carbon", "Water"] },
-	{ name: "Neptune", materials: ["Hydrogen", "Nitrogen", "Carbon", "Water"] },
+	{ name: "Mercury", minerals: ["Ore", "Water"] },
+	{ name: "Venus", minerals: ["Ore", "Nitrogen", "Carbon"] },
+	{ name: "Mars", minerals: ["Ore", "Carbon", "Water"] },
+	{ name: "Jupiter", minerals: ["Hydrogen", "Ore", "Water"] },
+	{ name: "Saturn", minerals: ["Hydrogen", "Nitrogen", "Carbon", "Water"] },
+	{ name: "Uranus", minerals: ["Hydrogen", "Nitrogen", "Carbon", "Water"] },
+	{ name: "Neptune", minerals: ["Hydrogen", "Nitrogen", "Carbon", "Water"] },
 ];
 
 export const ROUTES = [
@@ -25,11 +25,11 @@ export const ROUTES = [
 	{
 		title: "Sell",
 		steps: "Home warehouse → Earth station → home bank",
-		body: "A pilot sells only at their own faction's station. The station pays cash onto the ship for the surplus above the burn home. That cash is banked only at home, and banked cash can finish an improvement sooner.",
+		body: "The ship sells at Earth's black market. The station pays Solscrip onto the ship for the surplus above the burn home. That Solscrip is banked only at home. Banked Solscrip can finish an improvement sooner, and it can buy another ship.",
 	},
 	{
 		title: "Supply",
 		steps: "Home → a world, to mine → home",
-		body: "A planet and its moons share one yield. The ship mines that yield at the planet or at any of its moons, including the home world. Materials have weight. A ship is not loaded past what it can lift home on the wide path today.",
+		body: "A planet and its moons share one yield. The ship mines that yield at the planet or at any of its moons, including the home world. Minerals have weight. A ship is not loaded past what it can lift home on the wide path today.",
 	},
 ];

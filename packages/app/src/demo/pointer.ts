@@ -6,6 +6,8 @@ const CLICK_SLOP_PIXELS = 6;
 export type Picker = {
 	/** Finds the body under a still pointer again, since bodies move. Call once per frame. */
 	update: () => string | null;
+	/** The cursor over the canvas while nothing pickable is under it. */
+	setIdleCursor: (cursor: string) => void;
 };
 
 /**
@@ -21,6 +23,7 @@ export function trackPicks(
 	let pointer: { x: number; y: number } | null = null;
 	let press: { x: number; y: number } | null = null;
 	let hovered: string | null = null;
+	let idle = "";
 
 	const at = (event: PointerEvent) => {
 		const box = canvas.getBoundingClientRect();
@@ -68,9 +71,15 @@ export function trackPicks(
 			const id = pointer ? pick(pointer.x, pointer.y) : null;
 			if (id !== hovered) {
 				hovered = id;
-				canvas.style.cursor = id ? "pointer" : "";
+				canvas.style.cursor = id ? "pointer" : idle;
 			}
 			return id;
+		},
+		setIdleCursor(cursor) {
+			idle = cursor;
+			if (!hovered) {
+				canvas.style.cursor = cursor;
+			}
 		},
 	};
 }
