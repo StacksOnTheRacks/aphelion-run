@@ -113,6 +113,7 @@ export type Ranger = ShipModel & {
  * The nose is turned onto +Z so `lookAt` points it along the heading.
  */
 export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> {
+	// The published site serves this from its own public folder. The copy beside this package is for the game dev server.
 	const container = await LoadAssetContainerAsync("/models/ranger.glb", scene);
 	container.addAllToScene();
 	for (const light of container.lights) {
