@@ -10,11 +10,13 @@ import {
 	blocked,
 	bodyTarget,
 	bodyTargets,
+	chartButtons,
 	choosePick,
 	scanTargets,
 	stopView,
 	travelSeconds,
 	viewTrail,
+	wheelLimits,
 } from "./environment";
 
 const failures: string[] = [];
@@ -107,6 +109,40 @@ expect(!blocked(origin, far, new Vector3(12, 0, 0), 1), "a body beyond the targe
 expect(!blocked(origin, far, new Vector3(-3, 0, 0), 1), "a body behind the eye does not");
 expect(SCAN_LIMIT === 10, "a scan names at most ten things");
 
+const systemSteps = chartButtons("system");
+expect(systemSteps.map((button) => button.label).join() === "Home,Galaxy", "the system chart offers Home, then Galaxy");
+expect(systemSteps[0]?.target === "ship", "Home opens the ship's orbit");
+expect(systemSteps[1]?.target === "galaxy", "Galaxy leaves Sol");
+expect(
+	chartButtons("earth-outer")[0]?.label === "System" && chartButtons("earth-outer")[0]?.target === "system",
+	"a planet steps back to the system"
+);
+expect(chartButtons("sun-outer")[0]?.label === "System", "the Sun steps back to the system");
+expect(
+	chartButtons("earth-inner")[0]?.label === "Planet" && chartButtons("earth-inner")[0]?.target === "earth-outer",
+	"an orbit steps back to its planet"
+);
+expect(
+	chartButtons("saturn-titan-outer")[0]?.label === "Planet" && chartButtons("saturn-titan-outer")[0]?.target === "saturn-outer",
+	"a moon steps back to its planet"
+);
+expect(chartButtons("saturn-titan-inner")[0]?.target === "saturn-outer", "a moon's orbit steps back to the planet");
+expect(
+	chartButtons("sun-inner")[0]?.label === "Sun" && chartButtons("sun-inner")[0]?.target === "sun-outer",
+	"the Sun's orbit steps back to the Sun"
+);
+expect(chartButtons("jupiter-outer").length === 1, "a planet view has one step");
+
+const planetWheel = wheelLimits("earth-outer", 100, 40, 7000);
+expect(planetWheel.near === 40 && planetWheel.far === 100, "a planet view can come in, and cannot pull back past its shot");
+const innerWheel = wheelLimits("earth-inner", 30, 10, 7000);
+expect(innerWheel.near === 30 && innerWheel.far === 30, "an inner orbit holds its shot");
+const moonWheel = wheelLimits("saturn-titan-inner", 12, 4, 7000);
+expect(moonWheel.near === 12 && moonWheel.far === 12, "a moon's inner orbit holds its shot");
+const systemWheel = wheelLimits("system", 2000, 800, 7000);
+expect(systemWheel.near === 800 && systemWheel.far === 7000, "the system chart can still pull back");
+expect(wheelLimits("mars-outer", 50, 80, 7000).near === 50, "the near limit stays on the arrived shot when that is closer");
+
 if (failures.length > 0) {
 	for (const failure of failures) {
 		console.error(failure);
@@ -114,4 +150,4 @@ if (failures.length > 0) {
 	process.exit(1);
 }
 
-console.log("every body has both orbits, the camera pace holds, and every pick opens an outer orbit");
+console.log("every body has both orbits, the camera pace holds, and the corner steps back one view");

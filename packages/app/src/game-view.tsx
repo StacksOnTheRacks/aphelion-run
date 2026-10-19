@@ -48,7 +48,7 @@ export function GameView() {
 	});
 	const [error, setError] = useState<string | null>(null);
 
-	const load = useCallback(async (place: Place, crossing: boolean) => {
+	const load = useCallback(async (place: Place, crossing: boolean, atShip = false) => {
 		const engine = engineRef.current;
 		const canvas = canvasRef.current;
 		if (!engine || !canvas) {
@@ -78,7 +78,7 @@ export function GameView() {
 			next =
 				place === "galaxy"
 					? { place, galaxy: createGalaxy(engine, scene, canvas, { opening: !crossing }) }
-					: { place, system: await createEnvironment(engine, scene, canvas) };
+					: { place, system: await createEnvironment(engine, scene, canvas, { atShip }) };
 		} catch (caught) {
 			scene.dispose();
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -143,12 +143,15 @@ export function GameView() {
 	}, [load]);
 
 	const enterSol = useCallback(() => void load("system", true), [load]);
+	const enterShip = useCallback(() => void load("system", true, true), [load]);
 	const leaveSol = useCallback(() => void load("galaxy", true), [load]);
 
 	return (
 		<div className="absolute inset-0 overflow-hidden bg-black text-white">
 			<canvas ref={canvasRef} className="h-full w-full outline-none select-none" />
-			{loaded?.place === "galaxy" ? <GalaxyPlace galaxy={loaded.galaxy} onEnterSol={enterSol} /> : null}
+			{loaded?.place === "galaxy" ? (
+				<GalaxyPlace galaxy={loaded.galaxy} onEnterSol={enterSol} onHome={enterShip} />
+			) : null}
 			{loaded?.place === "system" ? <SystemPlace system={loaded.system} onLeave={leaveSol} /> : null}
 			{!loaded ? <GameChrome /> : null}
 			{error ? (

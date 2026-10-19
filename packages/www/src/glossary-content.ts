@@ -132,7 +132,7 @@ export const GLOSSARY: GlossarySection[] = [
 			{
 				term: "Assist",
 				id: "assist",
-				body: "A close pass that lets a planet's gravity change the ship's speed, so the burn costs less. Any planet can be that pass, and only when it sits where its gravity bends the course. A course can use more than one planet.",
+				body: "A close pass that lets a planet's gravity change the ship's speed, so the burn costs less. The Sun and any planet can be that pass, and only when it sits where its gravity bends the course. A course can use more than one.",
 				also: ["gravity assist"],
 			},
 			{

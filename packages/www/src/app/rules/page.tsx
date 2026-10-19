@@ -101,8 +101,8 @@ export default function RulesPage() {
 				<div className="mt-8 grid gap-6 lg:grid-cols-2">
 					<p className="text-sm leading-relaxed text-white/75">
 						A gravity assist is the efficient burn. The ship is already moving at orbital speed, and a close pass lets
-						a planet&apos;s gravity change that speed, so the engines spend less stored energy. Any planet can be that
-						pass, and only when it sits where its gravity bends the course. A course can use more than one planet.
+						a planet&apos;s gravity change that speed, so the engines spend less stored energy. The Sun and any planet
+						can be that pass, and only when it sits where its gravity bends the course. A course can use more than one.
 					</p>
 					<p className="text-sm leading-relaxed text-white/75">
 						A wide path stays clear of the planet, spends the full reserve, and leaves the hull alone. A close path on

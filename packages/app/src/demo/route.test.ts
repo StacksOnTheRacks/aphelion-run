@@ -151,6 +151,30 @@ function checkClear(points: Vector3[], spheres: SphereBody[], rings: RingBody[],
 	expect(route.kinds.every((kind) => kind === "burn"), "a course with no assists is all burn");
 }
 
+// A course aimed through the Sun wraps it as an assist, in the planets' plane, instead of crossing the disk.
+{
+	const sun: AssistCandidate = { name: "Sun", center: Vector3.Zero(), flyby: flybyRadius("sun") };
+	const start = new Vector3(900, 0, 0);
+	const end = new Vector3(-640, 0, 8);
+	const route = planRoute({
+		start,
+		end,
+		candidates: [sun],
+		spheres: [{ center: Vector3.Zero(), radius: SUN_DIAMETER / 2 }],
+		rings: [],
+	});
+	checkShape(route, start, end, "through the sun");
+	expect(route.assists.join(",") === "Sun", "the Sun is taken as a gravity assist");
+	expect(route.kinds.includes("assist"), "the pass around the Sun is an assist");
+	checkArcs(route, [sun], "through the sun");
+	const approach = closestFlatApproach(route.points, Vector3.Zero());
+	expect(
+		approach >= bodyOuterRadius("sun"),
+		`the course stays outside the Sun's outer orbit (closest ${approach.toFixed(2)})`
+	);
+	expect(route.points.every((point) => Math.abs(point.y) < 1e-6), "the pass around the Sun stays in the planets' plane");
+}
+
 // A burn between two outer orbits leaves and arrives along a tangent.
 {
 	const start = new Vector3(0, 2, 0);
@@ -188,6 +212,24 @@ function staysOutside(point: Vector3, other: Vector3, center: Vector3, radius: n
 		}
 	}
 	return true;
+}
+
+/** Closest the polyline comes to `center` in the planets' plane. A hop over a body still counts as crossing it. */
+function closestFlatApproach(points: Vector3[], center: Vector3): number {
+	let best = Infinity;
+	for (let i = 0; i < points.length - 1; i++) {
+		const from = points[i];
+		const to = points[i + 1];
+		const dx = to.x - from.x;
+		const dz = to.z - from.z;
+		const lengthSquared = dx * dx + dz * dz;
+		const t =
+			lengthSquared < 1e-12
+				? 0
+				: Math.min(1, Math.max(0, ((center.x - from.x) * dx + (center.z - from.z) * dz) / lengthSquared));
+		best = Math.min(best, Math.hypot(from.x + dx * t - center.x, from.z + dz * t - center.z));
+	}
+	return best;
 }
 
 function isTangent(point: Vector3, other: Vector3, center: Vector3): boolean {
@@ -278,13 +320,7 @@ function checkJourney(layout: JourneyLayout, fromId: string, toId: string, name:
 	expect(plan.arrive.id === toId && plan.arrive.turn === route.endTurn, `${name}: arrives turning the way the burn ends`);
 	expect(route.kinds.length === route.points.length - 1, `${name}: one kind per segment`);
 
-	const candidates: AssistCandidate[] = PLANETS.filter((spec) => spec.name !== fromId && spec.name !== toId).map(
-		(spec) => ({
-			name: spec.name.charAt(0).toUpperCase() + spec.name.slice(1),
-			center: layout.bodies.find((body) => body.id === spec.name)!.center,
-			flyby: flybyRadius(spec),
-		})
-	);
+	const candidates = assistCandidates(layout, fromId, toId);
 	const spheres = layout.bodies.map((body) => ({ center: body.center, radius: body.radius }));
 	const saturn = layout.bodies.find((body) => body.id === "saturn")!;
 	const flown = [...plan.climb];
@@ -296,6 +332,11 @@ function checkJourney(layout: JourneyLayout, fromId: string, toId: string, name:
 	checkClear(flown, spheres, [saturnRing(saturn.center)], name);
 	checkSteady(flown, name);
 	checkArcs(route, candidates, name);
+	const sunApproach = closestFlatApproach(flown, Vector3.Zero());
+	expect(
+		sunApproach >= SUN_DIAMETER / 2 - 0.05,
+		`${name}: the course stays clear of the Sun in the planets' plane (closest ${sunApproach.toFixed(2)})`
+	);
 	expect(route.assists.every((assist) => assist.toLowerCase() !== fromId && assist.toLowerCase() !== toId), `${name}: neither end is an assist`);
 	return route;
 }
@@ -406,11 +447,7 @@ for (let step = 0; step < 24; step++) {
 	const earth = layout.bodies.find((body) => body.id === "earth")!;
 	const mars = layout.bodies.find((body) => body.id === "mars")!;
 	const saturn = layout.bodies.find((body) => body.id === "saturn")!;
-	const candidates: AssistCandidate[] = PLANETS.filter((spec) => spec.name !== "earth" && spec.name !== "mars").map((spec) => ({
-		name: spec.name,
-		center: layout.bodies.find((body) => body.id === spec.name)!.center,
-		flyby: flybyRadius(spec),
-	}));
+	const candidates = assistCandidates(layout, "earth", "mars");
 	const spheres = layout.bodies.map((body) => ({ center: body.center, radius: body.radius }));
 	const rings = [saturnRing(saturn.center)];
 	const cost = (at: Vector3, turn: number) => {
@@ -542,6 +579,33 @@ for (const spec of PLANETS) {
 		const shell = moon.orbit - moonOuterOrbitRadius(moon.diameter);
 		expect(flyby < shell, `${spec.name} assist stays inside ${moon.name}'s honeycomb (flyby ${flyby.toFixed(2)}, shell ${shell.toFixed(2)})`);
 	}
+}
+
+{
+	const flyby = flybyRadius("sun");
+	const mercury = PLANETS.find((spec) => spec.name === "mercury")!;
+	const mercuryShell = mercury.orbit - bodyOuterRadius("mercury");
+	expect(flyby > bodyOuterRadius("sun"), "the Sun's assist stands off its outer orbit");
+	expect(flyby < mercuryShell, `the Sun's assist stays inside Mercury's orbit (flyby ${flyby.toFixed(2)}, shell ${mercuryShell.toFixed(2)})`);
+}
+
+function assistCandidates(layout: JourneyLayout, fromId: string, toId: string): AssistCandidate[] {
+	const candidates: AssistCandidate[] = [];
+	if (fromId !== "sun" && toId !== "sun") {
+		const sun = layout.bodies.find((body) => body.id === "sun")!;
+		candidates.push({ name: "Sun", center: sun.center, flyby: flybyRadius("sun") });
+	}
+	for (const spec of PLANETS) {
+		if (spec.name === fromId || spec.name === toId) {
+			continue;
+		}
+		candidates.push({
+			name: spec.name.charAt(0).toUpperCase() + spec.name.slice(1),
+			center: layout.bodies.find((body) => body.id === spec.name)!.center,
+			flyby: flybyRadius(spec),
+		});
+	}
+	return candidates;
 }
 
 // Saturn's bases sit inside its tilted rings, so the drop to them must pass over the ring, not through it.

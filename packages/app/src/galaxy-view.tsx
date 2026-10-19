@@ -14,9 +14,18 @@ const STAR_COLOR: Record<StarClass, string> = {
 	M: "#FF8F6B",
 };
 
-/** The galaxy: its chrome, the systems named on the scene, and the card a click opens. */
-export function GalaxyPlace({ galaxy, onEnterSol }: { galaxy: GalaxyDemo; onEnterSol: () => void }) {
+/** The galaxy: its chrome, the systems named on the scene, and the card a click opens. Home opens the ship's orbit in Sol. */
+export function GalaxyPlace({
+	galaxy,
+	onEnterSol,
+	onHome,
+}: {
+	galaxy: GalaxyDemo;
+	onEnterSol: () => void;
+	onHome: () => void;
+}) {
 	const chromeRef = useRef<HTMLDivElement>(null);
+	const homeRef = useRef<HTMLDivElement>(null);
 	const [openId, setOpenId] = useState<string | null>(null);
 	const card = openId ? systemCard(openId) : null;
 	const items = useMemo<LabelItem[]>(
@@ -35,10 +44,23 @@ export function GalaxyPlace({ galaxy, onEnterSol }: { galaxy: GalaxyDemo; onEnte
 
 	return (
 		<>
-			<SpaceLabels source={galaxy} items={items} title="Star systems" keepOut={chromeRef} />
+			<SpaceLabels source={galaxy} items={items} title="Star systems" keepOut={[chromeRef, homeRef]} />
 			<GameChrome ref={chromeRef}>
 				<h2 className="mt-1 text-[11px] tracking-[0.22em] text-amber-300 uppercase">Galaxy</h2>
 			</GameChrome>
+			<div
+				ref={homeRef}
+				className="pointer-events-none absolute right-0 bottom-0 z-10 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-6"
+			>
+				<button
+					type="button"
+					onClick={onHome}
+					title="Your ship's orbit"
+					className="pointer-events-auto rounded-2xl border border-[#E8E4D9]/20 bg-black/60 px-4 py-2.5 text-[11px] tracking-[0.22em] text-[#E8E4D9]/80 uppercase backdrop-blur transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+				>
+					Home
+				</button>
+			</div>
 			{card ? <SystemModal card={card} onClose={() => setOpenId(null)} onEnter={onEnterSol} /> : null}
 		</>
 	);

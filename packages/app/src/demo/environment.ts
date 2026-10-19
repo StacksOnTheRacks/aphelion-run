@@ -538,8 +538,8 @@ export function bodyOuterRadius(id: string): number {
  */
 const FLYBY_OUTSIDE = 1.1;
 
-export function flybyRadius(spec: PlanetSpec): number {
-	return bodyOuterRadius(spec.name) * FLYBY_OUTSIDE;
+export function flybyRadius(spec: PlanetSpec | "sun"): number {
+	return bodyOuterRadius(spec === "sun" ? "sun" : spec.name) * FLYBY_OUTSIDE;
 }
 
 /** A body a journey can leave from or fly to. `id` is "sun", a planet name, or a moon name. */
@@ -661,6 +661,60 @@ export function viewTrail(view: DemoView): BodyTarget[] {
 	return [];
 }
 
+export type ChartTarget = DemoView | "galaxy" | "ship";
+
+/** One corner step: the word on the button, and where it goes. `ship` is the ship's inner orbit. */
+export type ChartButton = { label: string; target: ChartTarget };
+
+/**
+ * The corner steps for a chart, top to bottom.
+ * The system chart has Home, to the ship's orbit, and Galaxy, to leave Sol.
+ * A planet or the Sun steps back to the system. A moon steps back to its planet.
+ * An inner orbit steps back to that same place: a planet's own outer orbit, or its planet's when the
+ * orbit belongs to a moon. The Sun's inner orbit steps back to the Sun.
+ */
+export function chartButtons(view: DemoView): ChartButton[] {
+	if (view === "system") {
+		return [
+			{ label: "Home", target: "ship" },
+			{ label: "Galaxy", target: "galaxy" },
+		];
+	}
+	if (view === "sun-outer") {
+		return [{ label: "System", target: "system" }];
+	}
+	if (view === "sun-inner") {
+		return [{ label: "Sun", target: "sun-outer" }];
+	}
+	for (const spec of PLANETS) {
+		const outer = planetOrbitView(spec.name, "outer");
+		if (view === outer) {
+			return [{ label: "System", target: "system" }];
+		}
+		if (view === planetOrbitView(spec.name, "inner")) {
+			return [{ label: "Planet", target: outer }];
+		}
+		for (const moon of spec.moons) {
+			if (view === moonView(spec.name, moon.name, "outer") || view === moonView(spec.name, moon.name, "inner")) {
+				return [{ label: "Planet", target: outer }];
+			}
+		}
+	}
+	return [{ label: "System", target: "system" }];
+}
+
+/**
+ * How far the wheel may move once the camera has arrived.
+ * The system chart can pull back. An outer orbit can come in to its inner orbit and no farther out
+ * than the shot it arrived on. An inner orbit stays on that shot.
+ */
+export function wheelLimits(view: DemoView, arrived: number, closer: number, chartFar: number): { near: number; far: number } {
+	if (view.endsWith("-inner")) {
+		return { near: arrived, far: arrived };
+	}
+	return { near: Math.min(arrived, closer), far: view === "system" ? chartFar : arrived };
+}
+
 /** A body and where it is on screen, in CSS pixels from the canvas's top left. */
 type BodySpot = { target: BodyTarget; x: number; y: number; radius: number };
 
@@ -720,8 +774,10 @@ export type Departure = { at: Vector3; turn: number };
  * when that way out is shorter by more than half a lap, since reversing throws away the speed the
  * ship already has. A ship that is not docked circles the way the bases do, counterclockwise.
  *
- * Every planet that is not an end of the trip may give an assist. An assist passes just outside that
- * planet's outer orbit, and the ship is still burning, so the pass is not a place it can be attacked.
+ * Every planet that is not an end of the trip may give an assist, and so may the Sun. An assist passes
+ * just outside that body's outer orbit, and the ship is still burning, so the pass is not a place it
+ * can be attacked. A course that would cross the Sun takes that pass, so the burn wraps the Sun in
+ * the planets' plane instead of cutting through it.
  */
 export function planJourney(layout: JourneyLayout, fromId: string, toId: string, depart?: Departure): JourneyPlan {
 	const byId = new Map(layout.bodies.map((body) => [body.id, body]));
@@ -734,10 +790,16 @@ export function planJourney(layout: JourneyLayout, fromId: string, toId: string,
 
 	const spheres = layout.bodies.map((body) => ({ center: body.center, radius: body.radius }));
 	const rings = [saturnRing(saturnBody.center)];
-	const candidates = PLANETS.filter((spec) => spec.name !== fromId && spec.name !== toId).flatMap((spec) => {
-		const body = byId.get(spec.name);
-		return body ? [{ name: PLANET_LABEL[spec.name], center: body.center, flyby: flybyRadius(spec) }] : [];
-	});
+	const sunBody = byId.get("sun");
+	const candidates = [
+		...(sunBody && fromId !== "sun" && toId !== "sun"
+			? [{ name: "Sun", center: sunBody.center, flyby: flybyRadius("sun") }]
+			: []),
+		...PLANETS.filter((spec) => spec.name !== fromId && spec.name !== toId).flatMap((spec) => {
+			const body = byId.get(spec.name);
+			return body ? [{ name: PLANET_LABEL[spec.name], center: body.center, flyby: flybyRadius(spec) }] : [];
+		}),
+	];
 
 	const nearestBase = () =>
 		from.bases.reduce((best, base) =>
@@ -821,11 +883,18 @@ type PlanetBody = {
 
 export type EnvironmentDemo = LabelSource & {
 	go: (view: DemoView) => void;
-	/** Calls back when a body is clicked or tapped. Returns a stop function. */
+	/** The chart on screen. */
+	view: () => DemoView;
+	/**
+	 * Opens the inner orbit of the body the ship is at and rides with the ship.
+	 * The chart learns the view through `onSelect`.
+	 */
+	home: () => void;
+	/** Calls back when the chart is sent to a body, by View or by Home. Returns a stop function. */
 	onSelect: (listener: (target: BodyTarget) => void) => () => void;
 	/**
-	 * While on, the scene finds what is near the camera and names it to `onScanFound`, and a click names
-	 * what it lands on to `onScan` instead of opening a view. Only what the scan found can be picked.
+	 * While on, the scene names what is near the camera through `onScanFound`, and a click names what it
+	 * lands on through `onScan`. Only what was named can be picked. A click never opens a view.
 	 */
 	setScanning: (on: boolean) => void;
 	onScan: (listener: (target: ScanTarget) => void) => () => void;
@@ -851,7 +920,12 @@ export type EnvironmentDemo = LabelSource & {
 	onNav: (listener: (fix: NavFix) => void) => () => void;
 };
 
-export async function createEnvironment(engine: Engine, scene: Scene, canvas: HTMLCanvasElement): Promise<EnvironmentDemo> {
+export async function createEnvironment(
+	engine: Engine,
+	scene: Scene,
+	canvas: HTMLCanvasElement,
+	options?: { atShip?: boolean }
+): Promise<EnvironmentDemo> {
 	scene.clearColor = new Color4(0.02, 0.03, 0.07, 1);
 
 	const start = SHOTS.system;
@@ -985,7 +1059,7 @@ export async function createEnvironment(engine: Engine, scene: Scene, canvas: HT
 
 	const journey = createJourney(scene, camera, glow, harborOf, ranger);
 	const cockpit = createCockpit(scene, ranger.mounts, camera, glow);
-	// The ship is Earth's until it docks somewhere else. A click on it then opens that body's inner orbit.
+	// The ship is Earth's until it docks somewhere else. Home opens that body's inner orbit.
 	const berthPlayer = () => {
 		const docked = journey.docked();
 		player.host = docked?.id ?? "earth";
@@ -1033,8 +1107,8 @@ export async function createEnvironment(engine: Engine, scene: Scene, canvas: HT
 	let moveSeconds = TRAVEL_SECONDS;
 	/** The screen shows the cockpit. The chart camera keeps its place, so it is where it was on the way back. */
 	let piloting = false;
-	/** Names what is near and makes the next click name what it lands on instead of opening a view. */
-	let scanning = false;
+	/** Names what is near. A click opens that thing's card. It does not move the camera. */
+	let scanning = true;
 	/** What the scan found, and the view it was found from. Null until the camera settles. */
 	let scanFor: DemoView | null = null;
 	let found: ScanTarget[] = [];
@@ -1129,6 +1203,12 @@ export async function createEnvironment(engine: Engine, scene: Scene, canvas: HT
 			return moon.mesh.position;
 		}
 		return planetNamed(focus as PlanetName).mesh.position;
+	};
+
+	// The ship's azimuth around whatever it orbits, so Home can sit on it instead of a fixed angle.
+	player.angle = () => {
+		const center = focusPosition(player.host);
+		return Math.atan2(ranger.position.z - center.z, ranger.position.x - center.x);
 	};
 
 	const focusRadius = (focus: Focus): number => {
@@ -1322,12 +1402,14 @@ export async function createEnvironment(engine: Engine, scene: Scene, canvas: HT
 	const restoreCamera = () => {
 		camera.lowerBetaLimit = CAMERA_BETA_MIN;
 		camera.upperBetaLimit = CAMERA_BETA_MAX;
-		const close = closestRadius(active);
-		camera.lowerRadiusLimit = close;
-		if (camera.radius < close) {
-			camera.radius = close;
+		const arrived = goalFor(active).radius;
+		const limits = wheelLimits(active, arrived, closestRadius(active), CAMERA_RADIUS_MAX);
+		camera.lowerRadiusLimit = limits.near;
+		camera.upperRadiusLimit = limits.far;
+		if (camera.radius < limits.near || camera.radius > limits.far) {
+			camera.inertialRadiusOffset = 0;
+			camera.radius = Math.min(limits.far, Math.max(limits.near, camera.radius));
 		}
-		camera.upperRadiusLimit = CAMERA_RADIUS_MAX;
 	};
 
 	const applyWorld = (position: Vector3, target: Vector3) => {
@@ -1383,7 +1465,13 @@ export async function createEnvironment(engine: Engine, scene: Scene, canvas: HT
 			restoreCamera();
 			if (shot.ride) {
 				camera.target.copyFrom(focusPosition(shot.focus));
-				camera.alpha += (riding?.view === active ? riding.rate : rideSpeed(shot.focus)) * deltaSeconds;
+				// The ship is placed by the journey, so its angle is read from where it is. Other craft
+				// advance on their own rate.
+				if (riding?.id === "player-ship") {
+					camera.alpha = riding.angle();
+				} else {
+					camera.alpha += (riding?.view === active ? riding.rate : rideSpeed(shot.focus)) * deltaSeconds;
+				}
 				return;
 			}
 			if (shot.focus !== "sun") {
@@ -1458,9 +1546,7 @@ export async function createEnvironment(engine: Engine, scene: Scene, canvas: HT
 		return { target, x: projected.x, y: projected.y, radius };
 	};
 
-	/** Below this many pixels across, a craft is a speck and a click belongs to the body behind it. */
-	const CRAFT_MIN_PIXELS = 1.2;
-	/** Extra pixels around a visible craft, so a small dot can still be clicked. */
+	/** Extra pixels around a named craft, so a small dot can still be clicked. */
 	const CRAFT_HIT_PAD = 10;
 	const craftById = new Map(crafts.map((craft) => [craft.id, craft]));
 	const craftPoint = new Vector3();
@@ -1540,21 +1626,19 @@ export async function createEnvironment(engine: Engine, scene: Scene, canvas: HT
 	};
 
 	/**
-	 * The craft nearest the point. Ignored on the whole-system map, where the bodies are the targets. A
-	 * craft too small to see is passed over, unless a scan found it.
+	 * The named craft nearest the point. The whole-system map names bodies only. A craft that was not
+	 * named cannot be picked, however large it is.
 	 */
 	const craftAt = (x: number, y: number): Craft | null => {
-		if (piloting || travel < 1 || active === "system") {
+		if (!scanning || piloting || travel < 1 || active === "system") {
 			return null;
 		}
-		const candidates = scanning
-			? found.flatMap((target) => craftById.get(target.id) ?? [])
-			: crafts;
+		const candidates = found.flatMap((target) => craftById.get(target.id) ?? []);
 		let best: Craft | null = null;
 		let bestScore = 1;
 		for (const craft of candidates) {
 			const spot = craftSpot(craft);
-			if (!spot || (!scanning && spot.radius < CRAFT_MIN_PIXELS)) {
+			if (!spot) {
 				continue;
 			}
 			const score = Math.hypot(spot.x - x, spot.y - y) / (spot.radius + CRAFT_HIT_PAD);
@@ -1566,13 +1650,13 @@ export async function createEnvironment(engine: Engine, scene: Scene, canvas: HT
 		return best;
 	};
 
-	/** The pickable body nearest the point, measured against how big each one is on screen. */
+	/** The named body nearest the point, measured against how big each one is on screen. */
 	const hitAt = (x: number, y: number): BodySpot | null => {
-		if (piloting || travel < 1) {
+		if (!scanning || piloting || travel < 1) {
 			return null;
 		}
 		const scanned = new Set(found.map((target) => target.id));
-		const targets = scanning ? scanTargets(active).filter((target) => scanned.has(target.id)) : bodyTargets(active);
+		const targets = scanTargets(active).filter((target) => scanned.has(target.id));
 		let best: BodySpot | null = null;
 		let bestScore = 1;
 		for (const target of targets) {
@@ -1596,30 +1680,22 @@ export async function createEnvironment(engine: Engine, scene: Scene, canvas: HT
 		canvas,
 		scene,
 		(x, y) => {
+			if (!scanning) {
+				return null;
+			}
 			berthPlayer();
 			const craft = craftAt(x, y);
 			const body = hitAt(x, y)?.target.id ?? null;
-			// A scan includes the body the view is on, which every craft here circles, so the craft wins.
-			return scanning ? (craft?.id ?? body) : choosePick(craft, body);
+			// The body the view is on is named along with the craft that circle it, so the craft wins.
+			return craft?.id ?? body;
 		},
 		(id) => {
+			if (!scanning) {
+				return;
+			}
 			const craft = craftById.get(id);
-			if (scanning) {
-				const target = craft ? craftFound(craft) : bodyFound(id);
-				for (const listener of scanListeners) {
-					listener(target);
-				}
-				return;
-			}
-			const target = craft
-				? { id: craft.host, label: craft.host, view: craft.view }
-				: bodyTargets(active).find((candidate) => candidate.id === id);
-			if (!target) {
-				return;
-			}
-			// The listener starts the camera move, which takes the craft chosen here.
-			chosen = craft ?? null;
-			for (const listener of selectListeners) {
+			const target = craft ? craftFound(craft) : bodyFound(id);
+			for (const listener of scanListeners) {
 				listener(target);
 			}
 		}
@@ -1696,9 +1772,33 @@ export async function createEnvironment(engine: Engine, scene: Scene, canvas: HT
 	});
 
 	placeBodies(0);
+	picker.setIdleCursor("crosshair");
+	if (options?.atShip) {
+		berthPlayer();
+		active = player.view;
+		riding = player;
+		const goal = goalFor(player.view);
+		goal.alpha = player.angle();
+		camera.alpha = goal.alpha;
+		camera.beta = goal.beta;
+		camera.radius = goal.radius;
+		camera.target.copyFrom(goal.target);
+		const shot = SHOTS[player.view];
+		setOrbitLines(shot.closeUp ? 0 : 1);
+		setCorona(shot.corona ?? 1);
+		restoreCamera();
+	}
 
 	return {
 		go: animateTo,
+		view: () => active,
+		home() {
+			berthPlayer();
+			chosen = player;
+			for (const listener of selectListeners) {
+				listener({ id: player.host, label: player.host, view: player.view });
+			}
+		},
 		onLabels(listener) {
 			labelListeners.add(listener);
 			return () => {

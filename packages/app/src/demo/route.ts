@@ -9,9 +9,9 @@ import { routeAroundBodies, type RingBody, type SphereBody } from "./camera-path
  * The course meets that circle along a tangent, so the burn does not cut through the orbit. Of the
  * ways to turn onto and off those circles, the shorter course is the one flown.
  *
- * A planet that sits near the way ahead is taken as a gravity assist: the course bends toward it,
- * wraps around it at its flyby radius with the planet on the inside of the turn, and leaves toward
- * the next pass. The arc is where the planet does the work, so it is the cheap part of the course.
+ * A body that sits near the way ahead is taken as a gravity assist: the course bends toward it,
+ * wraps around it at its flyby radius with the body on the inside of the turn, and leaves toward
+ * the next pass. The arc is where that body does the work, so it is the cheap part of the course.
  * Every straight leg between passes is routed around whatever bodies stand in the way.
  */
 
@@ -20,7 +20,7 @@ export type RouteKind = "burn" | "assist";
 export type AssistCandidate = {
 	name: string;
 	center: Vector3;
-	/** Radius of the pass around the planet. */
+	/** Radius of the pass around the body. */
 	flyby: number;
 };
 
@@ -44,7 +44,7 @@ export type Route = {
 	kinds: RouteKind[];
 	cumulative: number[];
 	total: number;
-	/** Names of the planets the course passes for an assist, in the order they are reached. */
+	/** Names of the bodies the course passes for an assist, in the order they are reached. */
 	assists: string[];
 	/** +1 counterclockwise, -1 clockwise, 0 when that end is a point. */
 	startTurn: number;
@@ -174,7 +174,7 @@ function clampDistance(route: Route, distance: number): number {
 }
 
 /**
- * Walks from the start toward the end, taking each planet whose pass is cheap enough, farthest
+ * Walks from the start toward the end, taking each body whose pass is cheap enough, farthest
  * from the end first. Each accepted pass becomes the point the next one is measured from.
  */
 function pickAssists(start: Vector3, end: Vector3, candidates: AssistCandidate[]): AssistCandidate[] {
