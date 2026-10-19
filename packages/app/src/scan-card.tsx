@@ -69,7 +69,7 @@ export function ScanModal({
 						type="button"
 						aria-label="Close"
 						onClick={onClose}
-						className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[#E8E4D9]/70 transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+						className="touch-manipulation flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[#E8E4D9]/70 transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
 					>
 						<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
 							<path d="M3.5 3.5 12.5 12.5M12.5 3.5 3.5 12.5" strokeLinecap="round" />
@@ -83,7 +83,7 @@ export function ScanModal({
 						type="button"
 						onClick={onView}
 						disabled={!view.enabled}
-						className="flex-1 rounded-xl border border-[#E8E4D9]/25 px-4 py-2.5 text-[11px] tracking-[0.22em] text-[#E8E4D9] uppercase transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:text-white/45 disabled:hover:bg-transparent focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+						className="touch-manipulation flex-1 rounded-xl border border-[#E8E4D9]/25 px-4 py-2.5 text-[11px] tracking-[0.22em] text-[#E8E4D9] uppercase transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:text-white/45 disabled:hover:bg-transparent focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
 					>
 						{view.label}
 					</button>
@@ -92,7 +92,7 @@ export function ScanModal({
 						type="button"
 						onClick={onTravel}
 						disabled={!travel.enabled}
-						className="flex-1 rounded-xl bg-amber-300 px-4 py-2.5 text-[11px] tracking-[0.22em] text-black uppercase transition-colors hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/45 disabled:hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+						className="touch-manipulation flex-1 rounded-xl bg-amber-300 px-4 py-2.5 text-[11px] tracking-[0.22em] text-black uppercase transition-colors hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/45 disabled:hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
 					>
 						{travel.label}
 					</button>

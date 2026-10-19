@@ -3,6 +3,21 @@ import type { Scene } from "@babylonjs/core/scene";
 /** A press that moves farther than this is a drag of the camera, not a click. */
 const CLICK_SLOP_PIXELS = 6;
 
+/**
+ * A release picks when this press never grew a second finger and the pointer stayed put.
+ * A second finger is a pinch, and neither finger of that gesture is a tap.
+ */
+export function isPick(
+	start: { x: number; y: number } | null,
+	end: { x: number; y: number },
+	pinched: boolean
+): boolean {
+	if (!start || pinched) {
+		return false;
+	}
+	return Math.hypot(end.x - start.x, end.y - start.y) <= CLICK_SLOP_PIXELS;
+}
+
 export type Picker = {
 	/** Finds the body under a still pointer again, since bodies move. Call once per frame. */
 	update: () => string | null;
@@ -24,24 +39,46 @@ export function trackPicks(
 	let press: { x: number; y: number } | null = null;
 	let hovered: string | null = null;
 	let idle = "";
+	const active = new Set<number>();
+	let pinched = false;
 
 	const at = (event: PointerEvent) => {
 		const box = canvas.getBoundingClientRect();
 		return { x: event.clientX - box.left, y: event.clientY - box.top };
 	};
 	const onPointerMove = (event: PointerEvent) => {
+		if (pinched || active.size > 1) {
+			pointer = null;
+			return;
+		}
 		const point = at(event);
 		const dragging = press && Math.hypot(point.x - press.x, point.y - press.y) > CLICK_SLOP_PIXELS;
 		pointer = dragging ? null : point;
 	};
 	const onPointerDown = (event: PointerEvent) => {
+		active.add(event.pointerId);
+		if (active.size > 1) {
+			pinched = true;
+			press = null;
+			pointer = null;
+			return;
+		}
 		press = at(event);
 	};
-	const onPointerUp = (event: PointerEvent) => {
+	const release = (event: PointerEvent, choose: boolean) => {
+		active.delete(event.pointerId);
+		if (pinched) {
+			press = null;
+			pointer = null;
+			if (active.size === 0) {
+				pinched = false;
+			}
+			return;
+		}
 		const start = press;
 		const point = at(event);
 		press = null;
-		if (start && Math.hypot(point.x - start.x, point.y - start.y) <= CLICK_SLOP_PIXELS) {
+		if (choose && isPick(start, point, false)) {
 			const id = pick(point.x, point.y);
 			if (id) {
 				onPick(id);
@@ -50,18 +87,28 @@ export function trackPicks(
 		// A finger leaves nothing behind to hover with.
 		pointer = event.pointerType === "mouse" ? point : null;
 	};
+	const onPointerUp = (event: PointerEvent) => {
+		release(event, true);
+	};
+	const onPointerCancel = (event: PointerEvent) => {
+		release(event, false);
+	};
 	const onPointerLeave = () => {
 		pointer = null;
 		press = null;
+		active.clear();
+		pinched = false;
 	};
 	canvas.addEventListener("pointermove", onPointerMove);
 	canvas.addEventListener("pointerdown", onPointerDown);
 	canvas.addEventListener("pointerup", onPointerUp);
+	canvas.addEventListener("pointercancel", onPointerCancel);
 	canvas.addEventListener("pointerleave", onPointerLeave);
 	scene.onDisposeObservable.add(() => {
 		canvas.removeEventListener("pointermove", onPointerMove);
 		canvas.removeEventListener("pointerdown", onPointerDown);
 		canvas.removeEventListener("pointerup", onPointerUp);
+		canvas.removeEventListener("pointercancel", onPointerCancel);
 		canvas.removeEventListener("pointerleave", onPointerLeave);
 		canvas.style.cursor = "";
 	});

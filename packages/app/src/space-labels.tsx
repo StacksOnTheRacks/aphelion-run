@@ -173,7 +173,7 @@ export function SpaceLabels({
 								onPointerLeave={() => point(null)}
 								onFocus={() => point(item.id)}
 								onBlur={() => point(null)}
-								className="pointer-events-auto block rounded-md px-1 py-1 font-medium tracking-[0.2em] text-[#E8E4D9] uppercase transition-colors group-data-[active=true]:text-amber-300 focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+								className="pointer-events-auto touch-manipulation block rounded-md px-1 py-1 font-medium tracking-[0.2em] text-[#E8E4D9] uppercase transition-colors group-data-[active=true]:text-amber-300 focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
 							>
 								{item.label}
 							</button>

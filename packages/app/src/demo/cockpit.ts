@@ -54,6 +54,19 @@ const LOOK_UP = 0.6;
 const LOOK_DOWN = 0.45;
 /** Seconds for the head to catch up with a drag, so a flick turns it rather than jumping. */
 const LOOK_SECONDS = 0.08;
+/** A second tap this soon, and this close to the first, looks ahead again. */
+const DOUBLE_TAP_MS = 300;
+const DOUBLE_TAP_SLOP = 24;
+
+type Tap = { t: number; x: number; y: number };
+
+/** A second still tap in the same place. The page no longer sees this as a double-tap zoom. */
+export function isDoubleTap(previous: Tap | null, tap: Tap): boolean {
+	if (!previous) {
+		return false;
+	}
+	return tap.t - previous.t <= DOUBLE_TAP_MS && Math.hypot(tap.x - previous.x, tap.y - previous.y) <= DOUBLE_TAP_SLOP;
+}
 
 type Rig = {
 	mount: TransformNode;
@@ -126,16 +139,32 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 	let active = false;
 
 	// Dragging grabs the view: the world follows the pointer, so the head turns the other way.
+	// A second tap in the same place looks ahead. The browser's double-tap zoom is the same gesture,
+	// so this is recognized here instead of from a dblclick.
 	let aim: Head = { yaw: 0, pitch: 0 };
 	let head: Head = { yaw: 0, pitch: 0 };
-	let drag: { id: number; x: number; y: number } | null = null;
+	let drag: { id: number; x: number; y: number; originX: number; originY: number } | null = null;
+	let lastTap: Tap | null = null;
+	const fingers = new Set<number>();
 	const canvas = engine.getRenderingCanvas();
 	const radiansPerPixel = () => WINDSCREEN_FOV / Math.max(1, canvas?.clientHeight ?? 1);
 	const onDown = (event: PointerEvent) => {
-		if (!active || drag || event.button !== 0) {
+		fingers.add(event.pointerId);
+		if (!active || event.button !== 0 || fingers.size > 1) {
+			drag = null;
+			lastTap = null;
 			return;
 		}
-		drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
+		if (drag) {
+			return;
+		}
+		drag = {
+			id: event.pointerId,
+			x: event.clientX,
+			y: event.clientY,
+			originX: event.clientX,
+			originY: event.clientY,
+		};
 	};
 	const onMove = (event: PointerEvent) => {
 		if (!drag || event.pointerId !== drag.id) {
@@ -150,27 +179,47 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 		drag.y = event.clientY;
 	};
 	const onUp = (event: PointerEvent) => {
-		if (drag && event.pointerId === drag.id) {
-			drag = null;
+		fingers.delete(event.pointerId);
+		if (!drag || event.pointerId !== drag.id) {
+			return;
+		}
+		const originX = drag.originX;
+		const originY = drag.originY;
+		drag = null;
+		if (!active || fingers.size > 0) {
+			lastTap = null;
+			return;
+		}
+		const moved = Math.hypot(event.clientX - originX, event.clientY - originY);
+		if (moved > DOUBLE_TAP_SLOP) {
+			lastTap = null;
+			return;
+		}
+		const tap = { t: performance.now(), x: event.clientX, y: event.clientY };
+		if (isDoubleTap(lastTap, tap)) {
+			aim = { yaw: 0, pitch: 0 };
+			lastTap = null;
+		} else {
+			lastTap = tap;
 		}
 	};
-	const onRecenter = () => {
-		if (active) {
-			aim = { yaw: 0, pitch: 0 };
+	const onCancel = (event: PointerEvent) => {
+		fingers.delete(event.pointerId);
+		if (drag && event.pointerId === drag.id) {
+			drag = null;
+			lastTap = null;
 		}
 	};
 	// A drag starts on the scene and follows the pointer anywhere, over the chrome and off the page.
 	canvas?.addEventListener("pointerdown", onDown);
-	canvas?.addEventListener("dblclick", onRecenter);
 	window.addEventListener("pointermove", onMove);
 	window.addEventListener("pointerup", onUp);
-	window.addEventListener("pointercancel", onUp);
+	window.addEventListener("pointercancel", onCancel);
 	scene.onDisposeObservable.addOnce(() => {
 		canvas?.removeEventListener("pointerdown", onDown);
-		canvas?.removeEventListener("dblclick", onRecenter);
 		window.removeEventListener("pointermove", onMove);
 		window.removeEventListener("pointerup", onUp);
-		window.removeEventListener("pointercancel", onUp);
+		window.removeEventListener("pointercancel", onCancel);
 	});
 
 	const position = new Vector3();

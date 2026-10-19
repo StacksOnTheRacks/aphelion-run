@@ -24,15 +24,17 @@ Each system has a wormhole at its edge. A ship leaves through its own and arrive
 
 ## Planet outer orbit
 
-The planet and its moons. A tap on a moon opens that moon’s outer orbit.
+The planet and its moons. A tap on a moon opens that moon’s outer orbit. A tap on the planet comes in on the planet and stays on this chart. Zoom does the same. That framing is the one a moon chart uses: close enough to read the outer orbit. Planet, the corner step, pulls back out.
 
-This is the planet’s battle surface. A ship sitting here can be attacked. A ship on a photon burn between bodies cannot. From here the player can scan the inner orbit. That scan is named in the brief. It is not yet a control.
+While the camera is still wide enough to take in the moons, the names are the planet and its moons. Nothing orbiting either is named. Once the camera comes in to that close orbit, the names are the planet and the craft that orbit it. The moons drop off.
 
-The Sun’s outer orbit uses this same role. Ships arrive there. The collectors sit further in. They belong to one galaxy-wide company. The company is not named. Siphoning one is theft, as that company sees it.
+This is the planet’s battle surface. A ship sitting here can be attacked. A ship on a photon burn between bodies cannot.
+
+The Sun’s outer orbit uses this same role. Ships arrive there. The collectors sit further in. They belong to one galaxy-wide company. The company is not named. Siphoning one is theft, as that company sees it. Outside the close orbit the chart names the Sun. Inside it, the chart names the collectors too.
 
 ## Moon outer orbit
 
-The same visual rules as a planet’s outer orbit. The current sky uses the same camera angles, frames the moon with room around it, and hides the orbit line that would cut across it.
+The same visual rules as a planet’s outer orbit. The current sky uses the same camera angles, frames the moon with room around it, and hides the orbit line that would cut across it. The moon arrives already framed on its own, so the names are the moon and the craft that orbit it.
 
 A moon’s outer orbit is its own battle surface, not the planet’s. Earth’s Moon is the exception: it is not a combat zone.
 
@@ -42,7 +44,7 @@ Every body has one, including each moon and the Sun. Mining, docking, and siphon
 
 Moving between the inner orbit and the outer orbit is a slow impulse rocket. Travel between bodies is a photon rocket from outer orbit to outer orbit. A ship on that burn cannot be attacked. A ship in an outer orbit can challenge a ship that is mining that body, or a ship sitting idle in that outer orbit. A depleted mine or a finished Earth sale puts the ship back in that idle orbit.
 
-Open: there is no chosen way to go from a planet or moon outer orbit into its inner orbit. Zoom is the way the camera can get closer today, and it is the wrong mechanism. A click on a base, a station, or a collector currently flies the camera into the inner orbit and rides with that craft. That is also a stand-in. The replacement has not been decided.
+Open: there is no chosen way to go from a planet or moon outer orbit into its inner orbit. Zoom looks in at what orbits the body and stays on the chart the player is already on. A click on a base, a station, or a collector currently flies the camera into the inner orbit and rides with that craft. That is also a stand-in. The replacement has not been decided.
 
 Whatever replaces it has to be the same action on a phone and on a desk, and it has to work when the player wants to look inward before choosing a craft. Changing the zoom must keep the player on the surface they are already on.
 
@@ -54,4 +56,4 @@ Whatever replaces it has to be the same action on a phone and on a desk, and it 
 
 Chart and Pilot are camera modes, not surfaces. Chart is the system view above. Pilot puts the camera at the pilot's seat, looking out the windscreen, with an aft view on each side placed so the side thrusters show when they fire. The ranger has no modelled cabin, so the windscreen shows space and nothing of the ship. Dragging turns the pilot's head within a neck's reach, and a double click looks ahead again. A dashboard under the windscreen shows where the ship is: the whole system on one dial, the body it is at with its moons on another, and its bearing, course, and how far along the run it is. While piloting, the breadcrumb and scanning are hidden. One button in the lower right switches to whichever mode is not showing, at any time, in flight or docked.
 
-Bodies and craft are not named on the chart. Scan sits beside the mode button in Chart. It names what is near: the bodies this view offers, the body it is on, and the craft circling any of them, at most the ten nearest the camera. Only those can be picked while it is on, so a craft too small to see can still be reached. A pick, on the scene or by its name, opens a card. View takes the camera to a body's outer orbit, or alongside a craft. Travel To counts down five seconds, which can be cancelled, and then flies from wherever the ship sits. It is offered only while the ship is in orbit or docked, and not for the body the ship already orbits. A ship in flight cannot be rerouted.
+The chart names what the framing is about, at most the ten nearest the camera, and only those can be picked. The system chart names the Sun and the planets. A planet chart names the planet and its moons until a tap or the wheel comes in on the planet, and then it names the planet and what orbits it. A moon chart names that moon and what orbits it. Swinging the camera names what comes around into view. A tap on the Sun, a planet, or a moon goes there. A tap on a home base, a station, or a collector opens a card. View rides alongside that craft. Travel To counts down five seconds, which can be cancelled, and then flies from wherever the ship sits. It is offered only while the ship is in orbit or docked, and not for the body the ship already orbits. A ship in flight cannot be rerouted.

@@ -11,6 +11,7 @@ import type { Scene } from "@babylonjs/core/scene";
 
 import { awayFrom, type LabelAnchor, type LabelFrame, type LabelSource } from "./labels";
 import { trackPicks } from "./pointer";
+import { attachChartCamera, nudgeChartZoom, tuneChartCamera, type ZoomDirection } from "./zoom";
 
 /**
  * The Milky Way seen from above its north pole, with Sol and the systems around it.
@@ -209,6 +210,8 @@ export function systemCardAction(card: SystemCard): { label: string; enabled: bo
 export type GalaxyDemo = LabelSource & {
 	/** Calls back when a system is clicked or tapped. Returns a stop function. */
 	onSelect: (listener: (id: string) => void) => () => void;
+	/** One notch of the chart wheel. During the opening glide this only hurries the arrival. */
+	zoom: (direction: ZoomDirection) => void;
 };
 
 /** `opening` plays the glide from the whole galaxy down to Sol. Without it the camera starts settled on Sol. */
@@ -228,8 +231,7 @@ export function createGalaxy(
 	camera.upperRadiusLimit = 1600;
 	camera.lowerBetaLimit = 0.01;
 	camera.upperBetaLimit = 1.2;
-	camera.panningSensibility = 0;
-	camera.wheelDeltaPercentage = 0.02;
+	tuneChartCamera(camera);
 	camera.minZ = 1;
 	camera.maxZ = SKY_RADIUS * 2.5;
 	scene.activeCamera = camera;
@@ -258,7 +260,7 @@ export function createGalaxy(
 		camera.alpha = -Math.PI / 2;
 		camera.beta = SETTLE_BETA;
 		camera.radius = settledRadius();
-		camera.attachControl(canvas, true);
+		attachChartCamera(camera, canvas);
 	};
 	if (still) {
 		settle();
@@ -382,6 +384,13 @@ export function createGalaxy(
 			return () => {
 				selectListeners.delete(listener);
 			};
+		},
+		zoom(direction) {
+			if (glide < 1) {
+				hurry();
+				return;
+			}
+			nudgeChartZoom(camera, direction);
 		},
 	};
 }

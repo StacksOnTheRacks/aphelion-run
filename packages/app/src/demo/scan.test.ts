@@ -4,6 +4,7 @@ import {
 	destinationName,
 	scanCard,
 	scanLabel,
+	showsCard,
 	secondsLeft,
 	travelAction,
 	viewAction,
@@ -56,10 +57,17 @@ expect(scanLabel(collector) === "Unoccupied collector", "a scanned collector rea
 expect(scanLabel(marsHome) === "Corporate home base", "a scanned home base reads by who holds it");
 expect(scanLabel(earthStation) === "Marauder station", "a scanned station reads by who holds it");
 
+expect(!showsCard(mars) && !showsCard(titan) && !showsCard(sun), "a body is entered on click");
+expect(showsCard(marsHome) && showsCard(earthStation) && showsCard(collector), "a home, a station, or a collector opens its card");
+
 expect(viewAction(mars, "system").enabled, "a body can be viewed from the whole system");
-expect(!viewAction(mars, "mars-outer").enabled, "a body already in view is not viewed again");
+expect(viewAction(mars, "mars-outer").enabled && viewAction(mars, "mars-outer").label === "View", "a wide planet chart can come in on the planet");
+expect(!viewAction(mars, "mars-outer", true).enabled && viewAction(mars, "mars-outer", true).label === "In view", "a planet already framed close is in view");
+expect(!viewAction(titan, "saturn-titan-outer").enabled, "a moon chart is already the direct view");
 expect(viewAction(mars, "mars-inner").enabled, "from a body's inner orbit, View steps back out to its outer orbit");
 expect(viewAction(collector, "sun-inner").enabled, "a craft can always be ridden alongside");
+expect(viewAction(sun, "sun-outer").enabled, "the Sun's wide chart can come in on the Sun");
+expect(!viewAction(sun, "sun-outer", true).enabled, "the Sun already framed close is in view");
 
 const start = 1_000_000;
 const ends = start + DEPARTURE_SECONDS * 1000;

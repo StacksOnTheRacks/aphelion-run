@@ -5,6 +5,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { NEIGHBORS, SOL_ID, systemCard, systemCardAction, type GalaxyDemo, type StarClass, type SystemCard } from "./demo/galaxy";
 import { GameChrome } from "./game-chrome";
 import { SpaceLabels, type LabelItem } from "./space-labels";
+import { ZoomControls } from "./zoom-controls";
 
 const STAR_COLOR: Record<StarClass, string> = {
 	A: "#C7D9FF",
@@ -26,6 +27,8 @@ export function GalaxyPlace({
 }) {
 	const chromeRef = useRef<HTMLDivElement>(null);
 	const homeRef = useRef<HTMLDivElement>(null);
+	const zoomRef = useRef<HTMLDivElement>(null);
+	const keepOut = useMemo(() => [chromeRef, homeRef, zoomRef], []);
 	const [openId, setOpenId] = useState<string | null>(null);
 	const card = openId ? systemCard(openId) : null;
 	const items = useMemo<LabelItem[]>(
@@ -44,7 +47,7 @@ export function GalaxyPlace({
 
 	return (
 		<>
-			<SpaceLabels source={galaxy} items={items} title="Star systems" keepOut={[chromeRef, homeRef]} />
+			<SpaceLabels source={galaxy} items={items} title="Star systems" keepOut={keepOut} />
 			<GameChrome ref={chromeRef}>
 				<h2 className="mt-1 text-[11px] tracking-[0.22em] text-amber-300 uppercase">Galaxy</h2>
 			</GameChrome>
@@ -56,11 +59,12 @@ export function GalaxyPlace({
 					type="button"
 					onClick={onHome}
 					title="Your ship's orbit"
-					className="pointer-events-auto rounded-2xl border border-[#E8E4D9]/20 bg-black/60 px-4 py-2.5 text-[11px] tracking-[0.22em] text-[#E8E4D9]/80 uppercase backdrop-blur transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+					className="pointer-events-auto touch-manipulation rounded-2xl border border-[#E8E4D9]/20 bg-black/60 px-4 py-2.5 text-[11px] tracking-[0.22em] text-[#E8E4D9]/80 uppercase backdrop-blur transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
 				>
 					Home
 				</button>
 			</div>
+			<ZoomControls ref={zoomRef} onZoom={galaxy.zoom} />
 			{card ? <SystemModal card={card} onClose={() => setOpenId(null)} onEnter={onEnterSol} /> : null}
 		</>
 	);
@@ -120,7 +124,7 @@ function SystemModal({ card, onClose, onEnter }: { card: SystemCard; onClose: ()
 						type="button"
 						aria-label="Close"
 						onClick={onClose}
-						className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[#E8E4D9]/70 transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+						className="touch-manipulation flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[#E8E4D9]/70 transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
 					>
 						<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
 							<path d="M3.5 3.5 12.5 12.5M12.5 3.5 3.5 12.5" strokeLinecap="round" />
@@ -133,7 +137,7 @@ function SystemModal({ card, onClose, onEnter }: { card: SystemCard; onClose: ()
 					type="button"
 					onClick={onEnter}
 					disabled={!action.enabled}
-					className="mt-5 w-full rounded-xl bg-amber-300 px-4 py-2.5 text-[11px] tracking-[0.22em] text-black uppercase transition-colors hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/45 disabled:hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+					className="touch-manipulation mt-5 w-full rounded-xl bg-amber-300 px-4 py-2.5 text-[11px] tracking-[0.22em] text-black uppercase transition-colors hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/45 disabled:hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
 				>
 					{action.label}
 				</button>

@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AFT_VIEWS, type ScreenRect } from "./demo/cockpit";
-import { chartButtons, type ChartButton, type DemoView, type EnvironmentDemo } from "./demo/environment";
+import { chartButtons, wideChartStep, type ChartButton, type DemoView, type EnvironmentDemo } from "./demo/environment";
 import {
 	DEPARTURE_SECONDS,
 	destinationName,
 	placeName,
 	scanCard,
 	scanLabel,
+	showsCard,
 	secondsLeft,
 	travelAction,
 	viewAction,
@@ -19,6 +20,7 @@ import { Dashboard } from "./dashboard";
 import { GameChrome } from "./game-chrome";
 import { ScanModal } from "./scan-card";
 import { SpaceLabels, type LabelItem } from "./space-labels";
+import { ZoomControls } from "./zoom-controls";
 
 type Mode = "chart" | "pilot";
 
@@ -31,23 +33,25 @@ const STEP_TITLE: Record<string, string> = {
 };
 
 const cornerClass =
-	"pointer-events-auto flex items-center gap-2 rounded-2xl border border-[#E8E4D9]/20 bg-black/60 px-4 py-2.5 text-[11px] tracking-[0.22em] text-[#E8E4D9]/80 uppercase backdrop-blur transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none";
+	"pointer-events-auto touch-manipulation flex items-center gap-2 rounded-2xl border border-[#E8E4D9]/20 bg-black/60 px-4 py-2.5 text-[11px] tracking-[0.22em] text-[#E8E4D9]/80 uppercase backdrop-blur transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none";
 
 /**
- * Sol, and the chrome over it. Names stay on: the nearest bodies and craft, and a pick on the scene or
- * by its name opens a card. View takes the camera there, and Travel To counts down and then flies the
- * ship there from wherever it sits. A pick does not move the camera on its own. The cockpit has no
- * names and no picks.
+ * Sol, and the chrome over it. Names follow the framing: a wide planet chart names the planet and its
+ * moons, and a chart on one body names that body and what orbits it. A pick on a body goes there.
+ * A pick on a home base, a station, or a collector opens a card: View rides alongside it, and Travel
+ * To counts down and then flies the ship there from wherever it sits. The cockpit has no names and
+ * no picks.
  *
- * The lower right is Pilot, or Chart while piloting. Above it, one step back: System from a planet or
- * the Sun, Planet from a moon or from an inner orbit. The system chart has no Pilot. Its buttons are
- * Home, which opens the ship's orbit, and Galaxy, which leaves Sol. Escape takes the same step as the
- * top button. Dragging turns the pilot's head.
+ * The lower right is Pilot, or Chart while piloting, on every Sol chart including the system. Above it,
+ * one step back: System from a planet or the Sun, Planet from a moon or from an inner orbit. The system
+ * chart's steps are Home, which opens the ship's orbit, and Galaxy, which leaves Sol. Escape takes the
+ * same step as the top button. Dragging turns the pilot's head.
  */
 export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLeave: () => void }) {
 	const chromeRef = useRef<HTMLDivElement>(null);
 	const controlsRef = useRef<HTMLDivElement>(null);
-	const keepOut = useMemo(() => [chromeRef, controlsRef], []);
+	const zoomRef = useRef<HTMLDivElement>(null);
+	const keepOut = useMemo(() => [chromeRef, controlsRef, zoomRef], []);
 	const [view, setView] = useState<DemoView>(() => system.view());
 	const [mode, setMode] = useState<Mode>("chart");
 	const [found, setFound] = useState<ScanTarget[]>([]);
@@ -56,8 +60,10 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const [now, setNow] = useState(() => Date.now());
 	const [flight, setFlight] = useState<ScanTarget | null>(null);
 	const [docked, setDocked] = useState<ScanTarget | null>(null);
+	const [close, setClose] = useState(false);
 	const piloting = mode === "pilot";
-	const steps = chartButtons(view);
+	const back = close ? wideChartStep(view) : null;
+	const steps = back ? [back] : chartButtons(view);
 
 	const go = useCallback(
 		(next: DemoView) => {
@@ -67,9 +73,22 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		[system]
 	);
 
+	const pick = useCallback(
+		(target: ScanTarget) => {
+			if (showsCard(target)) {
+				setScanned(target);
+				return;
+			}
+			setScanned(null);
+			system.visit(target);
+		},
+		[system]
+	);
+
 	useEffect(() => system.onSelect((target) => go(target.view)), [system, go]);
-	useEffect(() => system.onScan(setScanned), [system]);
+	useEffect(() => system.onScan(pick), [system, pick]);
 	useEffect(() => system.onScanFound(setFound), [system]);
+	useEffect(() => system.onFraming(setClose), [system]);
 	useEffect(() => system.setScanning(!piloting), [system, piloting]);
 	useEffect(() => system.setPiloting(piloting), [system, piloting]);
 
@@ -113,10 +132,10 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 			return {
 				id: target.id,
 				label,
-				onSelect: () => setScanned(target),
+				onSelect: () => pick(target),
 			};
 		});
-	}, [found, piloting]);
+	}, [found, piloting, pick]);
 
 	const take = useCallback(
 		(button: ChartButton) => {
@@ -124,6 +143,8 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 				onLeave();
 			} else if (button.target === "ship") {
 				system.home();
+			} else if (button.target === "wide") {
+				system.widen();
 			} else {
 				go(button.target);
 			}
@@ -179,7 +200,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 					onStop={stop}
 				/>
 			</GameChrome>
-			{piloting ? <AftFrames /> : null}
+			{piloting ? <AftFrames /> : <ZoomControls ref={zoomRef} onZoom={system.zoom} />}
 			{piloting ? <Dashboard system={system} course={bound ? scanCard(bound).label : null} /> : null}
 			<div
 				ref={controlsRef}
@@ -198,34 +219,32 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 								{button.label}
 							</button>
 						))}
-				{view === "system" && !piloting ? null : (
-					<button
-						type="button"
-						onClick={togglePilot}
-						aria-label={piloting ? "Switch to chart view" : "Switch to pilot view"}
-						title={piloting ? "Back to the chart" : "Into the cockpit"}
-						className={cornerClass}
-					>
-						{piloting ? (
-							<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-								<circle cx="8" cy="8" r="6" />
-								<ellipse cx="8" cy="8" rx="6" ry="2.2" />
-								<circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
-							</svg>
-						) : (
-							<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-								<path d="M2 11.5 4 5h8l2 6.5" strokeLinejoin="round" />
-								<path d="M2 11.5h12M8 5v2.5" strokeLinecap="round" />
-							</svg>
-						)}
-						{piloting ? "Chart" : "Pilot"}
-					</button>
-				)}
+				<button
+					type="button"
+					onClick={togglePilot}
+					aria-label={piloting ? "Switch to chart view" : "Switch to pilot view"}
+					title={piloting ? "Back to the chart" : "Into the cockpit"}
+					className={cornerClass}
+				>
+					{piloting ? (
+						<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+							<circle cx="8" cy="8" r="6" />
+							<ellipse cx="8" cy="8" rx="6" ry="2.2" />
+							<circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
+						</svg>
+					) : (
+						<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+							<path d="M2 11.5 4 5h8l2 6.5" strokeLinejoin="round" />
+							<path d="M2 11.5h12M8 5v2.5" strokeLinecap="round" />
+						</svg>
+					)}
+					{piloting ? "Chart" : "Pilot"}
+				</button>
 			</div>
 			{scanned ? (
 				<ScanModal
 					card={scanCard(scanned)}
-					view={viewAction(scanned, view)}
+					view={viewAction(scanned, view, close)}
 					travel={travelAction(scanned, ship)}
 					onClose={() => setScanned(null)}
 					onView={() => {
@@ -282,7 +301,7 @@ function ShipStatus({
 				<button
 					type="button"
 					onClick={action.onClick}
-					className="pointer-events-auto rounded-xl border border-[#E8E4D9]/20 bg-black/50 px-3 py-1 text-[11px] tracking-[0.22em] text-amber-300 uppercase backdrop-blur transition-colors hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+					className="pointer-events-auto touch-manipulation rounded-xl border border-[#E8E4D9]/20 bg-black/50 px-3 py-1 text-[11px] tracking-[0.22em] text-amber-300 uppercase backdrop-blur transition-colors hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
 				>
 					{action.label}
 				</button>

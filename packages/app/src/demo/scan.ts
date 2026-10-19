@@ -128,9 +128,24 @@ export function scanLabel(target: ScanTarget): string {
 	return card.label;
 }
 
-/** The card's camera action: off to a body's outer orbit, or alongside a craft. Off when already there. */
-export function viewAction(target: ScanTarget, view: DemoView): { label: string; enabled: boolean } {
+/**
+ * A craft opens a card, because a home base, a station, or a collector can be traveled to.
+ * A star, a planet, or a moon is entered on the click itself.
+ */
+export function showsCard(target: ScanTarget): boolean {
+	return target.id !== target.host;
+}
+
+/**
+ * The card's camera action: off to a body's outer orbit, or alongside a craft.
+ * On a planet's or the Sun's wide chart, View comes in on that body. Off once that closer framing
+ * is already showing, and off on a moon chart, which arrives there.
+ */
+export function viewAction(target: ScanTarget, view: DemoView, close = false): { label: string; enabled: boolean } {
 	if (target.id === target.host && bodyTarget(target.id).view === view) {
+		if (view === `${target.id}-outer` && !close) {
+			return { label: "View", enabled: true };
+		}
 		return { label: "In view", enabled: false };
 	}
 	return { label: "View", enabled: true };

@@ -54,6 +54,7 @@ import type { NavBody, NavFix, NavPoint } from "./nav";
 import type { ScanKind, ScanTarget } from "./scan";
 import { createMoonTerrain } from "./moon-terrain";
 import { trackPicks } from "./pointer";
+import { attachChartCamera, nudgeChartZoom, tuneChartCamera, type ZoomDirection } from "./zoom";
 import { departureSpiral, planRoute, reversalPenalty } from "./route";
 
 type PlanetName = EphemerisPlanet;
@@ -661,7 +662,55 @@ export function viewTrail(view: DemoView): BodyTarget[] {
 	return [];
 }
 
-export type ChartTarget = DemoView | "galaxy" | "ship";
+/** Bodies this chart is on, outermost first. The inner-orbit crumb is not a body. */
+function chartBodies(view: DemoView): BodyTarget[] {
+	return viewTrail(view).filter((body) => !body.id.endsWith("-stop"));
+}
+
+/** What a framing names: the bodies, and the one host whose orbiting craft are named. */
+export type ScanScope = { bodies: BodyTarget[]; craftHost: string | null };
+
+/**
+ * What this framing names.
+ * The system chart names the Sun and the planets, and never a craft.
+ * A planet or the Sun, while the camera is still outside the close orbit, names that body and, for a
+ * planet, its moons. Nothing orbiting them is named.
+ * A moon chart, an inner orbit, or a camera that has come in to the close orbit names the focused
+ * body and the craft that orbit it. Moons of a zoomed planet drop off.
+ */
+export function scanScope(view: DemoView, close: boolean): ScanScope {
+	if (view === "system") {
+		return { bodies: scanTargets(view), craftHost: null };
+	}
+	const focus = chartBodies(view).at(-1);
+	if (!focus) {
+		return { bodies: [], craftHost: null };
+	}
+	const wide = !close && view.endsWith("-outer") && chartBodies(view).length === 1;
+	if (wide) {
+		return { bodies: scanTargets(view), craftHost: null };
+	}
+	return { bodies: [focus], craftHost: focus.id };
+}
+
+/**
+ * How near the camera must be before a planet or the Sun is framed on that one body.
+ * The same stand-off a moon's outer orbit uses: `filled` is the distance at which the body covers
+ * `MOON_OUTER_FILL` of the shorter side, and the camera also stays outside the outer-orbit shell.
+ */
+export function closeOrbitDistance(filled: number, outerRadius: number): number {
+	return Math.max(filled, outerRadius * OUTER_VIEW_MARGIN);
+}
+
+/** How far back past the close orbit a chart may drift before it names the family again. */
+export const CLOSE_HOLD = 0.08;
+
+/** True while the camera is inside the close orbit, holding a little past it once it has come in. */
+export function holdClose(radius: number, closeRadius: number, wasClose: boolean): boolean {
+	return radius <= (wasClose ? closeRadius * (1 + CLOSE_HOLD) : closeRadius);
+}
+
+export type ChartTarget = DemoView | "galaxy" | "ship" | "wide";
 
 /** One corner step: the word on the button, and where it goes. `ship` is the ship's inner orbit. */
 export type ChartButton = { label: string; target: ChartTarget };
@@ -701,6 +750,19 @@ export function chartButtons(view: DemoView): ChartButton[] {
 		}
 	}
 	return [{ label: "System", target: "system" }];
+}
+
+/**
+ * The step back from a planet's close framing, when that planet has moons.
+ * It pulls the camera out to the wide chart. Null on the Sun, a moon, and a planet with no moons.
+ */
+export function wideChartStep(view: DemoView): ChartButton | null {
+	for (const spec of PLANETS) {
+		if (view === planetOrbitView(spec.name, "outer") && spec.moons.length > 0) {
+			return { label: "Planet", target: "wide" };
+		}
+	}
+	return null;
 }
 
 /**
@@ -894,19 +956,28 @@ export type EnvironmentDemo = LabelSource & {
 	onSelect: (listener: (target: BodyTarget) => void) => () => void;
 	/**
 	 * While on, the scene names what is near the camera through `onScanFound`, and a click names what it
-	 * lands on through `onScan`. Only what was named can be picked. A click never opens a view.
+	 * lands on through `onScan`. Only what was named can be picked. A body click is entered by the chart.
+	 * A craft click is left for the card.
 	 */
 	setScanning: (on: boolean) => void;
 	onScan: (listener: (target: ScanTarget) => void) => () => void;
 	/**
-	 * Calls back with what a scan found: the bodies this view offers, the body it is on, and the craft
-	 * circling any of them, nearest the camera first and at most `SCAN_LIMIT`. It is found once the camera
-	 * settles on a view, and again on the next, so names stay on their objects as craft move. Empty while
-	 * not scanning or while the camera moves.
+	 * Calls back with what the framing names, nearest the camera first and at most `SCAN_LIMIT`.
+	 * The system chart names the Sun and the planets. A wide planet chart names the planet and its moons.
+	 * A moon chart, an inner orbit, or a planet zoomed in to one body names that body and the craft
+	 * orbiting it. The set is found again as the camera swings and zooms, and the callback runs when the
+	 * named ids change. Empty while not scanning or while the camera is still flying to a view.
 	 */
 	onScanFound: (listener: (found: ScanTarget[]) => void) => () => void;
-	/** Takes the camera to a scanned body's outer orbit, or rides alongside a scanned craft. */
+	/** Takes the camera to a scanned body's outer orbit, or rides alongside a scanned craft. On a wide planet or Sun chart, View of that body comes in to the close framing instead. */
 	visit: (target: ScanTarget) => void;
+	/** Pulls a close planet chart back out to the wide shot, where the moons are named. */
+	widen: () => void;
+	/**
+	 * Calls back with whether the camera is in the close framing, where a single body and what orbits
+	 * it are named. The callback runs when that changes, and once when the listener is added.
+	 */
+	onFraming: (listener: (close: boolean) => void) => () => void;
 	/**
 	 * Flies the ship from where it sits, its dock or its orbit at Earth, to the target's body and docks
 	 * it there: with the target itself when that is a craft. `onDone` runs once it has docked.
@@ -916,6 +987,8 @@ export type EnvironmentDemo = LabelSource & {
 	land: () => void;
 	/** Puts the camera in the ranger's cockpit, with both aft views, or back on the chart where it left. */
 	setPiloting: (on: boolean) => void;
+	/** One notch of the chart wheel, held to this chart's limits. Ignored in the cockpit and while the camera is flying. */
+	zoom: (direction: ZoomDirection) => void;
 	/** Calls back every frame while piloting with where the ship is in the system. Returns a stop function. */
 	onNav: (listener: (fix: NavFix) => void) => () => void;
 };
@@ -936,8 +1009,8 @@ export async function createEnvironment(
 	camera.upperRadiusLimit = CAMERA_RADIUS_MAX;
 	camera.minZ = 0.1;
 	camera.maxZ = 9000;
-	camera.wheelDeltaPercentage = 0.02;
-	camera.attachControl(canvas, true);
+	tuneChartCamera(camera);
+	attachChartCamera(camera, canvas);
 	scene.activeCamera = camera;
 
 	const sunlight = new PointLight("sunlight", Vector3.Zero(), scene);
@@ -1109,9 +1182,21 @@ export async function createEnvironment(
 	let piloting = false;
 	/** Names what is near. A click opens that thing's card. It does not move the camera. */
 	let scanning = true;
-	/** What the scan found, and the view it was found from. Null until the camera settles. */
-	let scanFor: DemoView | null = null;
 	let found: ScanTarget[] = [];
+	/** The chart has come in to the close orbit, so the hold band applies on the way back out. */
+	let namingCraft = false;
+	const framingListeners = new Set<(close: boolean) => void>();
+	const publishFraming = (close: boolean) => {
+		if (namingCraft === close) {
+			return;
+		}
+		namingCraft = close;
+		for (const listener of framingListeners) {
+			listener(close);
+		}
+	};
+	/** A radius move that stays on this chart: in to the close framing, or back out to the wide shot. */
+	let dolly: { from: number; to: number; t: number } | null = null;
 	/** How visible the names are. They drop out the moment the camera leaves and fade back in on arrival. */
 	let labelFade = 0;
 	let linesFrom = 1;
@@ -1463,6 +1548,17 @@ export async function createEnvironment(
 		if (travel >= 1) {
 			camera.minZ = 0.1;
 			restoreCamera();
+			if (dolly) {
+				dolly.t = Math.min(1, dolly.t + deltaSeconds / TRAVEL_SECONDS);
+				const eased = dolly.t * dolly.t * (3 - 2 * dolly.t);
+				camera.radius = dolly.from + (dolly.to - dolly.from) * eased;
+				if (dolly.t >= 1) {
+					dolly = null;
+					if (!piloting) {
+						attachChartCamera(camera, canvas);
+					}
+				}
+			}
 			if (shot.ride) {
 				camera.target.copyFrom(focusPosition(shot.focus));
 				// The ship is placed by the journey, so its angle is read from where it is. Other craft
@@ -1498,7 +1594,7 @@ export async function createEnvironment(
 			camera.minZ = 0.1;
 			restoreCamera();
 			if (!piloting) {
-				camera.attachControl(canvas, true);
+				attachChartCamera(camera, canvas);
 			}
 		} else {
 			widenCamera();
@@ -1515,6 +1611,7 @@ export async function createEnvironment(
 	const animateTo = (view: DemoView) => {
 		riding = chosen?.view === view ? chosen : null;
 		chosen = null;
+		dolly = null;
 		clearScan();
 		camera.detachControl();
 		widenCamera();
@@ -1572,7 +1669,7 @@ export async function createEnvironment(
 	});
 
 	const clearScan = () => {
-		scanFor = null;
+		publishFraming(false);
 		if (found.length > 0) {
 			found = [];
 			for (const listener of foundListeners) {
@@ -1581,10 +1678,21 @@ export async function createEnvironment(
 		}
 	};
 
+	/** True when both lists name the same things. Order does not matter: craft swap rank as they move. */
+	const sameFound = (left: ScanTarget[], right: ScanTarget[]): boolean => {
+		if (left.length !== right.length) {
+			return false;
+		}
+		const ids = (list: ScanTarget[]) => list.map((target) => target.id).sort();
+		const a = ids(left);
+		const b = ids(right);
+		return a.every((id, index) => id === b[index]);
+	};
+
 	/**
-	 * Everything the scan can name from here that is on screen and not behind a body, nearest the camera
-	 * first. A body counts from its surface. The whole system names bodies only: a craft there is too
-	 * far off to visit except through its body.
+	 * What this framing names that is on screen and not behind a body, nearest the camera first.
+	 * A body counts from its surface. Craft are named only for the focused body, and only once the
+	 * camera is in on that body. A swing changes which of them are near.
 	 */
 	const runScan = (): ScanTarget[] => {
 		const eye = camera.globalPosition;
@@ -1595,25 +1703,37 @@ export async function createEnvironment(
 			Vector3.ProjectToRef(world, Matrix.IdentityReadOnly, scene.getTransformMatrix(), viewport, projected);
 			return projected.z >= 0 && projected.z <= 1 && projected.x >= 0 && projected.x <= width && projected.y >= 0 && projected.y <= height;
 		};
-		const bodies = scanTargets(active).map((target) => ({
-			id: target.id,
+		const focus = chartBodies(active).at(-1);
+		if (focus) {
+			const standOff = closeOrbitDistance(
+				fillDistance(focusRadius(focus.id), MOON_OUTER_FILL),
+				bodyOuterRadius(focus.id)
+			);
+			publishFraming(holdClose(camera.radius, standOff, namingCraft));
+		} else {
+			publishFraming(false);
+		}
+		const scope = scanScope(active, namingCraft);
+		const named = new Set(scope.bodies.map((body) => body.id));
+		const occluders = scanTargets(active).map((target) => ({
 			center: focusPosition(target.id),
 			radius: focusRadius(target.id),
 		}));
 		const seen: { target: ScanTarget; distance: number }[] = [];
-		for (const body of bodies) {
-			if (onScreen(body.center)) {
-				seen.push({ target: bodyFound(body.id), distance: Math.max(0, Vector3.Distance(eye, body.center) - body.radius) });
+		for (const body of scope.bodies) {
+			const center = focusPosition(body.id);
+			if (onScreen(center)) {
+				const radius = focusRadius(body.id);
+				seen.push({ target: bodyFound(body.id), distance: Math.max(0, Vector3.Distance(eye, center) - radius) });
 			}
 		}
-		if (active !== "system") {
-			const hosts = new Set(bodies.map((body) => body.id));
+		if (scope.craftHost && named.has(scope.craftHost)) {
 			for (const craft of crafts) {
-				if (craft === player || !hosts.has(craft.host)) {
+				if (craft === player || craft.host !== scope.craftHost) {
 					continue;
 				}
 				const at = craft.position(craftPoint);
-				if (!onScreen(at) || bodies.some((body) => blocked(eye, at, body.center, body.radius))) {
+				if (!onScreen(at) || occluders.some((body) => blocked(eye, at, body.center, body.radius))) {
 					continue;
 				}
 				seen.push({ target: craftFound(craft), distance: Vector3.Distance(eye, at) });
@@ -1705,16 +1825,18 @@ export async function createEnvironment(
 	const labelListeners = new Set<(frame: LabelFrame) => void>();
 	const center = { x: 0, y: 0 };
 	scene.onAfterRenderObservable.add(() => {
-		const hovered = picker.update();
 		const step = engine.getDeltaTime() / 1000 / LABEL_FADE_SECONDS;
 		labelFade = !piloting && travel >= 1 ? Math.min(1, labelFade + step) : 0;
-		if (scanning && !piloting && travel >= 1 && scanFor !== active) {
-			scanFor = active;
-			found = runScan();
-			for (const listener of foundListeners) {
-				listener(found);
+		if (scanning && !piloting && travel >= 1) {
+			const next = runScan();
+			if (!sameFound(next, found)) {
+				found = next;
+				for (const listener of foundListeners) {
+					listener(found);
+				}
 			}
 		}
+		const hovered = picker.update();
 		if (labelListeners.size === 0) {
 			return;
 		}
@@ -1789,6 +1911,20 @@ export async function createEnvironment(
 		restoreCamera();
 	}
 
+	const closeRadiusFor = (id: string) =>
+		closeOrbitDistance(fillDistance(focusRadius(id), MOON_OUTER_FILL), bodyOuterRadius(id));
+
+	/** Moves the camera's distance, staying on this chart. The wheel comes back when it arrives. */
+	const beginDolly = (to: number) => {
+		if (Math.abs(camera.radius - to) < 0.05) {
+			camera.radius = to;
+			return;
+		}
+		camera.detachControl();
+		camera.inertialRadiusOffset = 0;
+		dolly = { from: camera.radius, to, t: 0 };
+	};
+
 	return {
 		go: animateTo,
 		view: () => active,
@@ -1824,18 +1960,39 @@ export async function createEnvironment(
 		},
 		onScanFound(listener) {
 			foundListeners.add(listener);
+			listener(found);
 			return () => {
 				foundListeners.delete(listener);
 			};
 		},
 		visit(target) {
 			const craft = craftById.get(target.id);
+			if (!craft) {
+				const focus = chartBodies(active).at(-1)?.id;
+				// Already on this body. A wide planet or Sun chart comes in. Anywhere closer stays put.
+				if (focus === target.id) {
+					if (active === `${target.id}-outer` && !namingCraft) {
+						beginDolly(closeRadiusFor(target.id));
+					}
+					return;
+				}
+			}
 			const place = craft ? { id: craft.host, label: craft.host, view: craft.view } : bodyTarget(target.id);
 			// The listener starts the camera move, which takes the craft chosen here.
 			chosen = craft ?? null;
 			for (const listener of selectListeners) {
 				listener(place);
 			}
+		},
+		widen() {
+			beginDolly(goalFor(active).radius);
+		},
+		onFraming(listener) {
+			framingListeners.add(listener);
+			listener(namingCraft);
+			return () => {
+				framingListeners.delete(listener);
+			};
 		},
 		travel(target, onDone) {
 			placeBodies(0);
@@ -1858,8 +2015,14 @@ export async function createEnvironment(
 			if (on) {
 				camera.detachControl();
 			} else if (travel >= 1) {
-				camera.attachControl(canvas, true);
+				attachChartCamera(camera, canvas);
 			}
+		},
+		zoom(direction) {
+			if (piloting || travel < 1 || dolly) {
+				return;
+			}
+			nudgeChartZoom(camera, direction);
 		},
 		onNav(listener) {
 			navListeners.add(listener);
@@ -2617,7 +2780,7 @@ function buildSaturnRing(scene: Scene, saturn: Mesh, planetRadius: number): Mesh
 }
 
 /** Radians per second before the game-speed scale. Slow enough that a base reads as orbiting, not as a moon. */
-const BASE_SPIN = 0.12;
+const BASE_SPIN = 0.06;
 
 /** Angular speed of the craft the inner camera rides with. Matches the satellites or bases already in the scene. */
 function rideSpeed(focus: Focus): number {

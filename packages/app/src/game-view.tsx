@@ -131,11 +131,19 @@ export function GameView() {
 			engine.resize();
 		};
 		window.addEventListener("resize", onResize);
+		// Safari zooms the page from these events even when touch-action is none.
+		const blockGesture = (event: Event) => {
+			event.preventDefault();
+		};
+		document.addEventListener("gesturestart", blockGesture, { capture: true });
+		document.addEventListener("gesturechange", blockGesture, { capture: true });
 		void load("galaxy", false);
 
 		return () => {
 			loadRef.current += 1;
 			window.removeEventListener("resize", onResize);
+			document.removeEventListener("gesturestart", blockGesture, { capture: true });
+			document.removeEventListener("gesturechange", blockGesture, { capture: true });
 			sceneRef.current = null;
 			engine.dispose();
 			engineRef.current = null;
@@ -147,8 +155,8 @@ export function GameView() {
 	const leaveSol = useCallback(() => void load("galaxy", true), [load]);
 
 	return (
-		<div className="absolute inset-0 overflow-hidden bg-black text-white">
-			<canvas ref={canvasRef} className="h-full w-full outline-none select-none" />
+		<div className="absolute inset-0 touch-none overflow-hidden overscroll-none bg-black text-white">
+			<canvas ref={canvasRef} className="h-full w-full touch-none outline-none select-none" />
 			{loaded?.place === "galaxy" ? (
 				<GalaxyPlace galaxy={loaded.galaxy} onEnterSol={enterSol} onHome={enterShip} />
 			) : null}

@@ -1,5 +1,8 @@
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 
+import { isDoubleTap } from "./cockpit";
+import { isPick } from "./pointer";
+import { WHEEL_ZOOM_FRACTION, wheelNotch } from "./zoom";
 import {
 	JOURNEY_STOPS,
 	PLACES,
@@ -7,12 +10,17 @@ import {
 	SCAN_LIMIT,
 	SUN_TRAVEL_SECONDS,
 	TRAVEL_SECONDS,
+	CLOSE_HOLD,
 	blocked,
 	bodyTarget,
 	bodyTargets,
 	chartButtons,
 	choosePick,
+	closeOrbitDistance,
+	holdClose,
+	scanScope,
 	scanTargets,
+	wideChartStep,
 	stopView,
 	travelSeconds,
 	viewTrail,
@@ -89,6 +97,43 @@ expect(scanTargets("jupiter-outer").length === 5, "a scan beside Jupiter offers 
 expect(scanTargets("saturn-titan-inner").map((target) => target.id).join() === "titan", "a scan in Titan's inner orbit offers Titan");
 expect(scanTargets("sun-outer").map((target) => target.id).join() === "sun", "a scan beside the Sun offers the Sun");
 
+const named = (view: Parameters<typeof scanScope>[0], close: boolean) =>
+	scanScope(view, close).bodies.map((body) => body.id).join();
+const family = systemTargets.map((target) => target.id).join();
+expect(named("system", true) === family && scanScope("system", true).craftHost === null, "the system chart names the Sun and the planets at any zoom");
+expect(
+	named("jupiter-outer", false) === "jupiter,io,europa,ganymede,callisto" && scanScope("jupiter-outer", false).craftHost === null,
+	"a wide planet chart names the planet and its moons, and nothing orbiting them"
+);
+expect(
+	named("jupiter-outer", true) === "jupiter" && scanScope("jupiter-outer", true).craftHost === "jupiter",
+	"a zoomed planet chart names the planet and what orbits it"
+);
+expect(
+	named("saturn-titan-outer", false) === "titan" && scanScope("saturn-titan-outer", false).craftHost === "titan",
+	"a moon chart names the moon and what orbits it"
+);
+expect(
+	named("saturn-titan-inner", false) === "titan" && scanScope("saturn-titan-inner", false).craftHost === "titan",
+	"a moon's inner orbit names the moon and what orbits it"
+);
+expect(
+	named("earth-inner", false) === "earth" && scanScope("earth-inner", false).craftHost === "earth",
+	"a planet's inner orbit names the planet and what orbits it"
+);
+expect(named("sun-outer", false) === "sun" && scanScope("sun-outer", false).craftHost === null, "the Sun names no collectors while the camera is wide");
+expect(named("sun-outer", true) === "sun" && scanScope("sun-outer", true).craftHost === "sun", "the Sun names its collectors once the camera is close");
+expect(scanScope("sun-inner", false).craftHost === "sun", "the Sun's inner orbit names its collectors");
+expect(named("mercury-outer", false) === "mercury" && scanScope("mercury-outer", false).craftHost === null, "a moonless planet names itself until the camera comes in");
+
+expect(closeOrbitDistance(12, 40) === 50, "the close orbit stands a margin outside the outer shell");
+expect(closeOrbitDistance(90, 40) === 90, "the close orbit stays back far enough for the body to fill the moon framing");
+const edge = 100;
+expect(holdClose(edge, edge, false), "arriving on the close orbit counts as close");
+expect(!holdClose(edge + 0.1, edge, false), "outside the close orbit the family stays named");
+expect(holdClose(edge * (1 + CLOSE_HOLD), edge, true), "a chart that came in stays close through the hold band");
+expect(!holdClose(edge * (1 + CLOSE_HOLD) + 0.01, edge, true), "past the hold band the family names return");
+
 const ship = { id: "player-ship", host: "dione" };
 expect(choosePick(ship, "dione") === "dione", "a click on Dione stays on Dione while the ship is docked there");
 expect(choosePick(ship, null) === "player-ship", "the docked ship is the click when the pointer is not on a body");
@@ -132,6 +177,10 @@ expect(
 	"the Sun's orbit steps back to the Sun"
 );
 expect(chartButtons("jupiter-outer").length === 1, "a planet view has one step");
+expect(wideChartStep("jupiter-outer")?.label === "Planet" && wideChartStep("jupiter-outer")?.target === "wide", "a close planet chart steps back out to the planet");
+expect(wideChartStep("mercury-outer") === null, "a moonless planet has no moons to step back to");
+expect(wideChartStep("saturn-titan-outer") === null, "a moon chart steps back with its own button");
+expect(wideChartStep("sun-outer") === null, "the Sun does not step back to moons");
 
 const planetWheel = wheelLimits("earth-outer", 100, 40, 7000);
 expect(planetWheel.near === 40 && planetWheel.far === 100, "a planet view can come in, and cannot pull back past its shot");
@@ -142,6 +191,20 @@ expect(moonWheel.near === 12 && moonWheel.far === 12, "a moon's inner orbit hold
 const systemWheel = wheelLimits("system", 2000, 800, 7000);
 expect(systemWheel.near === 800 && systemWheel.far === 7000, "the system chart can still pull back");
 expect(wheelLimits("mars-outer", 50, 80, 7000).near === 50, "the near limit stays on the arrived shot when that is closer");
+
+const inward = 100 - wheelNotch(100, "in");
+const outward = 100 - wheelNotch(100, "out");
+expect(inward < 100 && inward > 100 * (1 - WHEEL_ZOOM_FRACTION), "one zoom notch moves closer by just under two percent");
+expect(outward > 100 && outward < 100 * (1 + WHEEL_ZOOM_FRACTION) + 1, "one zoom notch moves farther by about two percent");
+expect(Math.abs(wheelNotch(200, "in")) > Math.abs(wheelNotch(100, "in")), "a zoom notch scales with the camera's distance");
+expect(isPick({ x: 10, y: 10 }, { x: 12, y: 11 }, false), "a still finger is a tap");
+expect(!isPick({ x: 10, y: 10 }, { x: 20, y: 10 }, false), "a finger that moved is a drag");
+expect(!isPick({ x: 10, y: 10 }, { x: 10, y: 10 }, true), "a pinch is not a tap");
+expect(!isPick(null, { x: 10, y: 10 }, false), "a release without a press is not a tap");
+expect(isDoubleTap({ t: 0, x: 40, y: 40 }, { t: 200, x: 48, y: 44 }), "a second tap in the same place looks ahead");
+expect(!isDoubleTap(null, { t: 200, x: 40, y: 40 }), "the first tap does not look ahead");
+expect(!isDoubleTap({ t: 0, x: 40, y: 40 }, { t: 400, x: 40, y: 40 }), "a late second tap does not look ahead");
+expect(!isDoubleTap({ t: 0, x: 40, y: 40 }, { t: 100, x: 80, y: 40 }), "a second tap elsewhere does not look ahead");
 
 if (failures.length > 0) {
 	for (const failure of failures) {
