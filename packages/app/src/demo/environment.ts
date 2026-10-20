@@ -47,7 +47,7 @@ import {
 } from "./bases";
 import { daysSinceJ2000, greenwichAngle, moonLongitude, planetLongitude, type EphemerisPlanet } from "./ephemeris";
 import { CLIMB_PACE, createJourney, type Dock, type Harbor, type JourneyPlan } from "./journey";
-import { CHART_LAYER, createCockpit } from "./cockpit";
+import { CHART_LAYER, createCockpit, type PilotViewpoint } from "./cockpit";
 import { HULL_LENGTH, loadRanger } from "./ranger";
 import { awayFrom, type LabelFrame, type LabelSource } from "./labels";
 import type { NavBody, NavFix, NavPoint } from "./nav";
@@ -993,6 +993,11 @@ export type EnvironmentDemo = LabelSource & {
 	land: () => void;
 	/** Puts the camera in the ranger's cockpit, with both aft views, or back on the chart where it left. */
 	setPiloting: (on: boolean) => void;
+	/**
+	 * Interior looks out the windscreen. Exterior orbits the hull and leaves the course undrawn.
+	 * Takes effect while piloting; the chart stays put until then.
+	 */
+	setViewpoint: (viewpoint: PilotViewpoint) => void;
 	/** One notch of the chart wheel, held to this chart's limits. Ignored in the cockpit and while the camera is flying. */
 	zoom: (direction: ZoomDirection) => void;
 	/** Calls back every frame while piloting with where the ship is in the system. Returns a stop function. */
@@ -2030,6 +2035,7 @@ export async function createEnvironment(
 				attachChartCamera(camera, canvas);
 			}
 		},
+		setViewpoint: cockpit.setViewpoint,
 		zoom(direction) {
 			if (piloting || travel < 1 || dolly) {
 				return;

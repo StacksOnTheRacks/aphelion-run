@@ -99,6 +99,8 @@ export type ShipMounts = {
 	port: TransformNode;
 	/** Beside the starboard side thruster, looking aft. */
 	starboard: TransformNode;
+	/** Middle of the hull, in the ship's space. The exterior camera looks here. */
+	hullCenter: Vector3;
 };
 
 export type Ranger = ShipModel & {
@@ -199,7 +201,7 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 	beacon.alwaysSelectAsActiveMesh = true;
 	beacon.layerMask = SHIP_LAYER;
 
-	const mounts = buildMounts(scene, ship, pilotBody);
+	const mounts = buildMounts(scene, ship, container.meshes, pilotBody);
 
 	// Only reaches the ship. It stays in the scene at zero, so turning it up does not rebuild shaders.
 	const fillLight = new HemisphericLight("ranger-fill", Vector3.Up(), scene);
@@ -308,7 +310,12 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
  * The eye goes where the pilot's visor is, and each aft camera goes beside its side thruster. Both are
  * measured off the model, so they follow it if the hull is rebuilt.
  */
-function buildMounts(scene: Scene, ship: TransformNode, pilotBody: AbstractMesh[]): ShipMounts {
+function buildMounts(
+	scene: Scene,
+	ship: TransformNode,
+	hull: AbstractMesh[],
+	pilotBody: AbstractMesh[]
+): ShipMounts {
 	ship.computeWorldMatrix(true);
 	const toShip = ship.getWorldMatrix().clone().invert();
 	const local = (world: Vector3) => Vector3.TransformCoordinates(world, toShip);
@@ -324,20 +331,32 @@ function buildMounts(scene: Scene, ship: TransformNode, pilotBody: AbstractMesh[
 			}
 		}
 	};
+	const spanOf = (meshes: AbstractMesh[]) => {
+		const min = new Vector3(Infinity, Infinity, Infinity);
+		const max = new Vector3(-Infinity, -Infinity, -Infinity);
+		let counted = 0;
+		for (const mesh of meshes) {
+			if (mesh.getTotalVertices() === 0) {
+				continue;
+			}
+			refresh(mesh);
+			const box = mesh.getBoundingInfo().boundingBox;
+			min.minimizeInPlace(local(box.minimumWorld));
+			max.maximizeInPlace(local(box.maximumWorld));
+			counted += 1;
+		}
+		return counted === 0 ? null : min.add(max).scale(0.5);
+	};
 
 	const visor = pilotBody.filter((mesh) => mesh.name.startsWith("Ranger Pilot Visor"));
-	if (visor.length === 0) {
+	const center = spanOf(visor);
+	if (!center) {
 		throw new Error("The ranger is missing the pilot's visor.");
 	}
-	const min = new Vector3(Infinity, Infinity, Infinity);
-	const max = new Vector3(-Infinity, -Infinity, -Infinity);
-	for (const mesh of visor) {
-		refresh(mesh);
-		const box = mesh.getBoundingInfo().boundingBox;
-		min.minimizeInPlace(local(box.minimumWorld));
-		max.maximizeInPlace(local(box.maximumWorld));
+	const hullCenter = spanOf(hull);
+	if (!hullCenter) {
+		throw new Error("The ranger hull has no bounds.");
 	}
-	const center = min.add(max).scale(0.5);
 
 	const eye = new TransformNode("ranger-eye", scene);
 	eye.parent = ship;
@@ -358,7 +377,7 @@ function buildMounts(scene: Scene, ship: TransformNode, pilotBody: AbstractMesh[
 		return mount;
 	};
 
-	return { eye, port: aft("Port", -1), starboard: aft("Starboard", 1) };
+	return { eye, port: aft("Port", -1), starboard: aft("Starboard", 1), hullCenter };
 }
 
 /** Signed angle from `previous` to `next` about Y. Positive swings the nose to starboard. */

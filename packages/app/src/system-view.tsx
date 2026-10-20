@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { AFT_VIEWS, type ScreenRect } from "./demo/cockpit";
+import { AFT_VIEWS, type PilotViewpoint, type ScreenRect } from "./demo/cockpit";
 import { chartButtons, wideChartStep, type ChartButton, type DemoView, type EnvironmentDemo } from "./demo/environment";
 import {
 	DEPARTURE_SECONDS,
@@ -42,10 +42,12 @@ const cornerClass =
  * To counts down and then flies the ship there from wherever it sits. The cockpit has no names and
  * no picks.
  *
- * The lower right is Pilot, or Chart while piloting, on every Sol chart including the system. Above it,
- * one step back: System from a planet or the Sun, Planet from a moon or from an inner orbit. The system
- * chart's steps are Home, which opens the ship's orbit, and Galaxy, which leaves Sol. Escape takes the
- * same step as the top button. Dragging turns the pilot's head.
+ * The lower right is Pilot, or Chart while piloting, on every Sol chart including the system. Above
+ * Chart, Exterior trades the windscreen for a camera outside the hull, and Interior returns to the seat.
+ * Above the mode button on a chart, one step back: System from a planet or the Sun, Planet from a moon
+ * or from an inner orbit. The system chart's steps are Home, which opens the ship's orbit, and Galaxy,
+ * which leaves Sol. Escape takes the same step as the top button, and leaves the cockpit for the chart.
+ * Dragging turns the pilot's head, or swings the exterior camera around the ship.
  */
 export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLeave: () => void }) {
 	const chromeRef = useRef<HTMLDivElement>(null);
@@ -54,6 +56,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const keepOut = useMemo(() => [chromeRef, controlsRef, zoomRef], []);
 	const [view, setView] = useState<DemoView>(() => system.view());
 	const [mode, setMode] = useState<Mode>("chart");
+	const [viewpoint, setViewpoint] = useState<PilotViewpoint>("interior");
 	const [found, setFound] = useState<ScanTarget[]>([]);
 	const [scanned, setScanned] = useState<ScanTarget | null>(null);
 	const [departure, setDeparture] = useState<{ target: ScanTarget; endsAt: number } | null>(null);
@@ -91,6 +94,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	useEffect(() => system.onFraming(setClose), [system]);
 	useEffect(() => system.setScanning(!piloting), [system, piloting]);
 	useEffect(() => system.setPiloting(piloting), [system, piloting]);
+	useEffect(() => system.setViewpoint(viewpoint), [system, viewpoint]);
 
 	const launch = useCallback(
 		(target: ScanTarget) => {
@@ -158,6 +162,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 			return;
 		}
 		if (piloting) {
+			setViewpoint("interior");
 			setMode("chart");
 		} else {
 			const step = steps[0];
@@ -179,6 +184,9 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 
 	const togglePilot = () => {
 		setScanned(null);
+		if (piloting) {
+			setViewpoint("interior");
+		}
 		setMode(piloting ? "chart" : "pilot");
 	};
 
@@ -200,15 +208,36 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 					onStop={stop}
 				/>
 			</GameChrome>
-			{piloting ? <AftFrames /> : <ZoomControls ref={zoomRef} onZoom={system.zoom} />}
+			{piloting && viewpoint === "interior" ? <AftFrames /> : null}
+			{piloting ? null : <ZoomControls ref={zoomRef} onZoom={system.zoom} />}
 			{piloting ? <Dashboard system={system} course={bound ? scanCard(bound).label : null} /> : null}
 			<div
 				ref={controlsRef}
 				className="pointer-events-none absolute right-0 bottom-0 z-10 flex flex-col items-end gap-2 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-6"
 			>
-				{piloting
-					? null
-					: steps.map((button) => (
+				{piloting ? (
+					<button
+						type="button"
+						onClick={() => setViewpoint(viewpoint === "interior" ? "exterior" : "interior")}
+						aria-label={viewpoint === "interior" ? "Switch to exterior view" : "Switch to interior view"}
+						title={viewpoint === "interior" ? "Outside the ship" : "Back in the cockpit"}
+						className={cornerClass}
+					>
+						{viewpoint === "interior" ? (
+							<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+								<path d="M8 3.2 11.2 8H4.8L8 3.2Z" strokeLinejoin="round" />
+								<path d="M2.5 11.2a5.8 5.8 0 0 0 11 0" strokeLinecap="round" />
+							</svg>
+						) : (
+							<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+								<path d="M2 11.5 4 5h8l2 6.5" strokeLinejoin="round" />
+								<path d="M2 11.5h12M8 5v2.5" strokeLinecap="round" />
+							</svg>
+						)}
+						{viewpoint === "interior" ? "Exterior" : "Interior"}
+					</button>
+				) : (
+					steps.map((button) => (
 							<button
 								key={button.label}
 								type="button"
@@ -218,7 +247,8 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 							>
 								{button.label}
 							</button>
-						))}
+						))
+				)}
 				<button
 					type="button"
 					onClick={togglePilot}

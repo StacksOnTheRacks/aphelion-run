@@ -7,7 +7,7 @@ import { Viewport } from "@babylonjs/core/Maths/math.viewport";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 
-import { SHIP_LAYER, type ShipMounts } from "./ranger";
+import { HULL_LENGTH, SHIP_LAYER, type ShipMounts } from "./ranger";
 
 /** A rectangle on screen as shares of the canvas, from its top left. */
 export type ScreenRect = { left: number; top: number; width: number; height: number };
@@ -26,7 +26,7 @@ const WORLD_LAYER = 0x0fffffff;
  * layer too.
  */
 export const CHART_LAYER = 0x40000000;
-/** Course chevrons in front of the pilot. The windscreen draws them; the chart and the aft views do not. */
+/** Course chevrons in front of the pilot. The windscreen draws them; the chart, the aft views, and the exterior camera do not. */
 export const PILOT_LAYER = 0x20000000;
 
 /** Vertical field of view out the windscreen, wider than the chart's so the dash reads under the view. */
@@ -57,11 +57,71 @@ const LOOK_UP = 0.6;
 const LOOK_DOWN = 0.45;
 /** Seconds for the head to catch up with a drag, so a flick turns it rather than jumping. */
 const LOOK_SECONDS = 0.08;
-/** A second tap this soon, and this close to the first, looks ahead again. */
+/** A second tap this soon, and this close to the first, looks ahead again. Outside, it returns behind the ship. */
 const DOUBLE_TAP_MS = 300;
 const DOUBLE_TAP_SLOP = 24;
+/** Vertical field of view for the camera outside the hull. Narrower than the windscreen, so the ship reads as a subject. */
+const EXTERIOR_FOV = 0.85;
+/**
+ * Radians of orbit across one screen of drag. A swipe from edge to edge carries the camera halfway
+ * around the ship.
+ */
+export const EXTERIOR_SWING = Math.PI;
+/**
+ * How far the exterior camera sits from the middle of the hull, in hull lengths.
+ * Far enough to take in the stern plume, close enough that the ship fills the frame.
+ */
+const EXTERIOR_RANGE = 2.4;
+export const EXTERIOR_RADIUS = HULL_LENGTH * EXTERIOR_RANGE;
+/** Behind the ship, off to starboard and a little above, so the hull reads before the camera is swung. */
+export const EXTERIOR_YAW = 0.55;
+export const EXTERIOR_PITCH = 0.38;
+/** Short of straight up and straight down, so the orbit does not flip over the hull. */
+const EXTERIOR_PITCH_LIMIT = 1.15;
 
 type Tap = { t: number; x: number; y: number };
+
+/** Where the exterior camera sits around the hull. Yaw 0 is astern; positive yaw swings to starboard. Pitch is positive above the ship. */
+export type ExteriorOrbit = { yaw: number; pitch: number };
+
+/** The view the cockpit opens on, and the one a double tap outside returns to. */
+export const EXTERIOR_HOME: ExteriorOrbit = { yaw: EXTERIOR_YAW, pitch: EXTERIOR_PITCH };
+
+export type PilotViewpoint = "interior" | "exterior";
+
+function wrapAngle(angle: number): number {
+	const turn = Math.PI * 2;
+	return ((angle + Math.PI) % turn + turn) % turn - Math.PI;
+}
+
+function clampExteriorPitch(pitch: number): number {
+	return Math.max(-EXTERIOR_PITCH_LIMIT, Math.min(EXTERIOR_PITCH_LIMIT, pitch));
+}
+
+/**
+ * Camera offset in ship axes, in world units. The nose is +Z, so yaw 0 sits on -Z, astern.
+ * The length stays `radius` at every angle.
+ */
+export function exteriorOffset(orbit: ExteriorOrbit, radius = EXTERIOR_RADIUS, result = new Vector3()): Vector3 {
+	const pitch = clampExteriorPitch(orbit.pitch);
+	const horizontal = Math.cos(pitch);
+	return result.set(
+		radius * Math.sin(orbit.yaw) * horizontal,
+		radius * Math.sin(pitch),
+		-radius * Math.cos(orbit.yaw) * horizontal
+	);
+}
+
+/**
+ * Dragging grabs the hull: it follows the pointer, so the camera swings the other way.
+ * `dx` and `dy` are pixels, right and down. Pitch stops at the limit; yaw wraps.
+ */
+export function orbitFromDrag(orbit: ExteriorOrbit, dx: number, dy: number, scale: number): ExteriorOrbit {
+	return {
+		yaw: wrapAngle(orbit.yaw - dx * scale),
+		pitch: clampExteriorPitch(orbit.pitch + dy * scale),
+	};
+}
 
 /** A second still tap in the same place. The page no longer sees this as a double-tap zoom. */
 export function isDoubleTap(previous: Tap | null, tap: Tap): boolean {
@@ -94,8 +154,13 @@ function clampHead(head: Head): Head {
 export type Cockpit = {
 	/** Moves every cockpit camera onto its mount. Call once per frame, after the ship has been placed. */
 	update: () => void;
-	/** Draws the windscreen and both aft views instead of `chart`, or hands the screen back to it. */
+	/** Draws the cockpit instead of `chart`, or hands the screen back to it. */
 	setActive: (on: boolean) => void;
+	/**
+	 * Interior is the windscreen and the aft views. Exterior orbits the hull.
+	 * The exterior camera leaves out the course: chevrons and the path line stay on the windscreen.
+	 */
+	setViewpoint: (viewpoint: PilotViewpoint) => void;
 };
 
 export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, glow: GlowLayer): Cockpit {
@@ -140,6 +205,8 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 		false,
 		WORLD_LAYER | PILOT_LAYER
 	);
+	// The world and the hull, and neither the course nor the orbit lines. Those are drawn on the glass.
+	const exterior = camera("cockpit-exterior", WORLD_LAYER | SHIP_LAYER, EXTERIOR_FOV, WORLD_NEAR, WORLD_FAR, null);
 	const rigs = [
 		windscreen,
 		rig("cockpit-aft-port", mounts.port, AFT_FOV, AFT_VIEWS.port, true),
@@ -149,22 +216,28 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 	const cameras = rigs.flatMap((each) => each.cameras);
 	const mirrored = new Set<Camera>(rigs.filter((each) => each.mirrored).flatMap((each) => each.cameras));
 	// The glow costs a full pass per camera, and the aft views are too small to need it.
-	const glowing = new Set<Camera>([chart, windscreen.cameras[0]]);
+	const glowing = new Set<Camera>([chart, windscreen.cameras[0], exterior]);
 	// The world half of each aft view. The windscreen is drawn first and later cameras leave its color in
 	// place, so without a clear the forward sky shows through the aft window behind the hull.
 	const aftWorld = new Set<Camera>(rigs.filter((each) => each.mirrored).map((each) => each.cameras[0]));
 	let active = false;
+	let viewpoint: PilotViewpoint = "interior";
 
 	// Dragging grabs the view: the world follows the pointer, so the head turns the other way.
 	// A second tap in the same place looks ahead. The browser's double-tap zoom is the same gesture,
 	// so this is recognized here instead of from a dblclick.
 	let aim: Head = { yaw: 0, pitch: 0 };
 	let head: Head = { yaw: 0, pitch: 0 };
+	let aimOrbit: ExteriorOrbit = { ...EXTERIOR_HOME };
+	let orbit: ExteriorOrbit = { ...EXTERIOR_HOME };
 	let drag: { id: number; x: number; y: number; originX: number; originY: number } | null = null;
 	let lastTap: Tap | null = null;
 	const fingers = new Set<number>();
 	const canvas = engine.getRenderingCanvas();
-	const radiansPerPixel = () => WINDSCREEN_FOV / Math.max(1, canvas?.clientHeight ?? 1);
+	const radiansPerPixel = () => {
+		const height = Math.max(1, canvas?.clientHeight ?? 1);
+		return viewpoint === "exterior" ? EXTERIOR_SWING / height : WINDSCREEN_FOV / height;
+	};
 	const onDown = (event: PointerEvent) => {
 		fingers.add(event.pointerId);
 		if (!active || event.button !== 0 || fingers.size > 1) {
@@ -188,10 +261,13 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 			return;
 		}
 		const scale = radiansPerPixel();
-		aim = clampHead({
-			yaw: aim.yaw - (event.clientX - drag.x) * scale,
-			pitch: aim.pitch - (event.clientY - drag.y) * scale,
-		});
+		const dx = event.clientX - drag.x;
+		const dy = event.clientY - drag.y;
+		if (viewpoint === "exterior") {
+			aimOrbit = orbitFromDrag(aimOrbit, dx, dy, scale);
+		} else {
+			aim = clampHead({ yaw: aim.yaw - dx * scale, pitch: aim.pitch - dy * scale });
+		}
 		drag.x = event.clientX;
 		drag.y = event.clientY;
 	};
@@ -214,7 +290,11 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 		}
 		const tap = { t: performance.now(), x: event.clientX, y: event.clientY };
 		if (isDoubleTap(lastTap, tap)) {
-			aim = { yaw: 0, pitch: 0 };
+			if (viewpoint === "exterior") {
+				aimOrbit = { ...EXTERIOR_HOME };
+			} else {
+				aim = { yaw: 0, pitch: 0 };
+			}
 			lastTap = null;
 		} else {
 			lastTap = tap;
@@ -245,6 +325,42 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 	const projection = new Matrix();
 	const flip = Matrix.Scaling(-1, 1, 1);
 	const flipped = new Matrix();
+	const lookAt = new Vector3();
+	const offset = new Vector3();
+	const shifted = new Vector3();
+
+	// The offset is in world units along the ship's axes. The hull's own scale must not shrink it.
+	// setTarget aims the camera: a hand-built look rotation needs an up vector perpendicular to the
+	// view, and the orbit's pitch is rarely that.
+	const placeExterior = () => {
+		const ship = mounts.eye.parent as TransformNode | null;
+		if (!ship) {
+			return;
+		}
+		ship.computeWorldMatrix(true);
+		const world = ship.getWorldMatrix();
+		Vector3.TransformCoordinatesToRef(mounts.hullCenter, world, lookAt);
+		world.decompose(undefined, rotation, undefined);
+		exteriorOffset(orbit, EXTERIOR_RADIUS, offset).applyRotationQuaternionToRef(rotation, shifted);
+		exterior.position.copyFrom(lookAt).addInPlace(shifted);
+		exterior.upVector.set(0, 1, 0);
+		exterior.setTarget(lookAt);
+	};
+
+	const show = () => {
+		if (!active) {
+			scene.activeCameras = [];
+			scene.activeCamera = chart;
+			return;
+		}
+		if (viewpoint === "exterior") {
+			scene.activeCameras = [exterior];
+			scene.activeCamera = exterior;
+			return;
+		}
+		scene.activeCameras = cameras;
+		scene.activeCamera = cameras[0];
+	};
 
 	// A mirrored projection turns every triangle's winding around, so those views cull the other face.
 	scene.onBeforeCameraRenderObservable.add((current) => {
@@ -270,6 +386,15 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 		const deltaSeconds = engine.getDeltaTime() / 1000;
 		const ease = 1 - Math.exp(-deltaSeconds / STEADY_SECONDS);
 		const turn = snap ? 1 : 1 - Math.exp(-deltaSeconds / LOOK_SECONDS);
+		if (viewpoint === "exterior") {
+			const yawStep = wrapAngle(aimOrbit.yaw - orbit.yaw);
+			orbit = {
+				yaw: wrapAngle(orbit.yaw + yawStep * turn),
+				pitch: orbit.pitch + (aimOrbit.pitch - orbit.pitch) * turn,
+			};
+			placeExterior();
+			return;
+		}
 		head = { yaw: head.yaw + (aim.yaw - head.yaw) * turn, pitch: head.pitch + (aim.pitch - head.pitch) * turn };
 		Quaternion.RotationYawPitchRollToRef(head.yaw, head.pitch, 0, look);
 		for (const each of rigs) {
@@ -315,12 +440,22 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 			drag = null;
 			if (on) {
 				aim = { yaw: 0, pitch: 0 };
+				aimOrbit = { ...EXTERIOR_HOME };
+				orbit = { ...EXTERIOR_HOME };
 				update(true);
-				scene.activeCameras = cameras;
-				scene.activeCamera = cameras[0];
-			} else {
-				scene.activeCameras = [];
-				scene.activeCamera = chart;
+			}
+			show();
+		},
+		setViewpoint(next) {
+			if (viewpoint === next) {
+				return;
+			}
+			viewpoint = next;
+			drag = null;
+			lastTap = null;
+			if (active) {
+				update(true);
+				show();
 			}
 		},
 	};
