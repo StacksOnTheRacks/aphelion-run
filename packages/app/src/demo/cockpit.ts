@@ -21,10 +21,13 @@ export const AFT_VIEWS: Record<"port" | "starboard", ScreenRect> = {
 /** Everything but the ship. Babylon's default mask, without the ship's bit. */
 const WORLD_LAYER = 0x0fffffff;
 /**
- * Drawn on the chart and nowhere in the cockpit. The course line runs from under the pilot's seat, so
- * from there it is a wobbling streak across the windscreen. Orbit lines use this layer too.
+ * Drawn on the chart and not on the windscreen. A screen-width line from under the seat reads as a
+ * streak across the glass, so the pilot sees chevrons on `PILOT_LAYER` instead. Orbit lines use this
+ * layer too.
  */
 export const CHART_LAYER = 0x40000000;
+/** Course chevrons in front of the pilot. The windscreen draws them; the chart and the aft views do not. */
+export const PILOT_LAYER = 0x20000000;
 
 /** Vertical field of view out the windscreen, wider than the chart's so the dash reads under the view. */
 const WINDSCREEN_FOV = 1.15;
@@ -112,17 +115,31 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 		return made;
 	};
 
-	const rig = (name: string, mount: TransformNode, fov: number, rect: ScreenRect | null, hull: boolean): Rig => ({
+	const rig = (
+		name: string,
+		mount: TransformNode,
+		fov: number,
+		rect: ScreenRect | null,
+		hull: boolean,
+		world: number = WORLD_LAYER
+	): Rig => ({
 		mount,
 		cameras: [
-			camera(`${name}-world`, WORLD_LAYER, fov, WORLD_NEAR, WORLD_FAR, rect),
+			camera(`${name}-world`, world, fov, WORLD_NEAR, WORLD_FAR, rect),
 			...(hull ? [camera(`${name}-ship`, SHIP_LAYER, fov, SHIP_NEAR, SHIP_FAR, rect)] : []),
 		],
 		mirrored: hull,
 		steady: new Quaternion(),
 	});
 
-	const windscreen = rig("cockpit-windscreen", mounts.eye, WINDSCREEN_FOV, null, false);
+	const windscreen = rig(
+		"cockpit-windscreen",
+		mounts.eye,
+		WINDSCREEN_FOV,
+		null,
+		false,
+		WORLD_LAYER | PILOT_LAYER
+	);
 	const rigs = [
 		windscreen,
 		rig("cockpit-aft-port", mounts.port, AFT_FOV, AFT_VIEWS.port, true),

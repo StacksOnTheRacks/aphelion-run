@@ -46,7 +46,7 @@ import {
 	type PlanetBaseInput,
 } from "./bases";
 import { daysSinceJ2000, greenwichAngle, moonLongitude, planetLongitude, type EphemerisPlanet } from "./ephemeris";
-import { createJourney, type Dock, type Harbor, type JourneyPlan } from "./journey";
+import { CLIMB_PACE, createJourney, type Dock, type Harbor, type JourneyPlan } from "./journey";
 import { CHART_LAYER, createCockpit } from "./cockpit";
 import { HULL_LENGTH, loadRanger } from "./ranger";
 import { awayFrom, type LabelFrame, type LabelSource } from "./labels";
@@ -55,7 +55,7 @@ import type { ScanKind, ScanTarget } from "./scan";
 import { createMoonTerrain } from "./moon-terrain";
 import { trackPicks } from "./pointer";
 import { attachChartCamera, nudgeChartZoom, tuneChartCamera, type ZoomDirection } from "./zoom";
-import { departureSpiral, planRoute, reversalPenalty } from "./route";
+import { curveClimbJoin, curveClimbStart, departureSpiral, planRoute, reversalPenalty, tangentHeading } from "./route";
 
 type PlanetName = EphemerisPlanet;
 
@@ -822,8 +822,8 @@ export type JourneyBody = {
 /** Every body where it is at one moment: the Sun, each planet, and each moon. */
 export type JourneyLayout = { bodies: JourneyBody[] };
 
-/** Where a docked ship is, and which way its satellite circles: +1 counterclockwise. */
-export type Departure = { at: Vector3; turn: number };
+/** Where a docked ship is, which way its satellite circles, and how fast it is already moving. */
+export type Departure = { at: Vector3; turn: number; speed?: number };
 
 /**
  * From one body to another, in three parts. The ship climbs slowly from the base nearest the
@@ -835,6 +835,7 @@ export type Departure = { at: Vector3; turn: number };
  * circles, and meets the burn along the outer orbit. Heading back against the orbit is taken only
  * when that way out is shorter by more than half a lap, since reversing throws away the speed the
  * ship already has. A ship that is not docked circles the way the bases do, counterclockwise.
+ * The burn always arrives the same way, so the ship is already facing the dock it will settle onto.
  *
  * Every planet that is not an end of the trip may give an assist, and so may the Sun. An assist passes
  * just outside that body's outer orbit, and the ship is still burning, so the pass is not a place it
@@ -880,11 +881,15 @@ export function planJourney(layout: JourneyLayout, fromId: string, toId: string,
 			startRadius: from.outer,
 			endRadius: to.outer,
 			startTurn: turn,
+			endTurn: 1,
 			candidates,
 			spheres,
 			rings,
 		});
-		return { cruise, climb: departureSpiral(from.center, origin, cruise.points[0], turn, rings) };
+		const spiral = departureSpiral(from.center, origin, cruise.points[0], turn, rings);
+		const opened = curveClimbStart(spiral, tangentHeading(from.center, origin, orbitTurn), spheres, rings, from.center);
+		const joined = curveClimbJoin(opened, cruise, spheres, rings);
+		return { cruise: joined.route, climb: joined.climb };
 	};
 	const withOrbit = option(orbitTurn);
 	const againstOrbit = option(-orbitTurn);
@@ -895,6 +900,7 @@ export function planJourney(layout: JourneyLayout, fromId: string, toId: string,
 		climb: chosen.climb,
 		cruise: chosen.cruise,
 		arrive: { id: toId, turn: chosen.cruise.endTurn || 1 },
+		departSpeed: depart?.speed ?? CLIMB_PACE,
 	};
 }
 
@@ -1999,7 +2005,12 @@ export async function createEnvironment(
 			// Undocked and not flying, the ship is circling Earth, the way the bases turn.
 			const docked = journey.docked();
 			const fromId = docked?.id ?? "earth";
-			const depart = { at: docked?.position ?? ranger.position.clone(), turn: docked?.turn ?? 1 };
+			const at = docked?.position ?? ranger.position.clone();
+			const turn = docked?.turn ?? 1;
+			const home = journeyLayout().bodies.find((body) => body.id === fromId);
+			const radius = home ? Math.hypot(at.x - home.center.x, at.z - home.center.z) : 0;
+			const rate = docked?.rate ?? 0.35 * ORBIT_PACE;
+			const depart = { at, turn, speed: Math.abs(rate) * radius };
 			const plan = planJourney(journeyLayout(), fromId, target.host, depart);
 			const dock = target.id === target.host ? undefined : dockById.get(target.id);
 			journey.start({ ...plan, arrive: { ...plan.arrive, dock } }, onDone);
@@ -2012,6 +2023,7 @@ export async function createEnvironment(
 			piloting = on;
 			ranger.setPiloted(on);
 			cockpit.setActive(on);
+			journey.setPiloting(on);
 			if (on) {
 				camera.detachControl();
 			} else if (travel >= 1) {

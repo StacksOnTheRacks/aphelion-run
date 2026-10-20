@@ -1,18 +1,23 @@
+import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import type { Camera } from "@babylonjs/core/Cameras/camera";
+import { Constants } from "@babylonjs/core/Engines/constants";
 import type { GlowLayer } from "@babylonjs/core/Layers/glowLayer";
 import {
 	GreasedLineMeshColorDistributionType,
 	GreasedLineMeshMaterialType,
 	type IGreasedLineMaterial,
 } from "@babylonjs/core/Materials/GreasedLine/greasedLineMaterialInterfaces";
+import { Material } from "@babylonjs/core/Materials/material";
+import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { CreateGreasedLine } from "@babylonjs/core/Meshes/Builders/greasedLineBuilder";
 import type { GreasedLineBaseMesh } from "@babylonjs/core/Meshes/GreasedLine/greasedLineBaseMesh";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
 
 import type { RingBody } from "./camera-path";
-import { CHART_LAYER } from "./cockpit";
+import { CHART_LAYER, PILOT_LAYER } from "./cockpit";
 import type { ShipModel } from "./ranger";
 import { headingAt, pointAt, type Route, type RouteKind } from "./route";
 
@@ -21,7 +26,9 @@ import { headingAt, pointAt, type Route, type RouteKind } from "./route";
  * the bright line to the destination's outer orbit, slowing as it arrives, then drops slowly inward
  * to dock with one of the craft circling there, and rides with it until the next trip. The bright
  * line is the way ahead and shortens as the ship goes. It is drawn at a fixed width on screen, so the
- * route reads from the whole-system view and from beside a planet alike. Nothing here moves the camera.
+ * route reads from the whole-system view and from beside a planet alike. From the cockpit the burn is
+ * a run of chevrons that fade with distance. The climb out to the outer orbit, and the drop in to dock,
+ * stay clear of them. Nothing here moves the camera.
  */
 
 /** World units a ship covers per second on a fast burn, on average. Neptune to the Sun takes about 80 seconds. */
@@ -75,6 +82,48 @@ export function cruiseDistance(t: number, length: number, seconds: number): numb
 	return CLIMB_PACE * clamped + rise * (seconds / Math.PI) * (1 - Math.cos((Math.PI * clamped) / seconds));
 }
 
+/** Share of a climb spent easing from dock speed up to the burn. The rest holds climb speed. */
+const CLIMB_EASE = 0.4;
+
+/** How long a climb of `length` takes when it starts at `departSpeed` and eases up to climb speed. */
+export function climbDuration(length: number, departSpeed: number): number {
+	if (length < 1e-6) {
+		return 0;
+	}
+	const v0 = Math.max(0, departSpeed);
+	const v1 = CLIMB_PACE;
+	if (Math.abs(v1 - v0) < 1e-3) {
+		return length / v1;
+	}
+	const easeLength = CLIMB_EASE * length;
+	const easeTime = easeLength / ((v0 + v1) / 2);
+	return easeTime + (length - easeLength) / v1;
+}
+
+/**
+ * Distance covered `t` seconds into a climb that eases from `departSpeed` to climb speed.
+ * At `climbDuration` this is `length`.
+ */
+export function climbDistance(t: number, length: number, departSpeed: number): number {
+	if (length < 1e-6) {
+		return 0;
+	}
+	const v0 = Math.max(0, departSpeed);
+	const v1 = CLIMB_PACE;
+	const clamped = Math.max(0, t);
+	if (Math.abs(v1 - v0) < 1e-3) {
+		return Math.min(length, v1 * clamped);
+	}
+	const easeLength = CLIMB_EASE * length;
+	const easeTime = easeLength / ((v0 + v1) / 2);
+	if (clamped >= easeTime) {
+		return Math.min(length, easeLength + v1 * (clamped - easeTime));
+	}
+	const u = clamped / easeTime;
+	const smoothIntegral = u * u * u - 0.5 * u * u * u * u;
+	return v0 * clamped + (v1 - v0) * easeTime * smoothIntegral;
+}
+
 /**
  * The body the burn ends at, and the way the ship is turning around it when it gets there. With `dock`
  * set the ship docks with that craft; without it, with whichever of the body's craft it reaches first.
@@ -90,6 +139,8 @@ export type JourneyPlan = {
 	climb: Vector3[];
 	cruise: Route;
 	arrive: Arrival;
+	/** Speed the ship is already moving when the climb starts. The climb eases from here up to `CLIMB_PACE`. */
+	departSpeed: number;
 };
 
 /** A craft a ship can dock with. */
@@ -123,6 +174,10 @@ export type Approach = {
 	/** Which side of the ring plane the ship crosses the ring on: +1 along the ring's normal, -1 against it. */
 	side: number;
 	ring?: HarborRing;
+	/** Unit direction the burn was traveling when it arrived. The drop curves off this onto the spiral. */
+	heading?: Vector3;
+	/** Shape parameter at each listed time. Absent until the drop has been timed. */
+	warp?: { times: number[]; params: number[] };
 };
 
 /** A docked ship sits this far above its dock on screen, in CSS pixels, so the dock stays in sight. */
@@ -141,17 +196,101 @@ const AHEAD_STEP = 2;
 const AMBER = Color3.FromHexString("#FCD34D");
 const ENERGY = Color3.FromHexString("#F5E6C8");
 
+/** First chevron sits this far ahead of the ship, so the wide end of the nearest mark is still on the glass. */
+export const MARK_GAP = 8;
+/**
+ * Chevrons are this far apart along the course. A gap between marks keeps each one a separate arrow,
+ * and the chain is dense enough that a fast burn does not strobe.
+ */
+export const MARK_SPACING = 10;
+/** How long each chevron is, along the course. Short enough to read as one arrow, not a ribbon. */
+export const MARK_LENGTH = 5.5;
+/** A chevron this far ahead of the ship has faded out. */
+export const MARK_REACH = 100;
+/** Alpha of a mark at the ship. The first mark, a gap ahead, is a little under this. */
+export const MARK_NEAR_ALPHA = 0.7;
+
+/** One chevron on the course ahead of the ship. */
+export type CourseMark = {
+	/** The near end still in front of the ship. The rest of the mark may already be behind it. */
+	point: Vector3;
+	/** Unit direction of travel there. The point of the chevron faces this way. */
+	heading: Vector3;
+	/** Translucency at `point`: nearly solid up close, zero at `MARK_REACH`. */
+	alpha: number;
+	/** Along the course, where the opening was planted. The arms are full width here. */
+	opening: number;
+	/** Along the course, where the visible part starts. Never behind the cockpit gap. */
+	from: number;
+	/** Along the course, where the point is. */
+	tip: number;
+};
+
+/** Alpha of a chevron `ahead` world units in front of the ship. Zero at `MARK_REACH`. */
+export function markAlpha(ahead: number): number {
+	if (ahead >= MARK_REACH || ahead < 0) {
+		return 0;
+	}
+	return MARK_NEAR_ALPHA * (1 - ahead / MARK_REACH);
+}
+
+/**
+ * Chevrons on `route` ahead of a ship `distance` along it. They start a gap in front, so the nearest
+ * is not inside the cockpit, and stop at the end of the course or at `MARK_REACH`, whichever is closer.
+ * Marks are planted on the course, so the ship flies through them instead of dragging them along.
+ */
+export function courseMarks(route: Route, distance: number): CourseMark[] {
+	if (route.total <= 0) {
+		return [];
+	}
+	const along = Math.min(route.total, Math.max(0, distance));
+	const gapAt = along + MARK_GAP;
+	const reachAt = Math.min(route.total, along + MARK_REACH);
+	if (gapAt >= reachAt) {
+		return [];
+	}
+	// A mark stays up until the ship passes its point, so a long chevron slides under the seat
+	// instead of vanishing the moment its opening does.
+	let opening = Math.floor((gapAt - MARK_LENGTH) / MARK_SPACING) * MARK_SPACING;
+	while (opening + MARK_LENGTH <= gapAt) {
+		opening += MARK_SPACING;
+	}
+	const marks: CourseMark[] = [];
+	for (; opening < reachAt - 1e-4 && opening < route.total; opening += MARK_SPACING) {
+		const tip = Math.min(route.total, opening + MARK_LENGTH);
+		const from = Math.max(opening, gapAt);
+		if (from >= tip - 1e-4) {
+			continue;
+		}
+		const alpha = markAlpha(from - along);
+		if (alpha <= 0) {
+			break;
+		}
+		marks.push({
+			point: pointAt(route, from),
+			heading: headingAt(route, from),
+			alpha,
+			opening,
+			from,
+			tip,
+		});
+	}
+	return marks;
+}
+
 export type Journey = {
 	start: (plan: JourneyPlan, onDone: () => void) => void;
 	/** Clears the ship and the line without calling `onDone`. */
 	stop: () => void;
 	update: (deltaSeconds: number, centerOf: (id: string) => Vector3) => void;
-	/** Where the ship is docked, and which way that satellite circles, once a trip has arrived. */
-	docked: () => { id: string; position: Vector3; turn: number } | null;
+	/** Where the ship is docked, which way that satellite circles, and how fast, once a trip has arrived. */
+	docked: () => { id: string; position: Vector3; turn: number; rate: number } | null;
 	/** Where the ship is and which way it is heading, while a trip is under way or docked. */
 	ship: () => { position: Vector3; heading: Vector3 } | null;
 	/** The line being flown and how far along it the ship is, from 0 to 1. Null once the burn has ended. */
 	course: () => { points: readonly Vector3[]; progress: number } | null;
+	/** Shows course chevrons on the windscreen while a burn is underway. */
+	setPiloting: (on: boolean) => void;
 };
 
 type Flight = {
@@ -161,6 +300,7 @@ type Flight = {
 	climbSeconds: number;
 	cruiseLength: number;
 	cruiseSeconds: number;
+	departSpeed: number;
 	elapsed: number;
 	phase: "transit" | "approach" | "docked";
 	/** Null when the body has nothing to dock with: the ship stays where it arrived. */
@@ -185,10 +325,31 @@ export function createJourney(
 ): Journey {
 	const engine = scene.getEngine();
 	let flight: Flight | null = null;
+	let piloting = false;
+	const chevrons = buildChevrons(scene);
+	glow.addExcludedMesh(chevrons);
 
 	const pixelRatio = () => 1 / engine.getHardwareScalingLevel();
 
+	const hideChevrons = () => {
+		chevrons.setEnabled(false);
+	};
+
+	const showChevrons = (route: Route, distance: number) => {
+		if (!piloting) {
+			hideChevrons();
+			return;
+		}
+		const marks = courseMarks(route, distance);
+		if (marks.length === 0 || !writeChevrons(chevrons, route, distance, marks)) {
+			hideChevrons();
+			return;
+		}
+		chevrons.setEnabled(true);
+	};
+
 	const clear = () => {
+		hideChevrons();
 		if (!flight) {
 			return;
 		}
@@ -213,12 +374,18 @@ export function createJourney(
 	const arrive = (current: Flight, center: Vector3) => {
 		const end = current.path.points[current.path.points.length - 1];
 		current.ahead.setEnabled(false);
+		hideChevrons();
 		current.last = end.subtract(center);
 		current.heading = headingAt(current.path, current.path.total);
 		current.since = 0;
 		const harbor = harborOf(current.plan.arrive.id);
 		const dock = current.plan.arrive.dock;
-		current.approach = planApproach(current.last, current.plan.arrive.turn || 1, dock ? { ...harbor, docks: [dock] } : harbor);
+		current.approach = planApproach(
+			current.last,
+			current.plan.arrive.turn || 1,
+			dock ? { ...harbor, docks: [dock] } : harbor,
+			current.heading
+		);
 		current.turn = Math.sign(current.approach?.dock.rate ?? 0) || Math.sign(current.plan.arrive.turn) || 1;
 		current.phase = current.approach ? "approach" : "docked";
 	};
@@ -259,9 +426,10 @@ export function createJourney(
 				plan,
 				path,
 				climbLength: polylineLength(plan.climb),
-				climbSeconds: polylineLength(plan.climb) / CLIMB_PACE,
+				climbSeconds: climbDuration(polylineLength(plan.climb), plan.departSpeed),
 				cruiseLength: plan.cruise.total,
 				cruiseSeconds: journeySeconds(plan.cruise.total),
+				departSpeed: plan.departSpeed,
 				elapsed: 0,
 				phase: "transit",
 				approach: null,
@@ -280,7 +448,12 @@ export function createJourney(
 			if (!flight || flight.phase !== "docked") {
 				return null;
 			}
-			return { id: flight.plan.arrive.id, position: ship.position.clone(), turn: flight.turn };
+			return {
+				id: flight.plan.arrive.id,
+				position: ship.position.clone(),
+				turn: flight.turn,
+				rate: flight.approach?.dock.rate ?? 0,
+			};
 		},
 		ship() {
 			return flight ? { position: ship.position.clone(), heading: flight.heading.clone() } : null;
@@ -297,6 +470,7 @@ export function createJourney(
 				return;
 			}
 			if (flight.phase !== "transit") {
+				hideChevrons();
 				const current = flight;
 				settle(current, deltaSeconds, centerOf(current.plan.arrive.id));
 				if (current.phase === "approach" && current.approach && current.since >= current.approach.seconds) {
@@ -328,13 +502,26 @@ export function createJourney(
 			const along = Math.min(distance, flight.path.total);
 			flight.heading = headingAt(flight.path, along);
 			placeShip(pointAt(flight.path, along), flight.heading, deltaSeconds);
+			// The climb leaves an orbit for the outer orbit, and docking is the drop after the burn.
+			// Chevrons are the road on the burn itself.
+			if (flight.elapsed <= flight.climbSeconds) {
+				hideChevrons();
+			} else {
+				showChevrons(flight.path, along);
+			}
+		},
+		setPiloting(on) {
+			piloting = on;
+			if (!on) {
+				hideChevrons();
+			}
 		},
 	};
 }
 
 function distanceAt(flight: Flight): number {
 	if (flight.elapsed <= flight.climbSeconds) {
-		return CLIMB_PACE * flight.elapsed;
+		return climbDistance(flight.elapsed, flight.climbLength, flight.departSpeed);
 	}
 	return flight.climbLength + cruiseDistance(flight.elapsed - flight.climbSeconds, flight.cruiseLength, flight.cruiseSeconds);
 }
@@ -342,9 +529,13 @@ function distanceAt(flight: Flight): number {
 /**
  * Picks the dock the ship reaches by swinging forward the least, but at least `APPROACH_MIN_SWEEP`,
  * and plans the drop to it. `from` is where the ship met the outer orbit, relative to the body, and
- * `turn` the way it was circling. Null when the body has nothing to dock with.
+ * `turn` the way it was circling. `arrival`, when set, is the heading the burn came in on; the drop
+ * curves off it onto the spiral. Null when the body has nothing to dock with.
+ *
+ * Speed eases from the arrival's climb pace down to the dock's orbital speed. The shape of the drop
+ * is unchanged: radius eases in, and the angle closes from one side.
  */
-export function planApproach(from: Vector3, turn: number, harbor: Harbor): Approach | null {
+export function planApproach(from: Vector3, turn: number, harbor: Harbor, arrival?: Vector3): Approach | null {
 	const radius = Math.hypot(from.x, from.z);
 	const shipRate = (turn * CLIMB_PACE) / Math.max(radius, 1e-6);
 	const fromAngle = Math.atan2(from.z, from.x);
@@ -370,20 +561,40 @@ export function planApproach(from: Vector3, turn: number, harbor: Harbor): Appro
 	const seconds = Math.max(APPROACH_MIN_SECONDS, length / APPROACH_PACE);
 	// A cubic that ends still stays on one side of the dock only while its starting slope is under three times the gap.
 	const closing = direction * Math.min(Math.abs(best.closingRate) * seconds, 3 * best.gap);
-	const approach: Approach = { dock: best.dock, from: from.clone(), lead: -direction * best.gap, closing, seconds, side: 1 };
+	const heading = arrival && arrival.lengthSquared() > 1e-8 ? arrival.normalize() : undefined;
+	const approach: Approach = {
+		dock: best.dock,
+		from: from.clone(),
+		lead: -direction * best.gap,
+		closing,
+		seconds,
+		side: 1,
+		heading,
+	};
 	if (harbor.ring) {
 		approach.ring = harbor.ring;
+	}
+	approach.warp = timeWarp(approach, best.at);
+	if (harbor.ring) {
 		approach.side = ringSide(approach, best.at);
 	}
 	return approach;
 }
+
+/** Share of the drop spent curving off the burn's heading onto the spiral. */
+const APPROACH_BLEND = 0.22;
 
 /**
  * Where the ship is `elapsed` seconds into an approach, relative to the body, given where the dock
  * is right now. Past the end it sits on the dock.
  */
 export function approachPoint(approach: Approach, elapsed: number, dock: Vector3): Vector3 {
-	const u = Math.min(1, Math.max(0, elapsed / approach.seconds));
+	const u = shapeParameter(approach, elapsed);
+	const spiral = spiralPoint(approach, u, dock);
+	return blendHeading(approach, u, dock, spiral);
+}
+
+function spiralPoint(approach: Approach, u: number, dock: Vector3): Vector3 {
 	const ease = u * u * (3 - 2 * u);
 	const from = approach.from;
 	const fromRadius = Math.hypot(from.x, from.z);
@@ -394,6 +605,147 @@ export function approachPoint(approach: Approach, elapsed: number, dock: Vector3
 	const angle = Math.atan2(dock.z, dock.x) + offset;
 	const point = new Vector3(Math.cos(angle) * radius, from.y + (dock.y - from.y) * ease, Math.sin(angle) * radius);
 	return approach.ring ? liftOverRing(point, approach.ring, approach.side, dockRadius) : point;
+}
+
+/** Curves the first part of the drop off `heading` onto the spiral, then rides the spiral. */
+function blendHeading(approach: Approach, u: number, dock: Vector3, spiral: Vector3): Vector3 {
+	const heading = approach.heading;
+	if (!heading || u <= 1e-6 || u >= APPROACH_BLEND) {
+		return spiral;
+	}
+	const probe = 0.004;
+	const ahead = spiralPoint(approach, probe, dock);
+	const prime = ahead.subtract(approach.from).scale(1 / probe);
+	const primeLength = prime.length();
+	if (primeLength < 1e-6) {
+		return spiral;
+	}
+	const aimed = heading.scale(primeLength);
+	if (Vector3.Dot(aimed, prime) > 0.999 * primeLength * primeLength) {
+		return spiral;
+	}
+	const fade = u * (1 - u / APPROACH_BLEND) ** 2;
+	return spiral.add(aimed.subtract(prime).scale(fade));
+}
+
+function shapeParameter(approach: Approach, elapsed: number): number {
+	const warp = approach.warp;
+	if (!warp || warp.times.length < 2) {
+		return Math.min(1, Math.max(0, elapsed / Math.max(approach.seconds, 1e-6)));
+	}
+	const times = warp.times;
+	const params = warp.params;
+	if (elapsed <= times[0]) {
+		return params[0];
+	}
+	const last = times.length - 1;
+	if (elapsed >= times[last]) {
+		return params[last];
+	}
+	let lo = 0;
+	let hi = last;
+	while (hi - lo > 1) {
+		const mid = (lo + hi) >> 1;
+		if (times[mid] <= elapsed) {
+			lo = mid;
+		} else {
+			hi = mid;
+		}
+	}
+	const span = times[hi] - times[lo];
+	const t = span < 1e-8 ? 0 : (elapsed - times[lo]) / span;
+	return params[lo] + (params[hi] - params[lo]) * t;
+}
+
+/**
+ * Times the drop so speed eases from climb pace down to the dock's orbital speed, or up to it when
+ * the dock is faster. The shape parameter still runs from 0 to 1. Time stretches when the spiral
+ * cannot be flown that slowly, and the ship holds on the dock once it arrives.
+ */
+function timeWarp(approach: Approach, dock0: Vector3): { times: number[]; params: number[] } {
+	const v0 = CLIMB_PACE;
+	const dockRadius = Math.hypot(dock0.x, dock0.z);
+	const v1 = Math.abs(approach.dock.rate) * dockRadius;
+	const ceiling = Math.max(v0, v1);
+	const times = [0];
+	const params = [0];
+	let u = 0;
+	let t = 0;
+	let previous = ceiling;
+	for (let step = 0; step < 480 && u < 1 - 1e-4; step++) {
+		const ease = v1 + (v0 - v1) * (1 - u);
+		const coast = Math.min(ceiling, coastSpeed(approach, dock0, u, t));
+		const target = Math.min(previous, Math.max(ease, coast));
+		let w = warpRate(approach, dock0, u, t, target);
+		if (w < 1e-4) {
+			w = warpRate(approach, dock0, u, t, Math.min(ceiling, coast + 0.08));
+		}
+		if (w < 1e-4) {
+			w = 0.004;
+		}
+		const du = Math.min(1 / 64, 1 - u);
+		t += du / w;
+		u = Math.min(1, u + du);
+		times.push(t);
+		params.push(u);
+		previous = target;
+	}
+	const duration = Math.max(approach.seconds, t);
+	approach.seconds = duration;
+	const end = params.length - 1;
+	if (params[end] > 0.98 && params[end] < 1) {
+		params[end] = 1;
+	}
+	if (times[end] < duration - 1e-3 && params[end] >= 1 - 1e-6) {
+		times.push(duration);
+		params.push(1);
+	}
+	return { times, params };
+}
+
+/** World speed when the shape parameter is held still and only the dock keeps turning. */
+function coastSpeed(approach: Approach, dock0: Vector3, u: number, t: number): number {
+	const sample = 0.02;
+	return Vector3.Distance(posed(approach, u, dock0, t), posed(approach, u, dock0, t + sample)) / sample;
+}
+
+/** How fast the shape parameter must move for the ship to travel at `desired` world units a second. */
+function warpRate(approach: Approach, dock0: Vector3, u: number, t: number, desired: number): number {
+	const speedAt = (w: number) => {
+		const sample = 0.02;
+		const left = posed(approach, u, dock0, t);
+		const right = posed(approach, Math.min(1, u + w * sample), dock0, t + sample);
+		return Vector3.Distance(left, right) / sample;
+	};
+	const slow = speedAt(0);
+	if (slow >= desired - 1e-3) {
+		return 0;
+	}
+	let lo = 0;
+	let hi = 0.5;
+	if (speedAt(hi) < desired) {
+		return hi;
+	}
+	for (let attempt = 0; attempt < 10; attempt++) {
+		const mid = (lo + hi) / 2;
+		if (speedAt(mid) < desired) {
+			lo = mid;
+		} else {
+			hi = mid;
+		}
+	}
+	return (lo + hi) / 2;
+}
+
+function posed(approach: Approach, u: number, dock0: Vector3, t: number): Vector3 {
+	const dock = yawAround(dock0, approach.dock.rate * t);
+	return blendHeading(approach, u, dock, spiralPoint(approach, u, dock));
+}
+
+function yawAround(point: Vector3, angle: number): Vector3 {
+	const cos = Math.cos(angle);
+	const sin = Math.sin(angle);
+	return new Vector3(point.x * cos - point.z * sin, point.y, point.x * sin + point.z * cos);
 }
 
 /**
@@ -501,6 +853,116 @@ function polylineLength(points: Vector3[]): number {
 		length += Vector3.Distance(points[i - 1], points[i]);
 	}
 	return length;
+}
+
+/**
+ * Each chevron lies under the course. The opening is just below the point, so the arrow stays in the
+ * lower windscreen: wide above the dashboard, with the chain receding toward the horizon.
+ */
+const MARK_NEAR_DROP = 1.35;
+const MARK_FAR_DROP = 0.85;
+/** Width of one arm's outer edge at the opening. The two arms make a wide forward point. */
+const MARK_HALF_WIDTH = 3;
+/** Thickness of an arm at the opening. The arms meet at the point. */
+const MARK_STROKE = 1;
+/** Samples along one chevron. Enough that a bend does not cut the corner. */
+const MARK_STEPS = 8;
+
+/** The windscreen's course. Unlit amber, see-through, and kept off the chart and the aft views. */
+function buildChevrons(scene: Scene): Mesh {
+	const mesh = new Mesh("journey-chevrons", scene);
+	const material = new StandardMaterial("journey-chevrons", scene);
+	material.disableLighting = true;
+	material.diffuseColor = Color3.Black();
+	material.ambientColor = Color3.Black();
+	material.emissiveColor = Color3.White();
+	material.specularColor = Color3.Black();
+	material.backFaceCulling = false;
+	material.disableDepthWrite = true;
+	material.alphaMode = Constants.ALPHA_COMBINE;
+	material.transparencyMode = Material.MATERIAL_ALPHABLEND;
+	mesh.material = material;
+	mesh.useVertexColors = true;
+	mesh.hasVertexAlpha = true;
+	mesh.isPickable = false;
+	mesh.layerMask = PILOT_LAYER;
+	mesh.setEnabled(false);
+	return mesh;
+}
+
+/** Far marks are written first, so a nearer chevron blends over the one beyond it. */
+function writeChevrons(mesh: Mesh, route: Route, distance: number, marks: CourseMark[]): boolean {
+	const right = new Vector3();
+	const up = new Vector3();
+	const positions: number[] = [];
+	const colors: number[] = [];
+	const indices: number[] = [];
+	for (let markIndex = marks.length - 1; markIndex >= 0; markIndex--) {
+		const mark = marks[markIndex];
+		const span = mark.tip - mark.from;
+		if (span < 1e-4) {
+			continue;
+		}
+		const base = positions.length / 3;
+		const samples = MARK_STEPS + 1;
+		for (let step = 0; step < samples; step++) {
+			// The tip is first, so the nearer quads are drawn over it.
+			const along = mark.tip - (span * step) / MARK_STEPS;
+			const share = (along - mark.opening) / MARK_LENGTH;
+			const outer = MARK_HALF_WIDTH * (1 - share);
+			const inner = Math.max(0, outer - MARK_STROKE * (1 - share));
+			const drop = MARK_NEAR_DROP + (MARK_FAR_DROP - MARK_NEAR_DROP) * share;
+			const center = pointAt(route, along);
+			markBasis(headingAt(route, along), right, up);
+			const alpha = markAlpha(along - distance);
+			for (const side of [1, -1]) {
+				for (const lateral of [outer, inner]) {
+					const x = side * lateral;
+					positions.push(
+						center.x + right.x * x - up.x * drop,
+						center.y + right.y * x - up.y * drop,
+						center.z + right.z * x - up.z * drop
+					);
+					colors.push(AMBER.r, AMBER.g, AMBER.b, alpha);
+				}
+			}
+		}
+		// Four corners per sample: right outer, right inner, left outer, left inner.
+		for (let step = 0; step < MARK_STEPS; step++) {
+			for (const arm of [0, 2]) {
+				const a = base + step * 4 + arm;
+				const b = a + 1;
+				const c = a + 4;
+				const d = b + 4;
+				indices.push(a, c, d, a, d, b);
+			}
+		}
+	}
+	if (positions.length === 0) {
+		return false;
+	}
+	mesh.setVerticesData(VertexBuffer.PositionKind, positions, true, 3);
+	mesh.setVerticesData(VertexBuffer.ColorKind, colors, true, 4);
+	mesh.setIndices(indices);
+	return true;
+}
+
+/** `right` and `up` for a chevron whose point faces `heading`. World up stays up, unless the course is vertical. */
+function markBasis(heading: Vector3, right: Vector3, up: Vector3): void {
+	const steep = Math.abs(heading.y) > 0.95;
+	const ax = steep ? 1 : 0;
+	const ay = steep ? 0 : 1;
+	right.set(ay * heading.z, -ax * heading.z, ax * heading.y - ay * heading.x);
+	if (right.lengthSquared() < 1e-8) {
+		right.set(1, 0, 0);
+	} else {
+		right.normalize();
+	}
+	up.set(
+		heading.y * right.z - heading.z * right.y,
+		heading.z * right.x - heading.x * right.z,
+		heading.x * right.y - heading.y * right.x
+	);
 }
 
 /**

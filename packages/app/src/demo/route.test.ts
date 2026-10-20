@@ -22,6 +22,8 @@ import {
 	JOURNEY_MAX_SECONDS,
 	JOURNEY_MIN_SECONDS,
 	approachPoint,
+	climbDistance,
+	climbDuration,
 	cruiseDistance,
 	cruiseSpeed,
 	journeySeconds,
@@ -29,7 +31,7 @@ import {
 	type Approach,
 	type Dock,
 } from "./journey";
-import { cross2, departureSpiral, headingAt, planRoute, pointAt, reversalPenalty, type AssistCandidate, type Route } from "./route";
+import { cross2, curveClimbJoin, curveClimbStart, departureSpiral, headingAt, planRoute, pointAt, reversalPenalty, tangentHeading, type AssistCandidate, type Route } from "./route";
 
 const failures: string[] = [];
 
@@ -318,6 +320,16 @@ function checkJourney(layout: JourneyLayout, fromId: string, toId: string, name:
 		`${name}: burn does not cut into the destination orbit`
 	);
 	expect(plan.arrive.id === toId && plan.arrive.turn === route.endTurn, `${name}: arrives turning the way the burn ends`);
+	expect(route.endTurn === 1, `${name}: arrives with the inner orbit`);
+	for (let i = route.points.length - 1; i > 0; i--) {
+		const flat = new Vector3(route.points[i].x - route.points[i - 1].x, 0, route.points[i].z - route.points[i - 1].z);
+		if (flat.lengthSquared() < 0.25) {
+			continue;
+		}
+		const prograde = tangentHeading(to.center, route.points[i], 1);
+		expect(Vector3.Dot(flat.normalize(), prograde) > 0.5, `${name}: arrival heads with the inner orbit`);
+		break;
+	}
 	expect(route.kinds.length === route.points.length - 1, `${name}: one kind per segment`);
 
 	const candidates = assistCandidates(layout, fromId, toId);
@@ -457,12 +469,17 @@ for (let step = 0; step < 24; step++) {
 			startRadius: earth.outer,
 			endRadius: mars.outer,
 			startTurn: turn,
+			endTurn: 1,
 			candidates,
 			spheres,
 			rings,
 		});
-		const climb = departureSpiral(earth.center, at, cruise.points[0], turn, rings);
-		return pathLength(climb) + (turn === 1 ? 0 : reversalPenalty(EARTH_STATION_RADIUS));
+		const spiral = departureSpiral(earth.center, at, cruise.points[0], turn, rings);
+		const opened = curveClimbStart(spiral, tangentHeading(earth.center, at, 1), spheres, rings, earth.center);
+		const joined = curveClimbJoin(opened, cruise, spheres, rings);
+		const climb = joined.climb;
+		const radius = Math.hypot(at.x - earth.center.x, at.z - earth.center.z);
+		return pathLength(climb) + (turn === 1 ? 0 : reversalPenalty(radius));
 	};
 	let withTheOrbit = 0;
 	let againstTheOrbit = 0;
@@ -646,6 +663,145 @@ function assistCandidates(layout: JourneyLayout, fromId: string, toId: string): 
 	expect(journeySeconds(0) === JOURNEY_MIN_SECONDS, "a short hop still lasts the minimum");
 	expect(Math.abs(journeySeconds(1120) - 80) < 1, "Neptune to the Sun takes about 80 seconds");
 	expect(journeySeconds(1e6) === JOURNEY_MAX_SECONDS, "the longest trips are capped");
+}
+
+{
+	expect(journeySeconds(0) === JOURNEY_MIN_SECONDS, "a short hop still lasts the minimum");
+	expect(Math.abs(journeySeconds(1120) - 80) < 1, "Neptune to the Sun takes about 80 seconds");
+	expect(journeySeconds(1e6) === JOURNEY_MAX_SECONDS, "the longest trips are capped");
+}
+
+{
+	const length = 40;
+	const departSpeed = 0.4;
+	const duration = climbDuration(length, departSpeed);
+	expect(Math.abs(climbDistance(duration, length, departSpeed) - length) < 1e-3, "a climb covers its length");
+	const dt = 0.02;
+	expect(Math.abs(climbDistance(dt, length, departSpeed) / dt - departSpeed) < 0.08, "a climb starts at dock speed");
+	const endSpeed = (length - climbDistance(duration - dt, length, departSpeed)) / dt;
+	expect(Math.abs(endSpeed - CLIMB_PACE) < 0.2, "a climb is at burn speed when the burn starts");
+	let previous = 0;
+	for (let i = 1; i <= 16; i++) {
+		const t = (i / 16) * duration;
+		const speed = (climbDistance(t, length, departSpeed) - climbDistance((i - 1) / 16 * duration, length, departSpeed)) / (duration / 16);
+		expect(speed + 0.05 >= previous, "climb speed eases upward");
+		previous = speed;
+	}
+}
+
+{
+	const layout = layoutAt(FIRST_DAY, 0);
+	const earth = layout.bodies.find((body) => body.id === "earth")!;
+	let retrograde = 0;
+	for (let step = 0; step < 24; step++) {
+		const angle = (step / 24) * Math.PI * 2;
+		const at = earth.center.add(new Vector3(Math.cos(angle) * EARTH_STATION_RADIUS, 0.2, Math.sin(angle) * EARTH_STATION_RADIUS));
+		const plan = planJourney(layout, "earth", "mars", { at, turn: 1, speed: 0.5 });
+		expect(Math.abs(plan.departSpeed - 0.5) < 1e-9, "a departure keeps the speed the ship already has");
+		expect(plan.cruise.endTurn === 1, "a departure still arrives with the inner orbit");
+		if (plan.cruise.startTurn !== -1) {
+			continue;
+		}
+		retrograde += 1;
+		const stepOut = plan.climb[1].subtract(plan.climb[0]);
+		const dockHeading = tangentHeading(earth.center, plan.climb[0], 1);
+		expect(
+			Vector3.Dot(stepOut.normalize(), dockHeading) > 0.85,
+			`a retrograde departure at ${angle.toFixed(2)} curves off the docked heading`
+		);
+		let worst = 0;
+		for (let i = 2; i < plan.climb.length; i++) {
+			const before = plan.climb[i - 1].subtract(plan.climb[i - 2]);
+			const after = plan.climb[i].subtract(plan.climb[i - 1]);
+			if (before.length() < 0.02 || after.length() < 0.02) {
+				continue;
+			}
+			const turn = Math.acos(Math.min(1, Math.max(-1, Vector3.Dot(before.normalize(), after.normalize()))));
+			worst = Math.max(worst, turn / after.length());
+		}
+		expect(worst < 1.25, `a retrograde departure at ${angle.toFixed(2)} turns gently (${worst.toFixed(2)} rad/unit)`);
+		for (let i = 1; i < plan.climb.length; i++) {
+			expect(
+				!segmentHitsSphere(plan.climb[i - 1], plan.climb[i], earth.center, earth.radius),
+				`a retrograde departure at ${angle.toFixed(2)} stays clear of Earth`
+			);
+		}
+	}
+	expect(retrograde > 0, "some departures still leave against the orbit");
+}
+
+{
+	const outer = 31;
+	const dockRadius = 11;
+	const dockRate = 0.03;
+	const clock = { now: 0 };
+	const from = new Vector3(outer, 0, 0);
+	const approach = planApproach(from, 1, { docks: dockRing(4, dockRadius, dockRate, clock, 0.2) })!;
+	const { path } = flyApproach(approach, clock);
+	const dockSpeed = dockRate * dockRadius;
+	let previous = CLIMB_PACE + 1;
+	const samples = 12;
+	for (let i = 0; i < samples; i++) {
+		const index = Math.round((i / samples) * (path.length - 2));
+		const next = Math.min(path.length - 1, index + Math.max(1, Math.round((path.length - 1) / samples)));
+		const speed = path[next].subtract(path[index]).length() / (((next - index) * approach.seconds) / (path.length - 1));
+		expect(speed <= previous + 0.35, `a drop does not surge (${speed.toFixed(2)} after ${previous.toFixed(2)})`);
+		if (i === 0) {
+			expect(Math.abs(speed - CLIMB_PACE) < 0.7, `a drop leaves at climb speed (${speed.toFixed(2)})`);
+		}
+		previous = speed;
+	}
+	const lateIndex = Math.round((path.length - 1) * 0.92);
+	const lateSpeed =
+		path[path.length - 1].subtract(path[lateIndex]).length() /
+		(((path.length - 1 - lateIndex) * approach.seconds) / (path.length - 1));
+	expect(Math.abs(lateSpeed - dockSpeed) < 0.55, `a drop settles near dock speed (${lateSpeed.toFixed(2)}, dock ${dockSpeed.toFixed(2)})`);
+	let reversed = false;
+	for (let i = 1; i < path.length; i++) {
+		const step = path[i].subtract(path[i - 1]);
+		if (step.lengthSquared() < 1e-8) {
+			continue;
+		}
+		const angle = Math.atan2(path[i].z, path[i].x);
+		const tangent = new Vector3(-Math.sin(angle), 0, Math.cos(angle));
+		if (Vector3.Dot(step.normalize(), tangent) < 0.15) {
+			reversed = true;
+		}
+	}
+	expect(!reversed, "a prograde drop keeps the nose with the inner orbit");
+}
+
+{
+	const layout = layoutAt(FIRST_DAY, 0);
+	const plan = planJourney(layout, "titan", "saturn");
+	const saturn = layout.bodies.find((body) => body.id === "saturn")!;
+	const ring = saturnRing(saturn.center);
+	const joined = [...plan.climb];
+	let covered = 0;
+	for (const point of plan.cruise.points) {
+		const previous = joined[joined.length - 1];
+		const step = Vector3.Distance(previous, point);
+		if (covered > 8) {
+			break;
+		}
+		joined.push(point);
+		covered += step;
+	}
+	let worst = 0;
+	for (let i = 2; i < joined.length; i++) {
+		const before = joined[i - 1].subtract(joined[i - 2]);
+		const after = joined[i].subtract(joined[i - 1]);
+		if (before.length() < 0.02 || after.length() < 0.02) {
+			continue;
+		}
+		const turn = Math.acos(Math.min(1, Math.max(-1, Vector3.Dot(before.normalize(), after.normalize()))));
+		worst = Math.max(worst, turn / after.length());
+	}
+	expect(worst < 1.25, `a Titan climb meets the burn gently (${worst.toFixed(2)} rad/unit)`);
+	for (let i = 1; i < joined.length; i++) {
+		expect(!segmentHitsSphere(joined[i - 1], joined[i], saturn.center, saturn.radius), "a Titan climb stays clear of Saturn");
+		expect(!segmentHitsRing(joined[i - 1], joined[i], ring), "a Titan climb stays clear of Saturn's rings");
+	}
 }
 
 if (failures.length > 0) {

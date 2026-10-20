@@ -1,6 +1,6 @@
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 
-import { routeAroundBodies, type RingBody, type SphereBody } from "./camera-path";
+import { routeAroundBodies, segmentHitsRing, segmentHitsSphere, type RingBody, type SphereBody } from "./camera-path";
 
 /**
  * A ship's course from one point to another in the planets' plane (y = 0).
@@ -33,6 +33,8 @@ export type RouteInput = {
 	endRadius?: number;
 	/** When set, the course leaves the start circle turning only this way: +1 counterclockwise. */
 	startTurn?: number;
+	/** When set, the course joins the end circle turning only this way: +1 counterclockwise. */
+	endTurn?: number;
 	candidates: AssistCandidate[];
 	spheres: SphereBody[];
 	rings: RingBody[];
@@ -66,7 +68,7 @@ export function planRoute(input: RouteInput): Route {
 	const startRadius = input.startRadius ?? 0;
 	const endRadius = input.endRadius ?? 0;
 	const startTurns = input.startTurn !== undefined ? [input.startTurn] : startRadius > 0 ? [1, -1] : [0];
-	const endTurns = endRadius > 0 ? [1, -1] : [0];
+	const endTurns = input.endTurn !== undefined ? [input.endTurn] : endRadius > 0 ? [1, -1] : [0];
 	let best: Route | undefined;
 	for (const startTurn of startTurns) {
 		for (const endTurn of endTurns) {
@@ -474,6 +476,542 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
 /** A max with its corner rounded over `soft`, so the lifted path has no kink. */
 function softMax(a: number, b: number, soft: number): number {
 	return 0.5 * (a + b + Math.sqrt((a - b) * (a - b) + soft * soft));
+}
+
+/**
+ * Radius of a fillet flown at climb speed. A ship turning on this radius yaws about a quarter turn
+ * a second, which is as sharp as a handoff should look from the cockpit.
+ */
+const GENTLE_RADIUS = 2;
+/** A heading gap smaller than this is already a smooth join. */
+const GENTLE_GAP = (5 * Math.PI) / 180;
+
+/** Unit tangent of the orbit through `point`. `turn` +1 is counterclockwise seen from above. */
+export function tangentHeading(center: Vector3, point: Vector3, turn: number): Vector3 {
+	const rx = point.x - center.x;
+	const rz = point.z - center.z;
+	const len = Math.hypot(rx, rz);
+	if (len < 1e-9) {
+		return new Vector3(0, 0, turn >= 0 ? 1 : -1);
+	}
+	const dir = turn >= 0 ? 1 : -1;
+	return new Vector3((-rz / len) * dir, 0, (rx / len) * dir);
+}
+
+/**
+ * Replaces the start of a climb when it does not leave along `heading`. The ship is facing along the
+ * orbit it is docked to; a departure the other way curves off that heading instead of snapping around.
+ * A curve that would cut a body or a ring is tightened until it stays clear, and the original climb
+ * is kept when even a tight curve cannot.
+ */
+export function curveClimbStart(
+	points: Vector3[],
+	heading: Vector3,
+	spheres: SphereBody[],
+	rings: RingBody[],
+	center?: Vector3
+): Vector3[] {
+	if (points.length < 2) {
+		return points;
+	}
+	const way = points[1].subtract(points[0]);
+	if (way.lengthSquared() < 1e-10) {
+		return points;
+	}
+	const aimed = heading.lengthSquared() < 1e-10 ? way.normalize() : heading.normalize();
+	const gap = Math.acos(clampUnit(Vector3.Dot(way.normalize(), aimed)));
+	if (gap < GENTLE_GAP) {
+		return points;
+	}
+	if (center) {
+		const opened = openDeparture(points, aimed, center, spheres, rings);
+		if (opened) {
+			return opened;
+		}
+	}
+	const total = polylineLength(points);
+	for (const scale of [1, 1.7, 2.6, 0.6]) {
+		for (const flip of [false, true]) {
+			const reach = Math.min(total * 0.7, Math.max(GENTLE_RADIUS * gap, 2) * scale);
+			const curved = replacePrefix(points, aimed, reach, scale, flip);
+			if (curved && !polylineHits(curved, spheres, rings)) {
+				return curved;
+			}
+		}
+	}
+	return points;
+}
+
+/**
+ * Curves the handoff where a climb meets a burn. The burn still begins on the outer orbit. The climb
+ * arrives there along the burn's first heading, and a short pitched hop just after that point is
+ * filleted in place. A curve that would cut a body or a ring is tightened back toward the corner,
+ * and the original join is kept when that still cannot clear.
+ */
+export function curveClimbJoin(
+	climb: Vector3[],
+	route: Route,
+	spheres: SphereBody[],
+	rings: RingBody[]
+): { climb: Vector3[]; route: Route } {
+	if (climb.length < 2 || route.points.length < 2 || route.total < 0.5) {
+		return { climb, route };
+	}
+	const burnStep = route.points[1].subtract(route.points[0]);
+	if (burnStep.lengthSquared() < 1e-10) {
+		return { climb, route };
+	}
+	const burnHeading = burnStep.normalize();
+	const climbLen = polylineLength(climb);
+	const reach = Math.min(climbLen * 0.45, Math.max(GENTLE_RADIUS * 2, 3));
+	const leave = pointBeforeEnd(climb, Math.min(reach, climbLen * 0.7));
+	let nextClimb = climb;
+	if (leave && Vector3.DistanceSquared(leave.point, route.points[0]) > 0.04) {
+		const gap = Math.acos(clampUnit(Vector3.Dot(leave.heading, burnHeading)));
+		if (gap >= GENTLE_GAP) {
+			for (const scale of [1, 1.7, 2.6, 0.6]) {
+				for (const flip of [false, true]) {
+					const curve = headingCurve(leave.point, leave.heading, route.points[0], burnHeading, scale, flip);
+					if (!curve) {
+						continue;
+					}
+					const shaped = dedupePoints([...leave.before, ...curve]);
+					if (shaped.length >= 2 && !polylineHits(shaped, spheres, rings)) {
+						nextClimb = shaped;
+						break;
+					}
+				}
+				if (nextClimb !== climb) {
+					break;
+				}
+			}
+		}
+	}
+	const filleted = filletCruisePrefix(route, spheres, rings);
+	return { climb: dropSlivers(nextClimb), route: filleted };
+}
+
+function dropSlivers(points: Vector3[]): Vector3[] {
+	if (points.length < 3) {
+		return points;
+	}
+	const kept = [points[0]];
+	for (let i = 1; i < points.length - 1; i++) {
+		if (Vector3.Distance(points[i], kept[kept.length - 1]) >= 0.02) {
+			kept.push(points[i]);
+		}
+	}
+	const last = points[points.length - 1];
+	if (Vector3.Distance(last, kept[kept.length - 1]) < 0.02) {
+		kept[kept.length - 1] = last;
+	} else {
+		kept.push(last);
+	}
+	return kept;
+}
+
+function dropRouteSlivers(points: Vector3[], kinds: RouteKind[]): { points: Vector3[]; kinds: RouteKind[] } {
+	const keptPoints = [points[0].clone()];
+	const keptKinds: RouteKind[] = [];
+	for (let i = 1; i < points.length; i++) {
+		const close = Vector3.Distance(points[i], keptPoints[keptPoints.length - 1]) < 0.02;
+		if (close && i < points.length - 1) {
+			continue;
+		}
+		if (close && keptPoints.length > 1) {
+			keptPoints[keptPoints.length - 1] = points[i].clone();
+			continue;
+		}
+		keptKinds.push(kinds[Math.min(i - 1, kinds.length - 1)] ?? "burn");
+		keptPoints.push(points[i].clone());
+	}
+	if (keptPoints.length < 2 || keptKinds.length !== keptPoints.length - 1) {
+		return { points, kinds };
+	}
+	return { points: keptPoints, kinds: keptKinds };
+}
+
+/** Rounds sharp corners in the first stretch of a burn, leaving its first point on the outer orbit. */
+function filletCruisePrefix(route: Route, spheres: SphereBody[], rings: RingBody[]): Route {
+	let points = route.points.map((point) => point.clone());
+	let kinds = route.kinds.slice();
+	for (let guard = 0; guard < 6; guard++) {
+		const cumulative = [0];
+		for (let i = 1; i < points.length; i++) {
+			cumulative.push(cumulative[i - 1] + Vector3.Distance(points[i - 1], points[i]));
+		}
+		let changed = false;
+		for (let i = 1; i < points.length - 1 && cumulative[i] < 8; i++) {
+			const incoming = points[i].subtract(points[i - 1]);
+			const outgoing = points[i + 1].subtract(points[i]);
+			const inLen = incoming.length();
+			const outLen = outgoing.length();
+			if (inLen < 1e-6 || outLen < 1e-6) {
+				continue;
+			}
+			const tIn = incoming.scale(1 / inLen);
+			const tOut = outgoing.scale(1 / outLen);
+			const gap = Math.acos(clampUnit(Vector3.Dot(tIn, tOut)));
+			if (gap < GENTLE_GAP || gap > Math.PI * 0.92) {
+				continue;
+			}
+			let radius = GENTLE_RADIUS;
+			for (let attempt = 0; attempt < 5; attempt++) {
+				const trim = radius * Math.tan(gap / 2);
+				if (trim < 0.08 || trim > inLen * 0.45 || trim > outLen * 0.45) {
+					radius *= 0.55;
+					continue;
+				}
+				const arc = circularFillet(points[i], tIn, tOut, radius, trim, gap);
+				if (!arc) {
+					radius *= 0.55;
+					continue;
+				}
+				const nextPoints = dedupePoints([...points.slice(0, i), ...arc, ...points.slice(i + 1)]);
+				const added = nextPoints.length - (points.length - 1);
+				const nextKinds = [...kinds.slice(0, i - 1), ...new Array(Math.max(0, added)).fill(kinds[i - 1] ?? "burn"), ...kinds.slice(i)];
+				if (nextKinds.length !== nextPoints.length - 1) {
+					radius *= 0.55;
+					continue;
+				}
+				if (!polylineHits(nextPoints, spheres, rings)) {
+					points = nextPoints;
+					kinds = nextKinds as RouteKind[];
+					changed = true;
+					break;
+				}
+				radius *= 0.55;
+			}
+			if (changed) {
+				break;
+			}
+		}
+		if (!changed) {
+			break;
+		}
+	}
+	if (points.length < 2 || kinds.length !== points.length - 1) {
+		return route;
+	}
+	const cleaned = dropRouteSlivers(points, kinds);
+	return rebuildRoute(route, cleaned.points, cleaned.kinds);
+}
+
+function circularFillet(
+	corner: Vector3,
+	tIn: Vector3,
+	tOut: Vector3,
+	radius: number,
+	trim: number,
+	gap: number
+): Vector3[] | null {
+	const axis = Vector3.Cross(tIn, tOut);
+	if (axis.lengthSquared() < 1e-10) {
+		return null;
+	}
+	axis.normalize();
+	const start = corner.subtract(tIn.scale(trim));
+	const toward = Vector3.Cross(axis, tIn);
+	if (toward.lengthSquared() < 1e-10) {
+		return null;
+	}
+	const center = start.add(toward.normalize().scale(radius));
+	const from = start.subtract(center);
+	const steps = Math.max(2, Math.ceil(gap / ARC_STEP));
+	const points: Vector3[] = [];
+	for (let i = 0; i <= steps; i++) {
+		points.push(center.add(rotateAround(from, axis, gap * (i / steps))));
+	}
+	points[0] = start;
+	points[points.length - 1] = corner.add(tOut.scale(trim));
+	return points;
+}
+
+function rotateAround(vector: Vector3, axis: Vector3, angle: number): Vector3 {
+	const cos = Math.cos(angle);
+	const sin = Math.sin(angle);
+	const cross = Vector3.Cross(axis, vector);
+	const along = Vector3.Dot(axis, vector);
+	return vector.scale(cos).add(cross.scale(sin)).add(axis.scale(along * (1 - cos)));
+}
+
+/**
+ * Turns off the docked heading onto the climb's turn, bulging away from the body, then climbs from
+ * there. A reverse departure is a curve out of the dock instead of a snap onto the opposite tangent.
+ */
+function openDeparture(
+	points: Vector3[],
+	heading: Vector3,
+	center: Vector3,
+	spheres: SphereBody[],
+	rings: RingBody[]
+): Vector3[] | null {
+	const radial = points[0].subtract(center);
+	const first = points[1].subtract(points[0]);
+	if (first.lengthSquared() < 1e-10) {
+		return null;
+	}
+	const turn = Math.sign(radial.x * first.z - radial.z * first.x) || 1;
+	const goal = points[points.length - 1];
+	for (const radius of [GENTLE_RADIUS, 3.2, 4.8, 7]) {
+		const arc = turnOntoOrbit(center, points[0], heading, turn, radius);
+		if (!arc || arc.length < 2) {
+			continue;
+		}
+		const spiral = departureSpiral(center, arc[arc.length - 1], goal, turn, rings);
+		const spiralLength = polylineLength(spiral);
+		const tail = spiralLength < 0.5 ? [goal] : spiral;
+		if (tail.length > 1 && !joinIsGentle(arc, tail)) {
+			continue;
+		}
+		const stitched = dedupePoints([...arc.slice(0, -1), ...tail]);
+		if (stitched.length >= 2 && Vector3.Distance(stitched[stitched.length - 1], goal) < 1e-4 && !polylineHits(stitched, spheres, rings)) {
+			return stitched;
+		}
+	}
+	return null;
+}
+
+/** Sweeps `heading` until it lines up with the orbit through the ship. A large reversal turns outward and keeps that direction. */
+function turnOntoOrbit(center: Vector3, from: Vector3, fromHeading: Vector3, turn: number, radius: number): Vector3[] | null {
+	const up = new Vector3(0, 1, 0);
+	const step = (1.5 * Math.PI) / 180;
+	let heading = new Vector3(fromHeading.x, 0, fromHeading.z);
+	if (heading.lengthSquared() < 1e-8) {
+		return null;
+	}
+	heading = heading.normalize();
+	const local = tangentHeading(center, from, turn);
+	if (Vector3.Dot(heading, local) > Math.cos(GENTLE_GAP)) {
+		return null;
+	}
+	const dir = departureTurn(from, heading, local, center, radius);
+	let pos = from.clone();
+	const points = [from.clone()];
+	const maxSteps = Math.ceil((Math.PI * 1.35) / step) + 1;
+	for (let i = 0; i < maxSteps; i++) {
+		const here = tangentHeading(center, pos, turn);
+		const cross = heading.x * here.z - heading.z * here.x;
+		const remain = Math.atan2(cross, clampUnit(Vector3.Dot(heading, here)));
+		if (Math.abs(remain) <= step) {
+			if (radius * Math.abs(remain) >= 0.05) {
+				const mid = rotateAround(heading, up, remain * 0.5);
+				pos = new Vector3(pos.x + mid.x * radius * Math.abs(remain), from.y, pos.z + mid.z * radius * Math.abs(remain));
+				points.push(pos.clone());
+			}
+			return points.length >= 2 ? points : null;
+		}
+		const delta = dir * step;
+		const mid = rotateAround(heading, up, delta * 0.5);
+		pos = new Vector3(pos.x + mid.x * radius * step, from.y, pos.z + mid.z * radius * step);
+		heading = rotateAround(heading, up, delta).normalize();
+		points.push(pos.clone());
+	}
+	return null;
+}
+
+/** +1 turns with a positive rotation about world up. Big reversals bulge away from the body. */
+function departureTurn(from: Vector3, heading: Vector3, local: Vector3, center: Vector3, radius: number): number {
+	const gain = (dir: number) => {
+		const mid = rotateAround(heading, new Vector3(0, 1, 0), dir * ARC_STEP * 0.5);
+		const next = from.add(new Vector3(mid.x, 0, mid.z).scale(radius * ARC_STEP));
+		return Vector3.DistanceSquared(next, center);
+	};
+	const outward = gain(1) >= gain(-1) ? 1 : -1;
+	const cross = heading.x * local.z - heading.z * local.x;
+	const gap = Math.acos(clampUnit(Vector3.Dot(heading, local)));
+	if (gap > Math.PI * 0.5 || Math.abs(cross) < 0.02) {
+		return outward;
+	}
+	return cross > 0 ? 1 : -1;
+}
+
+function joinIsGentle(arc: Vector3[], spiral: Vector3[]): boolean {
+	if (!curveIsGentle(arc)) {
+		return false;
+	}
+	const incoming = arc[arc.length - 1].subtract(arc[arc.length - 2]);
+	const outgoing = spiral[1].subtract(spiral[0]);
+	if (incoming.length() < 0.02 || outgoing.length() < 0.02) {
+		return false;
+	}
+	return Vector3.Dot(incoming.normalize(), outgoing.normalize()) > Math.cos((25 * Math.PI) / 180);
+}
+
+function replacePrefix(points: Vector3[], heading: Vector3, reach: number, scale: number, flip: boolean): Vector3[] | null {
+	const cut = pointAlongPoints(points, reach);
+	if (!cut) {
+		return null;
+	}
+	const curve = headingCurve(points[0], heading, cut.point, cut.heading, scale, flip);
+	if (!curve) {
+		return null;
+	}
+	return dedupePoints([...curve, ...cut.rest]);
+}
+
+/** A curve that leaves `from` along `fromHeading` and arrives at `to`. `scale` widens the turn. */
+function headingCurve(
+	from: Vector3,
+	fromHeading: Vector3,
+	to: Vector3,
+	toHeading: Vector3,
+	scale: number,
+	flip = false
+): Vector3[] | null {
+	const chord = to.subtract(from);
+	const distance = chord.length();
+	if (distance < 1e-4) {
+		return null;
+	}
+	const fromH = fromHeading.normalize();
+	const toH = toHeading.normalize();
+	const axis = turnAxis(fromH, toH, chord).scale(flip ? -1 : 1);
+	const gap = Math.atan2(Vector3.Dot(Vector3.Cross(fromH, toH), axis), Vector3.Dot(fromH, toH));
+	const steps = Math.max(8, Math.ceil(Math.abs(gap) / ARC_STEP));
+	const radius = Math.max(GENTLE_RADIUS, distance / Math.max(Math.abs(gap), 0.2)) * scale;
+	const stepLen = (Math.max(distance, radius * Math.abs(gap)) ) / steps;
+	const points: Vector3[] = [from.clone()];
+	let pos = from.clone();
+	for (let i = 1; i <= steps; i++) {
+		const heading = rotateAround(fromH, axis, gap * ((i - 0.5) / steps));
+		pos = pos.add(heading.scale(stepLen));
+		points.push(pos.clone());
+	}
+	const error = to.subtract(points[points.length - 1]);
+	const last = points.length - 1;
+	for (let i = 1; i <= last; i++) {
+		const u = i / last;
+		const weight = u * u * (3 - 2 * u);
+		points[i] = points[i].add(error.scale(weight));
+	}
+	points[last] = to.clone();
+	if (!curveIsGentle(points)) {
+		return null;
+	}
+	return points;
+}
+
+function curveIsGentle(points: Vector3[]): boolean {
+	let previous: Vector3 | null = null;
+	for (let i = 1; i < points.length; i++) {
+		const step = points[i].subtract(points[i - 1]);
+		const len = step.length();
+		if (len < 0.02) {
+			return false;
+		}
+		const heading = step.scale(1 / len);
+		if (previous && Vector3.Dot(previous, heading) < Math.cos((25 * Math.PI) / 180)) {
+			return false;
+		}
+		previous = heading;
+	}
+	return true;
+}
+
+function turnAxis(fromH: Vector3, toH: Vector3, chord: Vector3): Vector3 {
+	const crossed = Vector3.Cross(fromH, toH);
+	if (crossed.lengthSquared() > 1e-8) {
+		return crossed.normalize();
+	}
+	const side = Vector3.Cross(fromH, chord);
+	if (side.lengthSquared() > 1e-8) {
+		return side.normalize();
+	}
+	const up = Math.abs(fromH.y) < 0.9 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0);
+	return Vector3.Cross(fromH, up).normalize();
+}
+
+function pointAlongPoints(
+	points: Vector3[],
+	distance: number
+): { point: Vector3; heading: Vector3; rest: Vector3[] } | null {
+	let left = Math.max(0, distance);
+	for (let i = 1; i < points.length; i++) {
+		const step = points[i].subtract(points[i - 1]);
+		const len = step.length();
+		if (len < 1e-8) {
+			continue;
+		}
+		if (left <= len) {
+			const t = left / len;
+			const point = Vector3.Lerp(points[i - 1], points[i], t);
+			const rest = t > 1 - 1e-4 ? points.slice(i) : [point, ...points.slice(i)];
+			return { point, heading: step.normalize(), rest };
+		}
+		left -= len;
+	}
+	return null;
+}
+
+function pointBeforeEnd(
+	points: Vector3[],
+	distance: number
+): { point: Vector3; heading: Vector3; before: Vector3[] } | null {
+	const total = polylineLength(points);
+	const at = Math.max(0, total - distance);
+	let covered = 0;
+	for (let i = 1; i < points.length; i++) {
+		const step = points[i].subtract(points[i - 1]);
+		const len = step.length();
+		if (len < 1e-8) {
+			continue;
+		}
+		if (covered + len >= at - 1e-6) {
+			const t = len < 1e-8 ? 0 : (at - covered) / len;
+			const point = Vector3.Lerp(points[i - 1], points[i], Math.min(1, Math.max(0, t)));
+			const before = t < 1e-4 ? points.slice(0, i) : [...points.slice(0, i), point];
+			return { point, heading: step.normalize(), before };
+		}
+		covered += len;
+	}
+	return null;
+}
+
+function rebuildRoute(route: Route, points: Vector3[], kinds: RouteKind[]): Route {
+	const cumulative = [0];
+	for (let i = 1; i < points.length; i++) {
+		cumulative.push(cumulative[i - 1] + Vector3.Distance(points[i - 1], points[i]));
+	}
+	return { ...route, points, kinds, cumulative, total: cumulative[cumulative.length - 1] ?? 0 };
+}
+
+function dedupePoints(points: Vector3[]): Vector3[] {
+	const kept: Vector3[] = [];
+	for (const point of points) {
+		if (kept.length === 0 || Vector3.DistanceSquared(point, kept[kept.length - 1]) > 1e-8) {
+			kept.push(point.clone());
+		}
+	}
+	return kept;
+}
+
+function polylineLength(points: Vector3[]): number {
+	let length = 0;
+	for (let i = 1; i < points.length; i++) {
+		length += Vector3.Distance(points[i - 1], points[i]);
+	}
+	return length;
+}
+
+function polylineHits(points: Vector3[], spheres: SphereBody[], rings: RingBody[]): boolean {
+	for (let i = 1; i < points.length; i++) {
+		for (const sphere of spheres) {
+			if (segmentHitsSphere(points[i - 1], points[i], sphere.center, sphere.radius)) {
+				return true;
+			}
+		}
+		for (const ring of rings) {
+			if (segmentHitsRing(points[i - 1], points[i], ring)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+function clampUnit(value: number): number {
+	return Math.min(1, Math.max(-1, value));
 }
 
 /** How far the course bends at `at`, going from `from` toward `to`. */
