@@ -2558,7 +2558,7 @@ function dressEarth(scene: Scene, earth: Mesh, diameter: number): void {
 }
 
 /**
- * Adds a lights texture only where the surface faces away from the Sun (at the origin).
+ * Adds a lights texture only where the surface faces away from the Sun.
  * A plain emissive texture would glow on the day side too.
  */
 class NightLightsPlugin extends MaterialPluginBase {
@@ -2586,8 +2586,18 @@ class NightLightsPlugin extends MaterialPluginBase {
 		samplers.push("nightLightsSampler");
 	}
 
+	override getUniforms() {
+		return {
+			ubo: [{ name: "sunCenter", size: 3, type: "vec3" }],
+			fragment: "#ifdef NIGHT_LIGHTS\nuniform vec3 sunCenter;\n#endif",
+		};
+	}
+
+	// The scene is drawn around the camera, so the Sun's center arrives shifted away from the origin.
 	override bindForSubMesh(uniformBuffer: UniformBuffer): void {
 		uniformBuffer.setTexture("nightLightsSampler", this.lights);
+		const offset = this._material.getScene().floatingOriginOffset;
+		uniformBuffer.updateFloat3("sunCenter", -offset.x, -offset.y, -offset.z);
 	}
 
 	override hasTexture(texture: BaseTexture): boolean {
@@ -2606,7 +2616,7 @@ class NightLightsPlugin extends MaterialPluginBase {
 			CUSTOM_FRAGMENT_DEFINITIONS: "uniform sampler2D nightLightsSampler;",
 			CUSTOM_FRAGMENT_BEFORE_FOG: `
 				#ifdef NIGHT_LIGHTS
-				float sunFacing = dot(normalW, normalize(-vPositionW));
+				float sunFacing = dot(normalW, normalize(sunCenter - vPositionW));
 				float night = 1.0 - smoothstep(-0.12, 0.08, sunFacing);
 				// The NASA map also shades dark land faintly; the floor keeps only the cities.
 				vec3 cities = max(texture2D(nightLightsSampler, vDiffuseUV).rgb - 0.12, 0.0) * 1.15;
