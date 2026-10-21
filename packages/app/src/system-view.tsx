@@ -42,18 +42,21 @@ const cornerClass =
  * To counts down and then flies the ship there from wherever it sits. The cockpit has no names and
  * no picks.
  *
- * The lower right is Pilot, or Chart while piloting, on every Sol chart including the system. Above
- * Chart, Exterior trades the windscreen for a camera outside the hull, and Interior returns to the seat.
- * Above the mode button on a chart, one step back: System from a planet or the Sun, Planet from a moon
- * or from an inner orbit. The system chart's steps are Home, which opens the ship's orbit, and Galaxy,
- * which leaves Sol. Escape takes the same step as the top button, and leaves the cockpit for the chart.
- * Dragging turns the pilot's head, or swings the exterior camera around the ship.
+ * The upper right is navigation: zoom in, zoom out, and Home. Zoom is one notch of the chart wheel, so
+ * it shows on the chart and not in the cockpit. Home opens the ship's orbit and stays up in both views.
+ * The lower left is the view: Pilot, or Chart while piloting, on every Sol chart including the system.
+ * Above it, only while piloting, Exterior trades the windscreen for a camera outside the hull, and
+ * Interior returns to the seat. The lower right, on a chart, is one step back: System from a planet or
+ * the Sun, Planet from a moon or from an inner orbit, and Galaxy from the system. Escape takes the first
+ * chart step, Home on the system chart and otherwise that lower-right step, and leaves the cockpit for
+ * the chart. Dragging turns the pilot's head, or swings the exterior camera around the ship.
  */
 export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLeave: () => void }) {
 	const chromeRef = useRef<HTMLDivElement>(null);
 	const controlsRef = useRef<HTMLDivElement>(null);
-	const zoomRef = useRef<HTMLDivElement>(null);
-	const keepOut = useMemo(() => [chromeRef, controlsRef, zoomRef], []);
+	const trailRef = useRef<HTMLDivElement>(null);
+	const navRef = useRef<HTMLDivElement>(null);
+	const keepOut = useMemo(() => [chromeRef, controlsRef, trailRef, navRef], []);
 	const [view, setView] = useState<DemoView>(() => system.view());
 	const [mode, setMode] = useState<Mode>("chart");
 	const [viewpoint, setViewpoint] = useState<PilotViewpoint>("interior");
@@ -67,6 +70,8 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const piloting = mode === "pilot";
 	const back = close ? wideChartStep(view) : null;
 	const steps = back ? [back] : chartButtons(view);
+	// Home is the upper-right navigation control, on the chart and in the cockpit.
+	const trail = steps.filter((button) => button.target !== "ship");
 
 	const go = useCallback(
 		(next: DemoView) => {
@@ -209,11 +214,24 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 				/>
 			</GameChrome>
 			{piloting && viewpoint === "interior" ? <AftFrames /> : null}
-			{piloting ? null : <ZoomControls ref={zoomRef} onZoom={system.zoom} />}
 			{piloting ? <Dashboard system={system} course={bound ? scanCard(bound).label : null} /> : null}
 			<div
+				ref={navRef}
+				className="pointer-events-none absolute top-0 right-0 z-10 flex flex-col items-end gap-2 px-4 pt-[max(1rem,env(safe-area-inset-top))] sm:px-6 sm:pt-6"
+			>
+				{piloting ? null : <ZoomControls onZoom={system.zoom} />}
+				<button
+					type="button"
+					onClick={() => take({ label: "Home", target: "ship" })}
+					title={STEP_TITLE.Home}
+					className={cornerClass}
+				>
+					Home
+				</button>
+			</div>
+			<div
 				ref={controlsRef}
-				className="pointer-events-none absolute right-0 bottom-0 z-10 flex flex-col items-end gap-2 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-6"
+				className="pointer-events-none absolute bottom-0 left-0 z-10 flex flex-col items-start gap-2 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-6"
 			>
 				{piloting ? (
 					<button
@@ -236,19 +254,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 						)}
 						{viewpoint === "interior" ? "Exterior" : "Interior"}
 					</button>
-				) : (
-					steps.map((button) => (
-							<button
-								key={button.label}
-								type="button"
-								onClick={() => take(button)}
-								title={STEP_TITLE[button.label]}
-								className={cornerClass}
-							>
-								{button.label}
-							</button>
-						))
-				)}
+				) : null}
 				<button
 					type="button"
 					onClick={togglePilot}
@@ -271,6 +277,24 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 					{piloting ? "Chart" : "Pilot"}
 				</button>
 			</div>
+			{piloting || trail.length === 0 ? null : (
+				<div
+					ref={trailRef}
+					className="pointer-events-none absolute right-0 bottom-0 z-10 flex flex-col items-end gap-2 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-6"
+				>
+					{trail.map((button) => (
+						<button
+							key={button.label}
+							type="button"
+							onClick={() => take(button)}
+							title={STEP_TITLE[button.label]}
+							className={cornerClass}
+						>
+							{button.label}
+						</button>
+					))}
+				</div>
+			)}
 			{scanned ? (
 				<ScanModal
 					card={scanCard(scanned)}

@@ -15,7 +15,7 @@ const STAR_COLOR: Record<StarClass, string> = {
 	M: "#FF8F6B",
 };
 
-/** The galaxy: its chrome, the systems named on the scene, and the card a click opens. Home opens the ship's orbit in Sol. */
+/** The galaxy: its chrome, the systems named on the scene, and the card a click opens. Zoom and Home sit in the upper right. Home opens the ship's orbit in Sol. */
 export function GalaxyPlace({
 	galaxy,
 	onEnterSol,
@@ -26,9 +26,8 @@ export function GalaxyPlace({
 	onHome: () => void;
 }) {
 	const chromeRef = useRef<HTMLDivElement>(null);
-	const homeRef = useRef<HTMLDivElement>(null);
-	const zoomRef = useRef<HTMLDivElement>(null);
-	const keepOut = useMemo(() => [chromeRef, homeRef, zoomRef], []);
+	const navRef = useRef<HTMLDivElement>(null);
+	const keepOut = useMemo(() => [chromeRef, navRef], []);
 	const [openId, setOpenId] = useState<string | null>(null);
 	const card = openId ? systemCard(openId) : null;
 	const items = useMemo<LabelItem[]>(
@@ -52,9 +51,10 @@ export function GalaxyPlace({
 				<h2 className="mt-1 text-[11px] tracking-[0.22em] text-amber-300 uppercase">Galaxy</h2>
 			</GameChrome>
 			<div
-				ref={homeRef}
-				className="pointer-events-none absolute right-0 bottom-0 z-10 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-6"
+				ref={navRef}
+				className="pointer-events-none absolute top-0 right-0 z-10 flex flex-col items-end gap-2 px-4 pt-[max(1rem,env(safe-area-inset-top))] sm:px-6 sm:pt-6"
 			>
+				<ZoomControls onZoom={galaxy.zoom} />
 				<button
 					type="button"
 					onClick={onHome}
@@ -64,7 +64,6 @@ export function GalaxyPlace({
 					Home
 				</button>
 			</div>
-			<ZoomControls ref={zoomRef} onZoom={galaxy.zoom} />
 			{card ? <SystemModal card={card} onClose={() => setOpenId(null)} onEnter={onEnterSol} /> : null}
 		</>
 	);
