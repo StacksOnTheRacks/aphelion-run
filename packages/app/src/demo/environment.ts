@@ -6,7 +6,6 @@ import { GlowLayer } from "@babylonjs/core/Layers/glowLayer";
 import { PointLight } from "@babylonjs/core/Lights/pointLight";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { FresnelParameters } from "@babylonjs/core/Materials/fresnelParameters";
 import type { MaterialDefines } from "@babylonjs/core/Materials/materialDefines";
 import { MaterialPluginBase } from "@babylonjs/core/Materials/materialPluginBase";
 import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
@@ -2293,32 +2292,91 @@ function buildSun(scene: Scene): SunBody {
 	material.emissiveColor = Color3.Black();
 	material.emissiveTexture = buildSunSurface(scene);
 	material.disableLighting = true;
-	// Real stars look darker and redder toward the rim than at the middle.
-	material.emissiveFresnelParameters = new FresnelParameters({
-		leftColor: new Color3(0.9, 0.36, 0.08),
-		rightColor: Color3.White(),
-		bias: 0,
-		power: 0.6,
-	});
+	// Fresnel darkens by how square the surface faces the camera. From the cockpit that facing
+	// point sits off the disc, so the whole photosphere shades like a lit ball. The rim follows the
+	// silhouette instead.
+	new SunLimbPlugin(material);
 	const sun = MeshBuilder.CreateSphere("sun", { diameter: SUN_DIAMETER, segments: 64 }, scene);
 	sun.material = material;
 	sun.isPickable = false;
 
-	const corona = MeshBuilder.CreatePlane("corona", { size: SUN_DIAMETER * CORONA_SCALE }, scene);
-	const coronaTexture = buildCoronaTexture(scene);
-	const coronaMaterial = new StandardMaterial("corona", scene);
-	coronaMaterial.emissiveTexture = coronaTexture;
-	coronaMaterial.opacityTexture = coronaTexture;
-	coronaMaterial.disableLighting = true;
+	// Wider than the halo so the ring still reaches past the limb when the camera is close. A flat
+	// texture paints the glow at the Sun's radius, and perspective puts the limb outside that circle.
+	const corona = MeshBuilder.CreatePlane("corona", { size: SUN_DIAMETER * CORONA_SCALE * 3 }, scene);
+	const coronaMaterial = new ShaderMaterial(
+		"corona",
+		scene,
+		{
+			vertexSource: `
+				precision highp float;
+				attribute vec3 position;
+				uniform mat4 world;
+				uniform mat4 worldViewProjection;
+				varying vec3 vPositionW;
+				varying vec2 vPlane;
+				void main() {
+					vec4 worldPos = world * vec4(position, 1.0);
+					vPositionW = worldPos.xyz;
+					vPlane = position.xy;
+					gl_Position = worldViewProjection * vec4(position, 1.0);
+				}
+			`,
+			fragmentSource: `
+				precision highp float;
+				uniform vec3 eye;
+				uniform vec3 sunCenter;
+				uniform float sunRadius;
+				uniform float haloWidth;
+				varying vec3 vPositionW;
+				varying vec2 vPlane;
+				void main() {
+					vec3 ray = normalize(vPositionW - eye);
+					float impact = length(cross(sunCenter - eye, ray));
+					float beyond = impact - sunRadius;
+					if (beyond <= 0.0) {
+						gl_FragColor = vec4(0.0);
+						return;
+					}
+					float t = clamp(beyond / haloWidth, 0.0, 1.0);
+					float glow = exp(-t * 5.5);
+					float ang = atan(vPlane.y, vPlane.x);
+					float stream = pow(abs(sin(ang * 9.0)), 8.0) * exp(-t * 2.2);
+					vec3 color = vec3(1.0, 0.86, 0.62) * glow * 0.55 + vec3(1.0, 0.7, 0.35) * stream * 0.08;
+					gl_FragColor = vec4(color, 1.0);
+				}
+			`,
+		},
+		{
+			attributes: ["position"],
+			uniforms: ["world", "worldViewProjection", "eye", "sunCenter", "sunRadius", "haloWidth"],
+			needAlphaBlending: true,
+		}
+	);
+	coronaMaterial.alphaMode = Constants.ALPHA_ADD;
 	coronaMaterial.backFaceCulling = false;
 	coronaMaterial.disableDepthWrite = true;
-	coronaMaterial.alphaMode = Constants.ALPHA_ADD;
+	coronaMaterial.setFloat("sunRadius", SUN_DIAMETER / 2);
+	// The scene is drawn around the camera, so the eye and the Sun both arrive shifted by the same offset.
+	coronaMaterial.onBindObservable.add(() => {
+		const effect = coronaMaterial.getEffect();
+		if (effect) {
+			scene.bindEyePosition(effect, "eye", true);
+			const offset = scene.floatingOriginOffset;
+			effect.setFloat3("sunCenter", -offset.x, -offset.y, -offset.z);
+		}
+	});
 	corona.material = coronaMaterial;
 	corona.billboardMode = Mesh.BILLBOARDMODE_ALL;
 	corona.isPickable = false;
 
 	let elapsed = 0;
 	let size = 1;
+	const applyCorona = (span: number) => {
+		corona.scaling.setAll(span);
+		const width = (SUN_DIAMETER / 2) * (CORONA_SCALE * span - 1);
+		coronaMaterial.setFloat("haloWidth", Math.max(width, 0.001));
+	};
+	applyCorona(1);
 	return {
 		corona,
 		setCorona(next) {
@@ -2327,9 +2385,62 @@ function buildSun(scene: Scene): SunBody {
 		update(deltaSeconds) {
 			elapsed += deltaSeconds;
 			sun.rotation.y += SUN_SPIN * deltaSeconds;
-			corona.scaling.setAll(size * (1 + 0.01 * Math.sin(elapsed * 0.7)));
+			applyCorona(size * (1 + 0.01 * Math.sin(elapsed * 0.7)));
 		},
 	};
+}
+
+/**
+ * Reddens the outer part of the visible disc. The measure is how far the line of sight passes from
+ * the Sun's center, so the rim stays on the silhouette from the system chart and from beside it.
+ */
+class SunLimbPlugin extends MaterialPluginBase {
+	constructor(material: StandardMaterial) {
+		super(material, "SunLimb", 200, { SUN_LIMB: false });
+		this._enable(true);
+	}
+
+	override getClassName(): string {
+		return "SunLimbPlugin";
+	}
+
+	override prepareDefines(defines: MaterialDefines): void {
+		defines["SUN_LIMB"] = true;
+	}
+
+	override isReadyForSubMesh(): boolean {
+		return true;
+	}
+
+	override getUniforms() {
+		return {
+			ubo: [{ name: "sunCenter", size: 3, type: "vec3" }],
+			fragment: "#ifdef SUN_LIMB\nuniform vec3 sunCenter;\n#endif",
+		};
+	}
+
+	// The scene is drawn around the camera, so the Sun's center arrives shifted away from the origin.
+	override bindForSubMesh(uniformBuffer: UniformBuffer): void {
+		const offset = this._material.getScene().floatingOriginOffset;
+		uniformBuffer.updateFloat3("sunCenter", -offset.x, -offset.y, -offset.z);
+	}
+
+	override getCustomCode(shaderType: string): { [pointName: string]: string } | null {
+		if (shaderType !== "fragment") {
+			return null;
+		}
+		const sunRadius = SUN_DIAMETER / 2;
+		return {
+			CUSTOM_FRAGMENT_BEFORE_FOG: `
+				#ifdef SUN_LIMB
+				float sunImpact = length(cross(vPositionW - sunCenter, viewDirectionW));
+				float sunRho = clamp(sunImpact / ${sunRadius.toFixed(1)}, 0.0, 1.0);
+				float sunMu = sqrt(1.0 - sunRho * sunRho);
+				color.rgb *= mix(vec3(1.0, 0.45, 0.12), vec3(1.0), pow(sunMu, 0.6)) * (0.55 + 0.45 * sunMu);
+				#endif
+			`,
+		};
+	}
 }
 
 /** Mottled surface: bright and dark cells, plus a few small spots near the equator. */
@@ -2365,54 +2476,6 @@ function buildSunSurface(scene: Scene): DynamicTexture {
 		const y = height * (0.38 + random() * 0.24);
 		blot(x, y, 7 + random() * 5, "210, 110, 40", 0.45);
 		blot(x, y, 2 + random() * 2, "110, 45, 12", 0.65);
-	}
-	texture.update(false);
-	return texture;
-}
-
-/** Soft halo that starts at the Sun's rim and fades out, with faint streamers. */
-function buildCoronaTexture(scene: Scene): DynamicTexture {
-	const size = 512;
-	const center = size / 2;
-	const rim = center / CORONA_SCALE;
-	const texture = new DynamicTexture("corona", size, scene, true);
-	texture.hasAlpha = true;
-	const context = texture.getContext();
-	const random = seededRandom(23);
-	context.clearRect(0, 0, size, size);
-
-	// Inside the rim the Sun hides the halo up close. It still rises toward the middle, so a corona
-	// scaled up for the far view has no flat disc around the Sun.
-	const inner = (rim * 0.9) / center;
-	const at = (offset: number) => inner + offset * (1 - inner);
-	const halo = context.createRadialGradient(center, center, 0, center, center, center);
-	halo.addColorStop(0, "rgba(255, 236, 196, 0.85)");
-	halo.addColorStop(inner * 0.6, "rgba(255, 232, 182, 0.68)");
-	halo.addColorStop(inner * 0.88, "rgba(255, 228, 172, 0.56)");
-	halo.addColorStop(at(0), "rgba(255, 228, 170, 0.5)");
-	halo.addColorStop(at(0.06), "rgba(255, 190, 110, 0.28)");
-	halo.addColorStop(at(0.22), "rgba(255, 150, 70, 0.08)");
-	halo.addColorStop(at(0.5), "rgba(255, 120, 50, 0.02)");
-	halo.addColorStop(1, "rgba(255, 110, 40, 0)");
-	context.fillStyle = halo;
-	context.fillRect(0, 0, size, size);
-
-	for (let i = 0; i < 24; i++) {
-		const angle = random() * Math.PI * 2;
-		const length = rim * (0.3 + random() * 0.9);
-		const startX = center + Math.cos(angle) * rim;
-		const startY = center + Math.sin(angle) * rim;
-		const endX = center + Math.cos(angle) * (rim + length);
-		const endY = center + Math.sin(angle) * (rim + length);
-		const streak = context.createLinearGradient(startX, startY, endX, endY);
-		streak.addColorStop(0, `rgba(255, 210, 150, ${0.012 + random() * 0.018})`);
-		streak.addColorStop(1, "rgba(255, 160, 80, 0)");
-		context.strokeStyle = streak;
-		context.lineWidth = 6 + random() * 10;
-		context.beginPath();
-		context.moveTo(startX, startY);
-		context.lineTo(endX, endY);
-		context.stroke();
 	}
 	texture.update(false);
 	return texture;
