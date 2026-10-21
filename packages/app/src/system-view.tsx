@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { AFT_VIEWS, type PilotViewpoint, type ScreenRect } from "./demo/cockpit";
 import { chartButtons, wideChartStep, type ChartButton, type DemoView, type EnvironmentDemo } from "./demo/environment";
@@ -17,10 +17,10 @@ import {
 	type ScanTarget,
 } from "./demo/scan";
 import { Dashboard } from "./dashboard";
+import { PILOT_VIEWPORT } from "./pilot-viewport";
 import { GameChrome } from "./game-chrome";
 import { ScanModal } from "./scan-card";
 import { SpaceLabels, type LabelItem } from "./space-labels";
-import { ZoomControls } from "./zoom-controls";
 
 type Mode = "chart" | "pilot";
 
@@ -42,14 +42,15 @@ const cornerClass =
  * To counts down and then flies the ship there from wherever it sits. The cockpit has no names and
  * no picks.
  *
- * The upper right is navigation: zoom in, zoom out, and Home. Zoom is one notch of the chart wheel, so
- * it shows on the chart and not in the cockpit. Home opens the ship's orbit and stays up in both views.
- * The lower left is the view: Pilot, or Chart while piloting, on every Sol chart including the system.
- * Above it, only while piloting, Exterior trades the windscreen for a camera outside the hull, and
- * Interior returns to the seat. The lower right, on a chart, is one step back: System from a planet or
- * the Sun, Planet from a moon or from an inner orbit, and Galaxy from the system. Escape takes the first
- * chart step, Home on the system chart and otherwise that lower-right step, and leaves the cockpit for
- * the chart. Dragging turns the pilot's head, or swings the exterior camera around the ship.
+ * The upper right is Home. It opens the ship's orbit and stays up in both views. Zoom is the chart wheel.
+ * The lower left is the view: Pilot, or Chart while piloting, on every Sol chart including the system,
+ * when the window is a desktop or a large tablet. A phone stays on the chart, and shrinking the window
+ * below that leaves the cockpit. Above the toggle, only while piloting, Exterior trades the windscreen
+ * for a camera outside the hull, and Interior returns to the seat. The lower right, on a chart, is one
+ * step back: System from a planet or the Sun, Planet from a moon or from an inner orbit, and Galaxy from
+ * the system. Escape takes the first chart step, Home on the system chart and otherwise that lower-right
+ * step, and leaves the cockpit for the chart. Dragging turns the pilot's head, or swings the exterior
+ * camera around the ship.
  */
 export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLeave: () => void }) {
 	const chromeRef = useRef<HTMLDivElement>(null);
@@ -67,7 +68,8 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const [flight, setFlight] = useState<ScanTarget | null>(null);
 	const [docked, setDocked] = useState<ScanTarget | null>(null);
 	const [close, setClose] = useState(false);
-	const piloting = mode === "pilot";
+	const pilotFits = usePilotFits();
+	const piloting = mode === "pilot" && pilotFits;
 	const back = close ? wideChartStep(view) : null;
 	const steps = back ? [back] : chartButtons(view);
 	// Home is the upper-right navigation control, on the chart and in the cockpit.
@@ -99,6 +101,12 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	useEffect(() => system.onFraming(setClose), [system]);
 	useEffect(() => system.setScanning(!piloting), [system, piloting]);
 	useEffect(() => system.setPiloting(piloting), [system, piloting]);
+	useEffect(() => {
+		if (!pilotFits && mode === "pilot") {
+			setViewpoint("interior");
+			setMode("chart");
+		}
+	}, [pilotFits, mode]);
 	useEffect(() => system.setViewpoint(viewpoint), [system, viewpoint]);
 
 	const launch = useCallback(
@@ -188,6 +196,9 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	}, []);
 
 	const togglePilot = () => {
+		if (!pilotFits && !piloting) {
+			return;
+		}
 		setScanned(null);
 		if (piloting) {
 			setViewpoint("interior");
@@ -203,6 +214,12 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 
 	return (
 		<>
+			<style>{`
+				button.pilot-toggle { display: none; }
+				@media ${PILOT_VIEWPORT} {
+					button.pilot-toggle { display: flex; }
+				}
+			`}</style>
 			<SpaceLabels source={system} items={labels} title="Scanned" keepOut={keepOut} />
 			<GameChrome ref={chromeRef}>
 				<ShipStatus
@@ -219,7 +236,6 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 				ref={navRef}
 				className="pointer-events-none absolute top-0 right-0 z-10 flex flex-col items-end gap-2 px-4 pt-[max(1rem,env(safe-area-inset-top))] sm:px-6 sm:pt-6"
 			>
-				{piloting ? null : <ZoomControls onZoom={system.zoom} />}
 				<button
 					type="button"
 					onClick={() => take({ label: "Home", target: "ship" })}
@@ -260,7 +276,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 					onClick={togglePilot}
 					aria-label={piloting ? "Switch to chart view" : "Switch to pilot view"}
 					title={piloting ? "Back to the chart" : "Into the cockpit"}
-					className={cornerClass}
+					className={piloting ? cornerClass : `${cornerClass} pilot-toggle`}
 				>
 					{piloting ? (
 						<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
@@ -313,6 +329,19 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 				/>
 			) : null}
 		</>
+	);
+}
+
+/** The cockpit is offered on a desktop or a large tablet, and taken away when the window shrinks below that. */
+function usePilotFits(): boolean {
+	return useSyncExternalStore(
+		(onChange) => {
+			const media = window.matchMedia(PILOT_VIEWPORT);
+			media.addEventListener("change", onChange);
+			return () => media.removeEventListener("change", onChange);
+		},
+		() => window.matchMedia(PILOT_VIEWPORT).matches,
+		() => false
 	);
 }
 

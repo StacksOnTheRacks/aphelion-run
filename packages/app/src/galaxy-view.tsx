@@ -5,7 +5,6 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { NEIGHBORS, SOL_ID, systemCard, systemCardAction, type GalaxyDemo, type StarClass, type SystemCard } from "./demo/galaxy";
 import { GameChrome } from "./game-chrome";
 import { SpaceLabels, type LabelItem } from "./space-labels";
-import { ZoomControls } from "./zoom-controls";
 
 const STAR_COLOR: Record<StarClass, string> = {
 	A: "#C7D9FF",
@@ -15,7 +14,7 @@ const STAR_COLOR: Record<StarClass, string> = {
 	M: "#FF8F6B",
 };
 
-/** The galaxy: its chrome, the systems named on the scene, and the card a click opens. Zoom and Home sit in the upper right. Home opens the ship's orbit in Sol. */
+/** The galaxy: its chrome, the systems named on the scene, and the card a click opens. Home sits in the upper right and opens the ship's orbit in Sol. */
 export function GalaxyPlace({
 	galaxy,
 	onEnterSol,
@@ -54,7 +53,6 @@ export function GalaxyPlace({
 				ref={navRef}
 				className="pointer-events-none absolute top-0 right-0 z-10 flex flex-col items-end gap-2 px-4 pt-[max(1rem,env(safe-area-inset-top))] sm:px-6 sm:pt-6"
 			>
-				<ZoomControls onZoom={galaxy.zoom} />
 				<button
 					type="button"
 					onClick={onHome}
