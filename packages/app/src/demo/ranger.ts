@@ -17,17 +17,20 @@ import type { Scene } from "@babylonjs/core/scene";
 
 import "@babylonjs/loaders/glTF";
 
-import { WAREHOUSE_SIZE } from "./bases";
 import { createPlume, type Plume } from "./plume";
 import { plumesFor, type Drive, type Plumes } from "./thrust";
 
-/** Half the long side of a planet warehouse. */
-export const HULL_LENGTH = WAREHOUSE_SIZE.depth / 2;
+/**
+ * Length of the ranger, in world units. About a twelfth of the smallest moon, and shorter than a
+ * planet warehouse, so the hull reads as a craft docked at a station. The cockpit cameras are sized
+ * in hull lengths, so the pilot's view keeps the same framing.
+ */
+export const HULL_LENGTH = 0.04;
 
 /**
- * The hull, its plumes, and its beacon are drawn on this layer and nothing else is. The hull is a few
- * thousandths of a world unit across, so the aft views draw the ship with its own near plane, over the world.
- * The windscreen draws none of it: the model has no real cabin, and its nose and canopy would sit in the view.
+ * The hull, its plumes, and its beacon are drawn on this layer and nothing else is. The aft views
+ * draw the ship with their own near plane, over the world. The windscreen draws none of it: the
+ * model has no real cabin, and its nose and canopy would sit in the view.
  */
 export const SHIP_LAYER = 0x10000000;
 

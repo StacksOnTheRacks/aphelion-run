@@ -1,6 +1,13 @@
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 
-import { EARTH_STATION_RADIUS, SATURN_RING_INNER_SCALE, moonBases, moonOuterOrbitRadius, planetBases } from "./bases";
+import {
+	EARTH_STATION_RADIUS,
+	SATURN_RING_INNER_SCALE,
+	WAREHOUSE_SIZE,
+	moonBases,
+	moonOuterOrbitRadius,
+	planetBases,
+} from "./bases";
 import { segmentHitsRing, segmentHitsSphere, type RingBody, type SphereBody } from "./camera-path";
 import {
 	JOURNEY_STOPS,
@@ -15,6 +22,7 @@ import {
 	type JourneyLayout,
 } from "./environment";
 import { daysSinceJ2000, moonLongitude, planetLongitude } from "./ephemeris";
+import { HULL_LENGTH } from "./ranger";
 import {
 	APPROACH_MIN_SWEEP,
 	CLIMB_PACE,
@@ -587,6 +595,12 @@ for (const docks of [8, 2, 1]) {
 			expect(Math.abs(unwrapped) < 0.05, `${name}: closes the lead (${unwrapped.toFixed(3)})`);
 		}
 	}
+}
+
+{
+	const smallestMoon = Math.min(...PLANETS.flatMap((spec) => spec.moons.map((moon) => moon.diameter)));
+	expect(HULL_LENGTH < smallestMoon / 10, "the hull stays under a tenth of the smallest moon");
+	expect(HULL_LENGTH < WAREHOUSE_SIZE.depth, "a warehouse stays longer than the ship that docks there");
 }
 
 for (const spec of PLANETS) {
