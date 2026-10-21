@@ -42,7 +42,7 @@ A moon’s outer orbit is its own battle surface, not the planet’s. Earth’s 
 
 Every body has one, including each moon and the Sun. Mining, docking, and siphoning happen here. The fight is not fought here. An attack pulls the ship out to the outer orbit, and the work pauses. Earth's inner orbit holds the black market, the one station where energy is sold for Solscrip. Earth yields nothing else.
 
-Moving between the inner orbit and the outer orbit is a slow impulse rocket. Travel between bodies is a photon rocket from outer orbit to outer orbit. A ship on that burn cannot be attacked. A ship in an outer orbit can challenge a ship that is mining that body, or a ship sitting idle in that outer orbit. A depleted mine or a finished Earth sale puts the ship back in that idle orbit.
+Moving between the inner orbit and the outer orbit is an impulse rocket. Leaving or arriving is three seconds between docked and hovering, then seven seconds between that hover and the outer orbit, both ways. Travel between bodies is a photon rocket from outer orbit to outer orbit. A ship on that burn cannot be attacked. A ship in an outer orbit can challenge a ship that is mining that body, or a ship sitting idle in that outer orbit. A depleted mine or a finished Earth sale puts the ship back in that idle orbit.
 
 Open: there is no chosen way to go from a planet or moon outer orbit into its inner orbit. Zoom looks in at what orbits the body and stays on the chart the player is already on. A click on a base, a station, or a collector currently flies the camera into the inner orbit and rides with that craft. That is also a stand-in. The replacement has not been decided.
 

@@ -2018,7 +2018,15 @@ export async function createEnvironment(
 			const depart = { at, turn, speed: Math.abs(rate) * radius };
 			const plan = planJourney(journeyLayout(), fromId, target.host, depart);
 			const dock = target.id === target.host ? undefined : dockById.get(target.id);
-			journey.start({ ...plan, arrive: { ...plan.arrive, dock } }, onDone);
+			journey.start(
+				{
+					...plan,
+					arrive: { ...plan.arrive, dock },
+					departDock: docked?.dock,
+					departBody: docked?.dock ? fromId : undefined,
+				},
+				onDone
+			);
 		},
 		land: journey.stop,
 		setPiloting(on) {

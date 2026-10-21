@@ -4,8 +4,11 @@ import { LoadAssetContainerAsync } from "@babylonjs/core/Loading/sceneLoader";
 import { Material } from "@babylonjs/core/Materials/material";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
+import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
+import { Space } from "@babylonjs/core/Maths/math.axis";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { ReflectionProbe } from "@babylonjs/core/Probes/reflectionProbe";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
@@ -44,9 +47,22 @@ const AFT_FILL = 0.6;
 /**
  * Painted metal, not polished: every surface is at least this rough and at most this metallic. Glossy
  * panels caught the Sun in glints that strobed across the aft views whenever the ship turned.
+ * The canopy is the exception. It is the dark metal from the Blender file, and the sky shows in it.
  */
 const HULL_ROUGHNESS = 0.8;
 const HULL_METALLIC = 0.2;
+const CANOPY_COLOR = new Color3(0.22, 0.23, 0.25);
+const CANOPY_ROUGHNESS = 0.1;
+/** One face of the sky cube. Taken once, so this cost is paid a single time. */
+const SKY_REFLECTION_SIZE = 256;
+/**
+ * The starfield sits thousands of units out. The aft cameras that draw the hull clip at one unit,
+ * and a capture taken with that clip is an empty cube.
+ */
+const SKY_REFLECTION_NEAR = 0.1;
+const SKY_REFLECTION_FAR = 9000;
+/** Turns of the main fan each second at full burn. Slow enough that the blades still read. */
+const FAN_TURNS = 1.5;
 
 /** The hull replaces the beacon once it covers this many pixels, and comes back below the lower one. */
 const HULL_PIXELS_ON = 8;
@@ -61,13 +77,17 @@ const CUT_ANGLE = 0.35;
 
 type Hardpoint = "MainEngine" | "Port" | "Starboard" | "Dorsal" | "Ventral";
 
-/** Exhaust in the ship's space: the nose is +Z, starboard is +X, and up is +Y. */
+/**
+ * Exhaust in the ship's space: the nose is +Z, starboard is +X, and up is +Y.
+ * Each directional nozzle rakes outward and aft, 45° off the hull, the same angle as its vanes.
+ */
+const OUT_AND_AFT = Math.SQRT1_2;
 const EXHAUST: Record<Hardpoint, Vector3> = {
 	MainEngine: new Vector3(0, 0, -1),
-	Port: new Vector3(-1, 0, 0),
-	Starboard: new Vector3(1, 0, 0),
-	Dorsal: new Vector3(0, 1, 0),
-	Ventral: new Vector3(0, -1, 0),
+	Port: new Vector3(-OUT_AND_AFT, 0, -OUT_AND_AFT),
+	Starboard: new Vector3(OUT_AND_AFT, 0, -OUT_AND_AFT),
+	Dorsal: new Vector3(0, OUT_AND_AFT, -OUT_AND_AFT),
+	Ventral: new Vector3(0, -OUT_AND_AFT, -OUT_AND_AFT),
 };
 
 const PLUME_SHAPE: Record<Hardpoint, { length: number; radius: number }> = {
@@ -129,14 +149,15 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 		// light is what shades the rest of the system, so the hull uses that same falloff.
 		material.usePhysicalLightFalloff = false;
 		if (material.name === "Ranger Canopy") {
-			// Dark tinted glass. It reflects nothing: a live reflection redrew the whole system six
-			// times over, a dozen times a second, for a few pixels of nose.
-			material.albedoColor.set(0.06, 0.07, 0.08);
-			material.metallic = 0;
-			material.roughness = 0.35;
+			// Dark metal, as authored. Mirroring the whole system redrew every body six times a frame,
+			// so the cube is the starfield only, captured once.
+			material.albedoColor.copyFrom(CANOPY_COLOR);
+			material.metallic = 1;
+			material.roughness = CANOPY_ROUGHNESS;
 			material.alpha = 1;
 			material.transparencyMode = Material.MATERIAL_OPAQUE;
 			material.backFaceCulling = false;
+			reflectSky(scene, material);
 		} else {
 			material.roughness = Math.max(material.roughness ?? 1, HULL_ROUGHNESS);
 			material.metallic = Math.min(material.metallic ?? 1, HULL_METALLIC);
@@ -176,6 +197,7 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 	}
 	ship.scaling.setAll(HULL_LENGTH / length);
 
+	const fan = mountEngineFan(scene, container.meshes);
 	const plumes = new Map<Hardpoint, Plume>();
 	for (const name of Object.keys(EXHAUST) as Hardpoint[]) {
 		const hardpoint = scene.getTransformNodeByName(name);
@@ -244,6 +266,10 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 			}
 			plume.set(shown[pair.field], hullOn);
 		}
+		// The rear fan turns with the main engine and stops as that burn eases off. Side thrusters do not drive it.
+		if (deltaSeconds > 0 && shown.main > 0) {
+			fan.hub.rotate(fan.axis, shown.main * FAN_TURNS * Math.PI * 2 * deltaSeconds, Space.LOCAL);
+		}
 	};
 
 	const present = () => {
@@ -304,6 +330,117 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 			present();
 		},
 	};
+}
+
+type EngineFan = {
+	hub: TransformNode;
+	/** The shaft, in the hub's own space. The fan is a disc, so this is its thin axis. */
+	axis: Vector3;
+};
+
+/**
+ * The fan's geometry sits at the nozzle, but its origin is the ship's origin. Spinning the mesh
+ * itself would swing it around the hull. The hub sits on the fan's center and turns on the shaft.
+ * The loader splits the fan into one mesh per material, so every part turns together.
+ */
+function mountEngineFan(scene: Scene, meshes: AbstractMesh[]): EngineFan {
+	const parts = meshes.filter((mesh) => mesh.name.startsWith("Ranger Engine Fan"));
+	const first = parts[0];
+	if (!first) {
+		throw new Error("The ranger is missing the engine fan.");
+	}
+	const min = new Vector3(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY);
+	const max = new Vector3(Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY);
+	for (const part of parts) {
+		const box = part.getBoundingInfo().boundingBox;
+		min.minimizeInPlace(box.minimum.add(part.position));
+		max.maximizeInPlace(box.maximum.add(part.position));
+	}
+	const center = min.add(max).scale(0.5);
+	const holder = first.parent;
+	const whole =
+		holder instanceof TransformNode && holder.name === "Ranger Engine Fan" && parts.every((part) => part.parent === holder);
+	const hub = new TransformNode("ranger-fan-hub", scene);
+	if (whole && holder) {
+		hub.parent = holder.parent;
+		hub.position.copyFrom(holder.position).addInPlace(center);
+		holder.parent = hub;
+		holder.position.copyFrom(center.scale(-1));
+	} else {
+		hub.parent = holder;
+		hub.position.copyFrom(center);
+		for (const part of parts) {
+			part.parent = hub;
+			part.position.subtractInPlace(center);
+		}
+	}
+	return { hub, axis: fanAxis(max.subtract(min)) };
+}
+
+/** The shaft runs through the disc, which is the fan's shortest side. */
+function fanAxis(extent: Vector3): Vector3 {
+	if (extent.x <= extent.y && extent.x <= extent.z) {
+		return Vector3.Right().clone();
+	}
+	if (extent.y <= extent.z) {
+		return Vector3.Up().clone();
+	}
+	return Vector3.Forward().clone();
+}
+
+/**
+ * Puts the starfield into the canopy. The cube is world-aligned and the sky never turns, so one
+ * capture stays right as the ship moves. It is taken from the camera, because that is where the
+ * sky is drawn, and with a far plane that reaches the stars.
+ */
+function reflectSky(scene: Scene, material: PBRMaterial): void {
+	const sky: AbstractMesh[] = [];
+	for (const name of ["stars", "milky-way"]) {
+		const mesh = scene.getMeshByName(name);
+		if (mesh) {
+			sky.push(mesh);
+		}
+	}
+	if (sky.length === 0) {
+		return;
+	}
+	const probe = new ReflectionProbe("canopy-sky", SKY_REFLECTION_SIZE, scene, true, false, true);
+	probe.refreshRate = RenderTargetTexture.REFRESHRATE_RENDER_ONCE;
+	probe.renderList = sky;
+	// The probe copies the active camera's clip, and an aft camera's far plane is closer than the stars.
+	// The saved clip is put back once the cube is done, so that camera still draws the hull as before.
+	const clip: { near: number; far: number; camera: { minZ: number; maxZ: number } | null } = {
+		near: 0,
+		far: 0,
+		camera: null,
+	};
+	probe.cubeTexture.onBeforeRenderObservable.add(() => {
+		const camera = scene.activeCamera;
+		if (!camera) {
+			return;
+		}
+		if (clip.camera !== camera) {
+			clip.camera = camera;
+			clip.near = camera.minZ;
+			clip.far = camera.maxZ;
+		}
+		camera.minZ = SKY_REFLECTION_NEAR;
+		camera.maxZ = SKY_REFLECTION_FAR;
+		// The sky is drawn around this camera. Floating origin keeps that near the origin, not at the
+		// ship's real position, so the capture has to use the same point.
+		const center = camera.getWorldMatrix().m;
+		probe.position.set(center[12] ?? 0, center[13] ?? 0, center[14] ?? 0);
+	}, -1, true);
+	probe.cubeTexture.onAfterUnbindObservable.add(() => {
+		const camera = clip.camera;
+		if (!camera) {
+			return;
+		}
+		camera.minZ = clip.near;
+		camera.maxZ = clip.far;
+		clip.camera = null;
+	});
+	material.reflectionTexture = probe.cubeTexture;
 }
 
 /**

@@ -20,20 +20,21 @@ export const FULL_TURN = 0.25;
 const TURN_DEAD = 0.02;
 
 /**
- * Which plumes are lit. `yawRate` is positive when the nose is swinging to starboard, so the port
- * thruster is the one that fires. `pitchRate` is how fast the nose is leaving the planets' plane;
- * that lights the dorsal and ventral pair together. Impulse flight, which is inner orbit, never
+ * Which plumes are lit. The directional nozzles sit aft of the center of mass and exhaust outward,
+ * so the nozzle on the side the nose is turning toward is the one that fires: it shoves the tail
+ * the other way. `yawRate` is positive when the nose swings to starboard. `pitchRate` is positive
+ * when the nose rises out of the planets' plane. Impulse flight, which is inner orbit, never
  * lights the main engine. A photon burn does, at `burn`.
  */
 export function plumesFor(drive: Drive, yawRate: number, pitchRate: number, burn: number): Plumes {
 	const yaw = Math.abs(yawRate) < TURN_DEAD ? 0 : yawRate / FULL_TURN;
-	const pitch = Math.abs(pitchRate) < TURN_DEAD ? 0 : Math.abs(pitchRate) / FULL_TURN;
+	const pitch = Math.abs(pitchRate) < TURN_DEAD ? 0 : pitchRate / FULL_TURN;
 	return {
 		main: drive === "photon" ? clamp01(burn) : 0,
-		port: clamp01(yaw),
-		starboard: clamp01(-yaw),
+		port: clamp01(-yaw),
+		starboard: clamp01(yaw),
 		dorsal: clamp01(pitch),
-		ventral: clamp01(pitch),
+		ventral: clamp01(-pitch),
 	};
 }
 

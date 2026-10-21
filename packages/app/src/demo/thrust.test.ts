@@ -17,22 +17,31 @@ const idle = plumesFor("impulse", 0, 0, 1);
 expect(idle.main === 0 && idle.port === 0 && idle.starboard === 0 && idle.dorsal === 0 && idle.ventral === 0, "a straight impulse leg lights nothing");
 
 const starboard = plumesFor("impulse", FULL_TURN, 0, 1);
-expect(starboard.port === 1, "yawing starboard lights the port thruster");
-expect(dark(starboard, ["port"]), "a flat starboard yaw lights only the port thruster");
+expect(starboard.starboard === 1, "yawing starboard lights the starboard thruster");
+expect(dark(starboard, ["starboard"]), "a flat starboard yaw lights only the starboard thruster");
 
 const port = plumesFor("impulse", -FULL_TURN * 0.5, 0, 1);
-expect(Math.abs(port.starboard - 0.5) < 1e-6, "a half port yaw lights the starboard thruster halfway");
-expect(port.port === 0 && port.main === 0, "that yaw leaves the port thruster and the main engine dark");
+expect(Math.abs(port.port - 0.5) < 1e-6, "a half port yaw lights the port thruster halfway");
+expect(port.starboard === 0 && port.main === 0, "that yaw leaves the starboard thruster and the main engine dark");
 
 const climb = plumesFor("impulse", 0, FULL_TURN, 1);
-expect(climb.dorsal === 1 && climb.ventral === 1, "leaving the plane lights the vertical pair");
-expect(climb.main === 0 && climb.port === 0 && climb.starboard === 0, "a vertical impulse lights no other engine");
+expect(climb.dorsal === 1 && climb.ventral === 0, "a climb lights only the dorsal thruster");
+expect(dark(climb, ["dorsal"]), "a climb lights no other engine");
 
-expect(plumesFor("impulse", 0.01, 0.01, 1).port === 0, "a tiny wobble does not light a thruster");
+const dive = plumesFor("impulse", 0, -FULL_TURN * 0.5, 1);
+expect(Math.abs(dive.ventral - 0.5) < 1e-6, "a half dive lights the ventral thruster halfway");
+expect(dive.dorsal === 0 && dive.port === 0 && dive.starboard === 0, "a dive leaves the other thrusters dark");
+
+const climbTurn = plumesFor("impulse", FULL_TURN, FULL_TURN, 1);
+expect(climbTurn.starboard === 1 && climbTurn.dorsal === 1, "a climbing starboard turn lights those two thrusters");
+expect(dark(climbTurn, ["starboard", "dorsal"]), "that turn leaves the other thrusters dark");
+
+expect(plumesFor("impulse", 0.01, 0.01, 1).starboard === 0, "a tiny wobble does not light a thruster");
+expect(plumesFor("impulse", -0.01, -0.01, 1).port === 0 && plumesFor("impulse", -0.01, -0.01, 1).ventral === 0, "a tiny wobble the other way stays dark");
 
 const burn = plumesFor("photon", FULL_TURN, 0, 0.4);
 expect(Math.abs(burn.main - 0.4) < 1e-6, "a photon burn lights the main engine at the burn's strength");
-expect(burn.port === 1 && burn.starboard === 0, "the burn still uses the port thruster while yawing starboard");
+expect(burn.starboard === 1 && burn.port === 0, "the burn still uses the starboard thruster while yawing starboard");
 expect(plumesFor("photon", 0, 0, 2).main === 1, "the main engine does not burn harder than full");
 expect(plumesFor("photon", 0, 0, -1).main === 0, "a negative burn stays dark");
 
