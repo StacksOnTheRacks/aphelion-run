@@ -17,8 +17,8 @@ type Readout = { place: string | null; bearing: string; progress: number | null 
 
 /**
  * The console under the windscreen: the whole system on the left, the body the ship is at on the right,
- * and the readouts between them. `course` names where the ship is bound. Below a wide screen it sits
- * above the lower-left view buttons.
+ * and the readouts between them. `course` names where the ship is bound. The ship list is gone in the
+ * cockpit, so the console is centered on the screen and sits on the bottom edge.
  */
 export function Dashboard({ system, course }: { system: EnvironmentDemo; course: string | null }) {
 	const systemRef = useRef<HTMLCanvasElement>(null);
@@ -51,7 +51,7 @@ export function Dashboard({ system, course }: { system: EnvironmentDemo; course:
 	return (
 		<section
 			aria-label="Navigation"
-			className="pointer-events-none absolute inset-x-0 bottom-[6.75rem] z-10 flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-6 lg:bottom-0"
+			className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center"
 		>
 			<div
 				className="relative flex items-stretch gap-4 rounded-sm border border-amber-300/20 bg-[#05070c]/75 px-4 py-3 shadow-[0_0_24px_rgba(252,211,77,0.08)] backdrop-blur-sm"

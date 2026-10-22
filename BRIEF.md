@@ -47,11 +47,11 @@ A ship carries one siphon, one thruster, one drill, and one cloak. Any of those 
 
 The home base is the energy warehouse, the repair bay, the bank, and the space dock. Ships are improved there, and repaired there, and only there. It can orbit any planet or moon except Earth. It cannot orbit the Sun.
 
-Energy hauled from the Sun can be stored in the warehouse and spent on later trips. The pilot does not have to sell on Earth after every harvest. When the warehouse is full, the energy has to be sold at Earth's black market to make room for more. Water is stored apart from that energy. A full energy store does not block a water unload.
+Energy hauled from the Sun can be stored in the warehouse and spent on later trips. The pilot does not have to sell on Earth after every harvest. When the warehouse is full, the energy has to be sold at Earth's black market to make room for more.
 
 A gravity boom on the base works the pull along its length as the base orbits, and feeds a slow stream of energy into the warehouse. Every home gets the same rate, so where the home sits does not change it. The stream can cover a departure if the pilot waits. It does not replace a haul from the Sun.
 
-Base equipment is static. A piece is built, then upgraded, and it is not swapped for a different piece. The pieces are the gravity boom, the warehouse, the repair bay, the dock, and the water store. Each can be upgraded to level 100. The base itself advances only when every piece has reached the same step of ten. Base level 2 requires every piece at level 10. Base level 3 requires every piece at level 20. That continues until every piece is at level 100.
+Base equipment is static. A piece is built, then upgraded, and it is not swapped for a different piece. The pieces are the gravity boom, the warehouse, the repair bay, and the dock. Each can be upgraded to level 100. The base itself advances only when every piece has reached the same step of ten. Base level 2 requires every piece at level 10. Base level 3 requires every piece at level 20. That continues until every piece is at level 100.
 
 A base does not receive minerals on its own. The pilot mines the home world's yield the same as any other world's. The Sun and Earth are the only exceptions, and neither can hold a pilot base. The Sun is where energy is mined. Earth is where energy is sold. The giant planets are mined from orbit, and their gravity still makes a close pass cheaper when they sit in the right part of their orbit.
 
@@ -63,19 +63,17 @@ Where the home sits is a choice about distance, and that location is the home's 
 
 A world is a planet and its moons. They share one yield. A pilot mines that yield at the planet or at any of its moons and gets the same minerals either way.
 
-The minerals are hydrogen, ore, nitrogen, carbon, and water. Ships are improved and repaired from hydrogen, ore, nitrogen, and carbon. Water is consumed. The same mineral is the same wherever it is mined. This brief sets no amounts.
+The minerals are hydrogen, ore, nitrogen, and carbon. Ships are improved and repaired from all four. The same mineral is the same wherever it is mined. Water is not a mineral. Ice is mined as hydrogen, and the oxygen in that ice is not tracked. This brief sets no amounts.
 
-- **Mercury** yields ore and water.
+- **Mercury** yields hydrogen and ore.
 - **Venus** yields ore, nitrogen, and carbon.
-- **Mars** yields ore, carbon, and water.
-- **Jupiter** yields hydrogen, ore, and water.
-- **Saturn** yields hydrogen, nitrogen, carbon, and water.
-- **Uranus** yields hydrogen, nitrogen, carbon, and water.
-- **Neptune** yields hydrogen, nitrogen, carbon, and water.
+- **Mars** yields hydrogen, ore, and carbon.
+- **Jupiter** yields hydrogen and ore.
+- **Saturn** yields hydrogen, nitrogen, and carbon.
+- **Uranus** yields hydrogen, nitrogen, and carbon.
+- **Neptune** yields hydrogen, nitrogen, and carbon.
 
 The Sun yields energy. Earth yields nothing a ship can mine. The Moon shares Earth's yield, so it yields nothing either. A pilot mines the home world's yield to have it. The base does not hand it over.
-
-The home base drinks water at one rate, whether or not the pilot is online. The rate follows the fleet. A ship locked in the repair bay does not count. A ship on a route does not drink, and the route does not spend water. When the base is dry, a ship can depart only for a world that yields water. A ship already sent finishes its route. A sale at Earth is not allowed while the base is dry. A dry ship cannot attack. It can be attacked.
 
 ### Mining
 

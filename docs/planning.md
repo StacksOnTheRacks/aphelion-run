@@ -6,7 +6,7 @@ This note is the rest. A blank here becomes a special case in code.
 
 ## Decided
 
-- **Server clock.** The game needs a durable server clock. It may not exist yet. Travel, mining, siphoning, repair, water, the gravity boom, collector recharge, and the market all read it, including while the player is away. Lambda is unlikely to be that clock. An invocation does not keep time between calls. [STRATEGY.md](../STRATEGY.md) records the same limit.
+- **Server clock.** The game needs a durable server clock. It may not exist yet. Travel, mining, siphoning, repair, the gravity boom, collector recharge, and the market all read it, including while the player is away. Lambda is unlikely to be that clock. An invocation does not keep time between calls. [STRATEGY.md](../STRATEGY.md) records the same limit.
 - **Amounts vary.** Rates and capacities are not one fixed table. A starting value can exist, and the variant can change it. The classes are Miner, Warship, Explorer, and Hauler, five variants each. The axes are storage capacity, siphon speed, weapon strength, speed adjusted by weight, and energy burn rate. Hull strength is separate from the weapons. A ship carries one siphon, one thruster, one drill, and one cloak. Names and numbers are not locked. A ship has a siphon rate, and that rate can be improved. Raising it raises how fast the ship consumes a collector.
 - **Units.** Minerals and energy share one cargo unit. One of either takes one space in the hold. Solscrip takes none, and it has no weight. The currency is Solscrip. No rates and no prices.
 - **One market.** Earth is the black market in Sol. It yields nothing a ship can mine. Each other system has one such planet. Those systems cannot be entered yet. Whether a completed sale moves the price is not decided.
@@ -29,8 +29,7 @@ Amounts are rates and capacities, and they move. The brief sets no starting valu
 - Siphon rate: how fast a ship drinks a collector. Improving the rate increases consumption. The starting rate can differ by ship class.
 - Mineral yield: how fast a mine pays, when it runs empty, and when it returns. The same mineral is the same wherever it is mined, so the rate belongs to the mineral, or the brief has to say otherwise. The starting rate can still differ by ship class.
 - Which mineral each ship part spends, and how many. Missing one delays the work and does not ground the ship. Solscrip can shorten an upgrade and cannot replace the mineral or shorten a repair. Both of those need a time and a price.
-- Water drunk per ship at home, and what “dry” does to departure, to a sale, and to an attack. The rule is written. The rate is not.
-- Warehouse size for energy, and for each mineral. Water is stored apart from energy. A full energy store does not block a water unload.
+- Warehouse size for energy, and for each mineral.
 - Cargo. One mineral and one energy take the same space and the same weight. Solscrip does not. More units aboard raise the burn and lower combat power. The formula in the brief is hull + component bonuses + crew skills − payload weight. Components and crew skills are named and not defined.
 - Burn cost from the orbit left, the orbit joined, the mass aboard, and whether a planet on the path can bend the course today. A ship cannot depart under the reserve. A siphon stops before the leftover energy cannot buy the trip. Both need the cost function. The wormhole hop needs one too, when a system can be entered.
 - Collector capacity and how fast an empty one refills from the Sun.
@@ -53,7 +52,7 @@ A new player needs a starting home, a starting ship, and enough energy and miner
 
 Fights resolve with the player away. Before that can be built:
 
-- Who may start a fight. A ship in an outer orbit can challenge a ship that is mining that body, or a ship sitting idle in that outer orbit. Not the Moon. Not a ship on a photon burn between bodies. Not a cloaked ship. A dry ship cannot attack, and it can be attacked. A scan can find a cloak. The scan’s cost, range, and chance are open.
+- Who may start a fight. A ship in an outer orbit can challenge a ship that is mining that body, or a ship sitting idle in that outer orbit. Not the Moon. Not a ship on a photon burn between bodies. Not a cloaked ship. A scan can find a cloak. The scan’s cost, range, and chance are open.
 - Which ship is the target when several share an orbit.
 - Weapons, hit chance, range, and how long a fight takes. The player does not steer the shots. Weapon strength is an axis of ship class. The number is not set.
 - What scrap is, and what it is spent on. The victor takes the energy, the Solscrip, and scrap. Stolen Solscrip is not banked until that pilot carries it home.

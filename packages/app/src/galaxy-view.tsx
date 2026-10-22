@@ -3,7 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { NEIGHBORS, SOL_ID, systemCard, systemCardAction, type GalaxyDemo, type StarClass, type SystemCard } from "./demo/galaxy";
-import { GameChrome } from "./game-chrome";
+import { Hud, useHudAnchors } from "./hud";
 import { SpaceLabels, type LabelItem } from "./space-labels";
 
 const STAR_COLOR: Record<StarClass, string> = {
@@ -14,7 +14,7 @@ const STAR_COLOR: Record<StarClass, string> = {
 	M: "#FF8F6B",
 };
 
-/** The galaxy: its chrome, the systems named on the scene, and the card a click opens. Home sits in the upper right and opens the ship's orbit in Sol. */
+/** The galaxy: its HUD, the systems named on the scene, and the card a click opens. Locate opens the ship's orbit in Sol. */
 export function GalaxyPlace({
 	galaxy,
 	onEnterSol,
@@ -24,9 +24,7 @@ export function GalaxyPlace({
 	onEnterSol: () => void;
 	onHome: () => void;
 }) {
-	const chromeRef = useRef<HTMLDivElement>(null);
-	const navRef = useRef<HTMLDivElement>(null);
-	const keepOut = useMemo(() => [chromeRef, navRef], []);
+	const { anchors, keepOut } = useHudAnchors();
 	const [openId, setOpenId] = useState<string | null>(null);
 	const card = openId ? systemCard(openId) : null;
 	const items = useMemo<LabelItem[]>(
@@ -46,22 +44,13 @@ export function GalaxyPlace({
 	return (
 		<>
 			<SpaceLabels source={galaxy} items={items} title="Star systems" keepOut={keepOut} />
-			<GameChrome ref={chromeRef}>
-				<h2 className="mt-1 text-[11px] tracking-[0.22em] text-amber-300 uppercase">Galaxy</h2>
-			</GameChrome>
-			<div
-				ref={navRef}
-				className="pointer-events-none absolute top-0 right-0 z-10 flex flex-col items-end gap-2 px-4 pt-[max(1rem,env(safe-area-inset-top))] sm:px-6 sm:pt-6"
-			>
-				<button
-					type="button"
-					onClick={onHome}
-					title="Your ship's orbit"
-					className="pointer-events-auto touch-manipulation rounded-2xl border border-[#E8E4D9]/20 bg-black/60 px-4 py-2.5 text-[11px] tracking-[0.22em] text-[#E8E4D9]/80 uppercase backdrop-blur transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
-				>
-					Home
-				</button>
-			</div>
+			<Hud
+				anchors={anchors}
+				location={{ title: "Galaxy", detail: null }}
+				pilot={{ onClick: () => {}, disabled: true, title: "Pilot from inside Sol" }}
+				locate={{ onClick: onHome, title: "Your ship's orbit" }}
+				recall={{ onClick: () => {}, disabled: true, title: "The ship is holding" }}
+			/>
 			{card ? <SystemModal card={card} onClose={() => setOpenId(null)} onEnter={onEnterSol} /> : null}
 		</>
 	);

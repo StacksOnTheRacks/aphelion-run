@@ -25,6 +25,8 @@ const sun = bodyScan("sun");
 const marsHome: ScanTarget = { id: "mars-warehouse-corporate-0", host: "mars", kind: "home", owner: "corporate" };
 const earthStation: ScanTarget = { id: "earth-station-marauder-1", host: "earth", kind: "station", owner: "marauder" };
 const collector: ScanTarget = { id: "satellites-empty-4", host: "sun", kind: "collector", owner: "empty" };
+const marsOre: ScanTarget = { id: "mars-generator-ore", host: "mars", kind: "generator", resource: "ore" };
+const phobosHydrogen: ScanTarget = { id: "phobos-generator-hydrogen", host: "phobos", kind: "generator", resource: "hydrogen" };
 
 expect(sun.kind === "star" && mars.kind === "planet" && titan.kind === "moon", "a body's kind follows from its id");
 expect(mars.host === "mars", "a body is its own host");
@@ -35,11 +37,16 @@ expect(scanCard(marsHome).label === "Mars home base", "a home base is named for 
 expect(scanCard(marsHome).owner === "Corporate", "a craft's card shows who holds it");
 expect(scanCard(earthStation).label === "Earth station", "Earth's station is named for Earth");
 expect(scanCard(collector).owner === "Unoccupied", "an empty collector reads as unoccupied");
+expect(scanCard(marsOre).kind === "Generator" && scanCard(marsOre).label === "Ore mine", "a generator is named for its mineral");
+expect(scanCard(marsOre).text.includes("ore") && scanCard(marsOre).text.includes("Mars"), "a generator's card says where it mines");
+expect(scanCard(phobosHydrogen).label === "Hydrogen mine", "a moon's generator is named for its mineral");
 expect(scanCard(mars).owner === undefined, "a body has no owner");
 
 expect(destinationName(sun) === "the Sun", "the Sun reads with its article");
 expect(destinationName(collector) === "a collector at the Sun", "a collector reads with the body it circles");
 expect(destinationName(earthStation) === "Earth's station", "the station reads as Earth's");
+expect(destinationName(marsOre) === "the ore mine at Mars", "a generator reads as that mineral's mine");
+expect(destinationName(phobosHydrogen) === "the hydrogen mine at Phobos", "a moon generator names the moon");
 
 const idleAtEarth = { at: "earth", departing: false };
 expect(travelAction(mars, idleAtEarth).enabled, "a ship at Earth can travel to Mars");
@@ -56,9 +63,12 @@ expect(scanLabel(mars) === "Mars", "a scanned body is named on the scene");
 expect(scanLabel(collector) === "Unoccupied collector", "a scanned collector reads by who holds it");
 expect(scanLabel(marsHome) === "Corporate home base", "a scanned home base reads by who holds it");
 expect(scanLabel(earthStation) === "Marauder station", "a scanned station reads by who holds it");
+expect(scanLabel(marsOre) === "Ore mine", "a scanned generator reads by its mineral");
 
 expect(!showsCard(mars) && !showsCard(titan) && !showsCard(sun), "a body is entered on click");
 expect(showsCard(marsHome) && showsCard(earthStation) && showsCard(collector), "a home, a station, or a collector opens its card");
+expect(showsCard(marsOre) && showsCard(phobosHydrogen), "a generator opens its card");
+expect(travelAction(marsOre, idleAtEarth).enabled, "a ship at Earth can travel to a mine at Mars");
 
 expect(viewAction(mars, "system").enabled, "a body can be viewed from the whole system");
 expect(viewAction(mars, "mars-outer").enabled && viewAction(mars, "mars-outer").label === "View", "a wide planet chart can come in on the planet");

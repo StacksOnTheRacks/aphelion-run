@@ -45,6 +45,7 @@ import {
 	type PlanetBaseInput,
 } from "./bases";
 import { daysSinceJ2000, greenwichAngle, moonLongitude, planetLongitude, type EphemerisPlanet } from "./ephemeris";
+import { moonGeneratorSlots, planetGeneratorSlots, type GeneratorSlot, type Mineral } from "./generators";
 import { CLIMB_PACE, createJourney, hoverDeparture, type Dock, type Harbor, type JourneyPlan } from "./journey";
 import { CHART_LAYER, createCockpit, type PilotViewpoint } from "./cockpit";
 import { HULL_LENGTH, loadRanger } from "./ranger";
@@ -1135,7 +1136,7 @@ export async function createEnvironment(
 		return { docks, outer };
 	};
 
-	/** One craft to dock with, by craft id: a base, a station, or a collector. */
+	/** One craft to dock with, by craft id: a base, a station, a generator, or a collector. */
 	const dockById = new Map(swarm.dockById);
 	for (const base of spinningBases) {
 		dockById.set(base.mesh.name, { position: () => base.mesh.position.clone(), rate: BASE_SPIN * ORBIT_PACE });
@@ -1677,6 +1678,7 @@ export async function createEnvironment(
 		host: craft.host,
 		kind: craft.kind as ScanKind,
 		owner: craft.owner,
+		resource: craft.resource,
 	});
 
 	const clearScan = () => {
@@ -2905,6 +2907,8 @@ type Craft = {
 	view: DemoView;
 	kind: Exclude<ScanKind, "star" | "planet" | "moon"> | "ship";
 	owner?: SatelliteOwner;
+	/** The mineral a generator yields. */
+	resource?: Mineral;
 	/** Half the craft's longest side, in world units, for the pointer. */
 	reach: number;
 	/** Radius of a screen-space marker in CSS pixels. Used instead of `reach` while that marker is drawn. */
@@ -2918,19 +2922,32 @@ type Craft = {
 
 function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[]): SpinningBase[] {
 	const materials = factionMaterials(scene);
+	const generatorMaterial = grayBoxMaterial(scene);
 	const spinning: SpinningBase[] = [];
 	for (const body of bodies) {
-		const placed = planetBases({
+		const input = {
 			diameter: body.spec.diameter,
 			moons: body.spec.moons.map((moon) => ({ orbit: moon.orbit, diameter: moon.diameter })),
 			stationRadius: body.spec.name === "earth" ? EARTH_STATION_RADIUS : undefined,
 			homes: body.spec.name !== "earth",
 			ringInnerScale: body.spec.name === "saturn" ? SATURN_RING_INNER_SCALE : undefined,
-		});
+		};
+		const placed = planetBases(input);
 		const inner = planetOrbitView(body.spec.name, "inner");
 		addBaseSlots(scene, body.anchor, placed.warehouses, materials, `${body.spec.name}-warehouse`, spinning, crafts, body.spec.name, inner, "home");
 		addBaseSlots(scene, body.anchor, placed.stations, materials, `${body.spec.name}-station`, spinning, crafts, body.spec.name, inner, "station");
+		addGeneratorSlots(
+			scene,
+			body.anchor,
+			planetGeneratorSlots(body.spec.name, input),
+			generatorMaterial,
+			spinning,
+			crafts,
+			body.spec.name,
+			inner
+		);
 		for (const moon of body.moons) {
+			const moonInner = moonView(body.spec.name, moon.mesh.name, "inner");
 			addBaseSlots(
 				scene,
 				moon.baseAnchor,
@@ -2940,12 +2957,31 @@ function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[]): Spi
 				spinning,
 				crafts,
 				moon.mesh.name,
-				moonView(body.spec.name, moon.mesh.name, "inner"),
+				moonInner,
 				"home"
+			);
+			addGeneratorSlots(
+				scene,
+				moon.baseAnchor,
+				moonGeneratorSlots(body.spec.name, moon.radius * 2),
+				generatorMaterial,
+				spinning,
+				crafts,
+				moon.mesh.name,
+				moonInner
 			);
 		}
 	}
 	return spinning;
+}
+
+/** Neutral gray, so a mine reads apart from the faction-colored homes and stations. */
+function grayBoxMaterial(scene: Scene): StandardMaterial {
+	const material = new StandardMaterial("generators", scene);
+	material.diffuseColor = new Color3(0.55, 0.56, 0.58);
+	material.emissiveColor = new Color3(0.16, 0.17, 0.18);
+	material.specularColor = new Color3(0.15, 0.15, 0.15);
+	return material;
 }
 
 function factionMaterials(scene: Scene): Record<Faction, StandardMaterial> {
@@ -2994,6 +3030,39 @@ function addBaseSlots(
 			position: (out) => out.copyFrom(mesh.getAbsolutePosition()),
 		});
 	});
+}
+
+function addGeneratorSlots(
+	scene: Scene,
+	parent: TransformNode,
+	slots: GeneratorSlot[],
+	material: StandardMaterial,
+	spinning: SpinningBase[],
+	crafts: Craft[],
+	host: string,
+	view: DemoView
+): void {
+	for (const slot of slots) {
+		const mesh = MeshBuilder.CreateBox(`${host}-generator-${slot.resource}`, slot.size, scene);
+		mesh.material = material;
+		mesh.parent = parent;
+		mesh.isPickable = false;
+		mesh.position.set(Math.cos(slot.angle) * slot.radius, 0, Math.sin(slot.angle) * slot.radius);
+		mesh.rotation.y = -slot.angle;
+		const craft: SpinningBase = { mesh, angle: slot.angle, radius: slot.radius };
+		spinning.push(craft);
+		crafts.push({
+			id: mesh.name,
+			host,
+			view,
+			kind: "generator",
+			resource: slot.resource,
+			reach: Math.max(slot.size.width, slot.size.depth) / 2,
+			rate: BASE_SPIN * ORBIT_PACE,
+			angle: () => craft.angle,
+			position: (out) => out.copyFrom(mesh.getAbsolutePosition()),
+		});
+	}
 }
 
 type SatelliteOrbit = {

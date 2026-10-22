@@ -17,8 +17,8 @@ import {
 	type ScanTarget,
 } from "./demo/scan";
 import { Dashboard } from "./dashboard";
+import { Hud, useHudAnchors } from "./hud";
 import { PILOT_VIEWPORT } from "./pilot-viewport";
-import { GameChrome } from "./game-chrome";
 import { ScanModal } from "./scan-card";
 import { SpaceLabels, type LabelItem } from "./space-labels";
 
@@ -32,9 +32,6 @@ const STEP_TITLE: Record<string, string> = {
 	Sun: "Back to the Sun",
 };
 
-const cornerClass =
-	"pointer-events-auto touch-manipulation flex items-center gap-2 rounded-2xl border border-[#E8E4D9]/20 bg-black/60 px-4 py-2.5 text-[11px] tracking-[0.22em] text-[#E8E4D9]/80 uppercase backdrop-blur transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none";
-
 /**
  * Sol, and the chrome over it. Names follow the framing: a wide planet chart names the planet and its
  * moons, and a chart on one body names that body and what orbits it. A pick on a body goes there.
@@ -42,22 +39,17 @@ const cornerClass =
  * To counts down and then flies the ship there from wherever it sits. The cockpit has no names and
  * no picks.
  *
- * The upper right is Home. It opens the ship's orbit and stays up in both views. Zoom is the chart wheel.
- * The lower left is the view: Pilot, or Chart while piloting, on every Sol chart including the system,
- * when the window is a desktop or a large tablet. A phone stays on the chart, and shrinking the window
- * below that leaves the cockpit. Above the toggle, only while piloting, Exterior trades the windscreen
- * for a camera outside the hull, and Interior returns to the seat. The lower right, on a chart, is one
- * step back: System from a planet or the Sun, Planet from a moon or from an inner orbit, and Galaxy from
- * the system. Escape takes the first chart step, Home on the system chart and otherwise that lower-right
- * step, and leaves the cockpit for the chart. Dragging turns the pilot's head, or swings the exterior
- * camera around the ship.
+ * The HUD reads the place, the warehouse, and the ranger. Pilot enters the cockpit on a desktop or a
+ * large tablet. The ship list then leaves. The round control becomes the exterior view, and Exit sits to its left. A phone stays on the
+ * chart, and shrinking the window below that leaves the cockpit. Locate opens the ship's orbit.
+ * Recall cancels a countdown or stops a burn.
+ * The lower right, on a chart, is one step back: System from a planet or the Sun, Planet from a moon
+ * or from an inner orbit, and Galaxy from the system. It stays down while piloting. Escape takes the
+ * first chart step, Home on the system chart and otherwise that lower-right step, and leaves the
+ * cockpit for the chart. Dragging turns the pilot's head, or swings the exterior camera around the ship.
  */
 export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLeave: () => void }) {
-	const chromeRef = useRef<HTMLDivElement>(null);
-	const controlsRef = useRef<HTMLDivElement>(null);
-	const trailRef = useRef<HTMLDivElement>(null);
-	const navRef = useRef<HTMLDivElement>(null);
-	const keepOut = useMemo(() => [chromeRef, controlsRef, trailRef, navRef], []);
+	const { anchors, keepOut } = useHudAnchors();
 	const [view, setView] = useState<DemoView>(() => system.view());
 	const [mode, setMode] = useState<Mode>("chart");
 	const [viewpoint, setViewpoint] = useState<PilotViewpoint>("interior");
@@ -72,7 +64,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const piloting = mode === "pilot" && pilotFits;
 	const back = close ? wideChartStep(view) : null;
 	const steps = back ? [back] : chartButtons(view);
-	// Home is the upper-right navigation control, on the chart and in the cockpit.
+	// Home is Locate. The rest of the chart steps stay in the lower right.
 	const trail = steps.filter((button) => button.target !== "ship");
 
 	const go = useCallback(
@@ -212,105 +204,83 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		setDocked(null);
 	};
 
+	const recall = () => {
+		if (departure) {
+			setDeparture(null);
+			return;
+		}
+		if (flight) {
+			stop();
+		}
+	};
+
+	const location = shipLocation(
+		departure ? { target: departure.target, seconds: secondsLeft(departure.endsAt, now) } : null,
+		flight,
+		docked
+	);
+
 	return (
 		<>
-			<style>{`
-				button.pilot-toggle { display: none; }
-				@media ${PILOT_VIEWPORT} {
-					button.pilot-toggle { display: flex; }
-				}
-			`}</style>
 			<SpaceLabels source={system} items={labels} title="Scanned" keepOut={keepOut} />
-			<GameChrome ref={chromeRef}>
-				<ShipStatus
-					departure={departure ? { target: departure.target, seconds: secondsLeft(departure.endsAt, now) } : null}
-					flight={flight}
-					docked={docked}
-					onCancel={() => setDeparture(null)}
-					onStop={stop}
-				/>
-			</GameChrome>
 			{piloting && viewpoint === "interior" ? <AftFrames /> : null}
 			{piloting ? <Dashboard system={system} course={bound ? scanCard(bound).label : null} /> : null}
-			<div
-				ref={navRef}
-				className="pointer-events-none absolute top-0 right-0 z-10 flex flex-col items-end gap-2 px-4 pt-[max(1rem,env(safe-area-inset-top))] sm:px-6 sm:pt-6"
-			>
-				<button
-					type="button"
-					onClick={() => take({ label: "Home", target: "ship" })}
-					title={STEP_TITLE.Home}
-					className={cornerClass}
-				>
-					Home
-				</button>
-			</div>
-			<div
-				ref={controlsRef}
-				className="pointer-events-none absolute bottom-0 left-0 z-10 flex flex-col items-start gap-2 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-6"
-			>
-				{piloting ? (
-					<button
-						type="button"
-						onClick={() => setViewpoint(viewpoint === "interior" ? "exterior" : "interior")}
-						aria-label={viewpoint === "interior" ? "Switch to exterior view" : "Switch to interior view"}
-						title={viewpoint === "interior" ? "Outside the ship" : "Back in the cockpit"}
-						className={cornerClass}
-					>
-						{viewpoint === "interior" ? (
-							<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-								<path d="M8 3.2 11.2 8H4.8L8 3.2Z" strokeLinejoin="round" />
-								<path d="M2.5 11.2a5.8 5.8 0 0 0 11 0" strokeLinecap="round" />
-							</svg>
-						) : (
-							<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-								<path d="M2 11.5 4 5h8l2 6.5" strokeLinejoin="round" />
-								<path d="M2 11.5h12M8 5v2.5" strokeLinecap="round" />
-							</svg>
-						)}
-						{viewpoint === "interior" ? "Exterior" : "Interior"}
-					</button>
-				) : null}
-				<button
-					type="button"
-					onClick={togglePilot}
-					aria-label={piloting ? "Switch to chart view" : "Switch to pilot view"}
-					title={piloting ? "Back to the chart" : "Into the cockpit"}
-					className={piloting ? cornerClass : `${cornerClass} pilot-toggle`}
-				>
-					{piloting ? (
-						<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-							<circle cx="8" cy="8" r="6" />
-							<ellipse cx="8" cy="8" rx="6" ry="2.2" />
-							<circle cx="8" cy="8" r="1" fill="currentColor" stroke="none" />
-						</svg>
-					) : (
-						<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-							<path d="M2 11.5 4 5h8l2 6.5" strokeLinejoin="round" />
-							<path d="M2 11.5h12M8 5v2.5" strokeLinecap="round" />
-						</svg>
-					)}
-					{piloting ? "Chart" : "Pilot"}
-				</button>
-			</div>
-			{piloting || trail.length === 0 ? null : (
-				<div
-					ref={trailRef}
-					className="pointer-events-none absolute right-0 bottom-0 z-10 flex flex-col items-end gap-2 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-6"
-				>
-					{trail.map((button) => (
+			<Hud
+				anchors={anchors}
+				location={location}
+				pilot={{
+					onClick: togglePilot,
+					disabled: !pilotFits && !piloting,
+					pressed: piloting,
+					title: piloting ? "Back to the chart" : pilotFits ? "Into the cockpit" : "The cockpit needs a larger screen",
+				}}
+				locate={{ onClick: () => take({ label: "Home", target: "ship" }), title: "Your ship's orbit" }}
+				recall={{
+					onClick: recall,
+					disabled: departure === null && flight === null,
+					title: departure ? "Cancel departure" : flight ? "Stop and hold" : "The ship is holding",
+				}}
+				steps={
+					piloting
+						? []
+						: trail.map((button) => ({
+								label: button.label,
+								title: STEP_TITLE[button.label] ?? button.label,
+								onClick: () => take(button),
+							}))
+				}
+				leading={
+					piloting ? (
 						<button
-							key={button.label}
 							type="button"
-							onClick={() => take(button)}
-							title={STEP_TITLE[button.label]}
-							className={cornerClass}
+							onClick={togglePilot}
+							aria-label="Exit to the chart"
+							title="Back to the chart"
+							className="pointer-events-auto flex size-14 items-center justify-center rounded-full border border-[#6b4f00] bg-[rgba(17,13,0,0.6)] text-xs font-semibold text-[#ffd73d] backdrop-blur-[12px] hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none lg:border-[#6b5500] lg:bg-[rgba(15,18,0,0.8)]"
 						>
-							{button.label}
+							Exit
 						</button>
-					))}
-				</div>
-			)}
+					) : null
+				}
+				corner={
+					piloting ? (
+						<button
+							type="button"
+							onClick={() => setViewpoint(viewpoint === "interior" ? "exterior" : "interior")}
+							aria-label={viewpoint === "interior" ? "Switch to exterior view" : "Switch to interior view"}
+							title={viewpoint === "interior" ? "Outside the ship" : "Back in the cockpit"}
+							className="pointer-events-auto flex size-[88px] flex-col items-center justify-center gap-1.5 rounded-full border border-[#6b4f00] bg-[rgba(17,13,0,0.6)] text-xs font-semibold text-[#ffd73d] backdrop-blur-[12px] hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none lg:size-24 lg:border-[#6b5500] lg:bg-[rgba(15,18,0,0.8)] lg:text-sm"
+						>
+							<svg viewBox="0 0 20 20" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+								<circle cx="10" cy="10" r="3" />
+								<path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2" strokeLinecap="round" />
+								<circle cx="10" cy="10" r="6.5" />
+							</svg>
+							{viewpoint === "interior" ? "Exterior" : "Interior"}
+						</button>
+					) : null
+				}
+			/>
 			{scanned ? (
 				<ScanModal
 					card={scanCard(scanned)}
@@ -345,52 +315,25 @@ function usePilotFits(): boolean {
 	);
 }
 
-/** Where the ship is, under the title: holding, counting down to leave, flying, or docked. */
-function ShipStatus({
-	departure,
-	flight,
-	docked,
-	onCancel,
-	onStop,
-}: {
-	departure: { target: ScanTarget; seconds: number } | null;
-	flight: ScanTarget | null;
-	docked: ScanTarget | null;
-	onCancel: () => void;
-	onStop: () => void;
-}) {
-	let text: string;
-	let action: { label: string; onClick: () => void } | null = null;
+/** The location bar: the place on the left, and what the ship is doing there. */
+function shipLocation(
+	departure: { target: ScanTarget; seconds: number } | null,
+	flight: ScanTarget | null,
+	docked: ScanTarget | null
+): { title: string; detail: string } {
 	if (departure) {
-		text = `Departing for ${destinationName(departure.target)} in ${departure.seconds}`;
-		action = { label: "Cancel", onClick: onCancel };
-	} else if (flight) {
-		text = `En route to ${destinationName(flight)}.`;
-		action = { label: "Stop", onClick: onStop };
-	} else if (docked) {
-		text =
-			docked.id === docked.host
-				? `Docked with a satellite of ${placeName(docked.host)}.`
-				: `Docked at ${destinationName(docked)}.`;
-	} else {
-		text = "In orbit at Earth.";
+		return { title: destinationName(departure.target), detail: `Departing in ${departure.seconds}` };
 	}
-	return (
-		<div className="mt-3 flex flex-wrap items-center gap-3">
-			<p role="status" aria-live="polite" className="text-sm leading-relaxed text-white/60">
-				{text}
-			</p>
-			{action ? (
-				<button
-					type="button"
-					onClick={action.onClick}
-					className="pointer-events-auto touch-manipulation rounded-xl border border-[#E8E4D9]/20 bg-black/50 px-3 py-1 text-[11px] tracking-[0.22em] text-amber-300 uppercase backdrop-blur transition-colors hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
-				>
-					{action.label}
-				</button>
-			) : null}
-		</div>
-	);
+	if (flight) {
+		return { title: destinationName(flight), detail: "En route" };
+	}
+	if (docked) {
+		return {
+			title: placeName(docked.host),
+			detail: docked.id === docked.host ? "With a satellite" : destinationName(docked),
+		};
+	}
+	return { title: "Earth", detail: "In orbit" };
 }
 
 /** A frame and a name around each aft view. The views themselves are drawn by the scene, under these. */

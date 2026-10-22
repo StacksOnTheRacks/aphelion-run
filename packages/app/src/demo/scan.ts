@@ -1,16 +1,23 @@
 import type { Faction } from "./bases";
 import { JOURNEY_STOPS, PLANETS, bodyTarget, type DemoView } from "./environment";
+import type { Mineral } from "./generators";
 
 /** Seconds between Travel To and the ship starting to move. */
 export const DEPARTURE_SECONDS = 5;
 
-export type ScanKind = "star" | "planet" | "moon" | "station" | "home" | "collector";
+export type ScanKind = "star" | "planet" | "moon" | "station" | "home" | "collector" | "generator";
 
 /**
  * What a scan picked. A body is its own host. A craft names the body it circles, and that body's
- * outer orbit is where the burn to it ends.
+ * outer orbit is where the burn to it ends. A generator names the mineral it yields.
  */
-export type ScanTarget = { id: string; host: string; kind: ScanKind; owner?: Faction | "empty" };
+export type ScanTarget = {
+	id: string;
+	host: string;
+	kind: ScanKind;
+	owner?: Faction | "empty";
+	resource?: Mineral;
+};
 
 export type ScanCard = {
 	id: string;
@@ -32,6 +39,7 @@ const KIND_LABEL: Record<ScanKind, string> = {
 	station: "Station",
 	home: "Home base",
 	collector: "Collector",
+	generator: "Generator",
 };
 
 const OWNER_LABEL: Record<Faction | "empty", string> = {
@@ -78,6 +86,10 @@ function craftText(target: ScanTarget): string {
 	if (target.kind === "collector") {
 		return "Holds the Sun's energy in its inner orbit. A ship docks here to siphon it.";
 	}
+	if (target.kind === "generator") {
+		const mineral = target.resource ?? "minerals";
+		return `A mine in the inner orbit of ${placeName(target.host)}. A ship docks here to take ${mineral}.`;
+	}
 	return `A home in the inner orbit of ${placeName(target.host)}: a warehouse, a repair bay, a bank, and a dock.`;
 }
 
@@ -96,9 +108,29 @@ export function destinationName(target: ScanTarget): string {
 			return `a home base at ${placeName(target.host)}`;
 		case "collector":
 			return `a collector at ${placeName(target.host)}`;
+		case "generator":
+			return `the ${target.resource ?? "mineral"} mine at ${placeName(target.host)}`;
 		default:
 			return placeName(target.id);
 	}
+}
+
+const MINERAL_LABEL: Record<Mineral, string> = {
+	hydrogen: "Hydrogen",
+	ore: "Ore",
+	nitrogen: "Nitrogen",
+	carbon: "Carbon",
+};
+
+function craftLabel(target: ScanTarget): string {
+	if (target.kind === "collector") {
+		return "Collector";
+	}
+	if (target.kind === "generator") {
+		const mineral = target.resource ? MINERAL_LABEL[target.resource] : "Mineral";
+		return `${mineral} mine`;
+	}
+	return `${stopLabel(target.host)} ${target.kind === "station" ? "station" : "home base"}`;
 }
 
 export function scanCard(target: ScanTarget): ScanCard {
@@ -106,11 +138,7 @@ export function scanCard(target: ScanTarget): ScanCard {
 	return {
 		id: target.id,
 		kind: KIND_LABEL[target.kind],
-		label: body
-			? stopLabel(target.id)
-			: target.kind === "collector"
-				? "Collector"
-				: `${stopLabel(target.host)} ${target.kind === "station" ? "station" : "home base"}`,
+		label: body ? stopLabel(target.id) : craftLabel(target),
 		owner: target.owner ? OWNER_LABEL[target.owner] : undefined,
 		text: body ? bodyText(target) : craftText(target),
 	};

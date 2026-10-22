@@ -4,7 +4,7 @@ Mine a body, store the haul, spend it on improvements and repairs. Energy from t
 
 | Mechanic | What it does | Status |
 | --- | --- | --- |
-| Base | Stores the energy and minerals a player has collected. Equipment is static: the gravity boom, the warehouse, the repair bay, the dock, and the water store. Each upgrades to level 100. The base advances when every piece reaches the next step of ten. | Recorded |
+| Base | Stores the energy and minerals a player has collected. Equipment is static: the gravity boom, the warehouse, the repair bay, and the dock. Each upgrades to level 100. The base advances when every piece reaches the next step of ten. | Recorded |
 | Mining | A player gathers a mineral by going to the body that has it, including the home body. | Recorded |
 | Upgrades | Minerals improve and repair a ship. They do not buy a new hull. Banked Solscrip can finish an improvement sooner. It does not replace a missing mineral, and it does not shorten a repair. | Recorded |
 | Ship class | Miner, Warship, Explorer, and Hauler. Each class has five variants, read on storage capacity, siphon speed, weapon strength, speed adjusted by weight, and energy burn rate. Hull strength is separate from the weapons. A ship carries one siphon, one thruster, one drill, and one cloak, each replaceable and upgradable to level 10. Names and numbers are not locked. | Recorded |
