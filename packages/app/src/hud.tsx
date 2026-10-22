@@ -11,7 +11,8 @@ const plate =
 
 /**
  * Figures from the HUD design. The warehouse has no ledger yet, so the strip shows these holdings
- * until energy and minerals are counted.
+ * until energy and minerals are counted. The published site serves these icons from its own public
+ * folder. The copies beside this package are for the game dev server.
  */
 const HOLDINGS = [
 	{ id: "helium-3", label: "Helium-3", amount: 4200, icon: "/hud/helium-3.svg" },
