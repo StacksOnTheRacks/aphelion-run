@@ -45,7 +45,7 @@ import {
 	type PlanetBaseInput,
 } from "./bases";
 import { daysSinceJ2000, greenwichAngle, moonLongitude, planetLongitude, type EphemerisPlanet } from "./ephemeris";
-import { CLIMB_PACE, createJourney, type Dock, type Harbor, type JourneyPlan } from "./journey";
+import { CLIMB_PACE, createJourney, hoverDeparture, type Dock, type Harbor, type JourneyPlan } from "./journey";
 import { CHART_LAYER, createCockpit, type PilotViewpoint } from "./cockpit";
 import { HULL_LENGTH, loadRanger } from "./ranger";
 import { awayFrom, type LabelFrame, type LabelSource } from "./labels";
@@ -887,7 +887,7 @@ export function planJourney(layout: JourneyLayout, fromId: string, toId: string,
 		});
 		const spiral = departureSpiral(from.center, origin, cruise.points[0], turn, rings);
 		const opened = curveClimbStart(spiral, tangentHeading(from.center, origin, orbitTurn), spheres, rings, from.center);
-		const joined = curveClimbJoin(opened, cruise, spheres, rings);
+		const joined = curveClimbJoin(opened, cruise, spheres, rings, from.center);
 		return { cruise: joined.route, climb: joined.climb };
 	};
 	const withOrbit = option(orbitTurn);
@@ -1119,8 +1119,9 @@ export async function createEnvironment(
 
 	/** The Sun's satellites, or the bases and stations circling a planet or moon. */
 	const harborOf = (id: string): Harbor => {
+		const outer = bodyOuterRadius(id);
 		if (id === "sun") {
-			return { docks: swarm.docks };
+			return { docks: swarm.docks, outer };
 		}
 		const planet = bodies.find((body) => body.spec.name === id);
 		const anchor = planet?.anchor ?? moonByName.get(id)?.baseAnchor;
@@ -1128,10 +1129,10 @@ export async function createEnvironment(
 			.filter((base) => base.mesh.parent === anchor)
 			.map((base): Dock => ({ position: () => base.mesh.position.clone(), rate: BASE_SPIN * ORBIT_PACE }));
 		if (planet === saturn) {
-			const { normal, inner, outer, halfHeight } = saturnRing(Vector3.Zero());
-			return { docks, ring: { normal, inner, outer, halfHeight } };
+			const { normal, inner, outer: ringOuter, halfHeight } = saturnRing(Vector3.Zero());
+			return { docks, outer, ring: { normal, inner, outer: ringOuter, halfHeight } };
 		}
-		return { docks };
+		return { docks, outer };
 	};
 
 	/** One craft to dock with, by craft id: a base, a station, or a collector. */
@@ -2012,9 +2013,11 @@ export async function createEnvironment(
 			const at = docked?.position ?? ranger.position.clone();
 			const turn = docked?.turn ?? 1;
 			const home = journeyLayout().bodies.find((body) => body.id === fromId);
-			const radius = home ? Math.hypot(at.x - home.center.x, at.z - home.center.z) : 0;
+			const origin =
+				docked?.dock && home ? home.center.add(hoverDeparture(docked.dock, home.outer)) : at;
+			const radius = home ? Math.hypot(origin.x - home.center.x, origin.z - home.center.z) : 0;
 			const rate = docked?.rate ?? 0.35 * ORBIT_PACE;
-			const depart = { at, turn, speed: Math.abs(rate) * radius };
+			const depart = { at: origin, turn, speed: Math.abs(rate) * radius };
 			const plan = planJourney(journeyLayout(), fromId, target.host, depart);
 			const dock = target.id === target.host ? undefined : dockById.get(target.id);
 			journey.start(

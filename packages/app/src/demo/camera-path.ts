@@ -147,7 +147,8 @@ function swingAroundRing(from: Vector3, to: Vector3, ring: RingBody): Vector3[] 
 	const radius = ring.outer + Math.max(0.8, ring.halfHeight);
 	const fromAngle = planarAngle(from, ring.center, basis);
 	const toAngle = planarAngle(to, ring.center, basis);
-	const lifts = [0, ring.halfHeight + 0.5, -(ring.halfHeight + 0.5)];
+	const clear = ring.halfHeight * 2;
+	const lifts = [0, clear, -clear];
 	const arcs: Vector3[][] = [];
 	for (const lift of lifts) {
 		const origin = ring.center.add(basis.n.scale(lift));
@@ -307,14 +308,14 @@ function ringFallback(from: Vector3, to: Vector3, ring: RingBody): Vector3 {
 	const sign = fromHeight * toHeight > 0 ? Math.sign(fromHeight) : Math.sign(basis.n.y) || 1;
 	return ring.center
 		.add(radial.normalize().scale(ring.outer + 1.5))
-		.add(basis.n.scale(sign * (ring.halfHeight + 0.8)));
+		.add(basis.n.scale(sign * ring.halfHeight * 2));
 }
 
 function exitRing(point: Vector3, ring: RingBody): Vector3 {
 	const normal = ring.normal.normalize();
 	const height = Vector3.Dot(point.subtract(ring.center), normal);
 	const sign = height >= 0 ? 1 : -1;
-	return point.add(normal.scale(sign * (ring.halfHeight + 0.4) - height));
+	return point.add(normal.scale(sign * ring.halfHeight * 2 - height));
 }
 
 function pathHitsSphere(points: Vector3[], center: Vector3, radius: number): boolean {

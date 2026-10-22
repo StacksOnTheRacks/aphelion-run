@@ -35,12 +35,15 @@ import {
 	climbDuration,
 	cruiseDistance,
 	cruiseSpeed,
+	flightSchedule,
 	journeySeconds,
+	legPose,
 	planApproach,
+	poseRise,
 	type Approach,
 	type Dock,
 } from "./journey";
-import { cross2, curveClimbJoin, curveClimbStart, departureSpiral, headingAt, planRoute, pointAt, reversalPenalty, tangentHeading, type AssistCandidate, type Route } from "./route";
+import { MAX_YAW, cross2, curveClimbJoin, curveClimbStart, departureSpiral, headingAt, planRoute, pointAt, reversalPenalty, tangentHeading, type AssistCandidate, type Route } from "./route";
 
 const failures: string[] = [];
 
@@ -485,7 +488,7 @@ for (let step = 0; step < 24; step++) {
 		});
 		const spiral = departureSpiral(earth.center, at, cruise.points[0], turn, rings);
 		const opened = curveClimbStart(spiral, tangentHeading(earth.center, at, 1), spheres, rings, earth.center);
-		const joined = curveClimbJoin(opened, cruise, spheres, rings);
+		const joined = curveClimbJoin(opened, cruise, spheres, rings, earth.center);
 		const climb = joined.climb;
 		const radius = Math.hypot(at.x - earth.center.x, at.z - earth.center.z);
 		return pathLength(climb) + (turn === 1 ? 0 : reversalPenalty(radius));
@@ -832,6 +835,147 @@ function assistCandidates(layout: JourneyLayout, fromId: string, toId: string): 
 	for (let i = 1; i < joined.length; i++) {
 		expect(!segmentHitsSphere(joined[i - 1], joined[i], saturn.center, saturn.radius), "a Titan climb stays clear of Saturn");
 		expect(!segmentHitsRing(joined[i - 1], joined[i], ring), "a Titan climb stays clear of Saturn's rings");
+	}
+}
+
+/** Largest yaw, radians per second, along the climb and the start of the burn. */
+function maxYaw(plan: Parameters<typeof legPose>[0], seconds: number): number {
+	const dt = 0.02;
+	let worst = 0;
+	let previous = legPose(plan, 0).heading;
+	const steps = Math.max(1, Math.ceil(seconds / dt));
+	for (let i = 1; i <= steps; i++) {
+		const heading = legPose(plan, Math.min(seconds, i * dt)).heading;
+		const gap = Math.acos(Math.min(1, Math.max(-1, Vector3.Dot(previous, heading))));
+		worst = Math.max(worst, gap / dt);
+		previous = heading;
+	}
+	return worst;
+}
+
+// A small moon's climb stays in its zone and on its plane. The dock rise is a hull, not a camera offset.
+{
+	const layout = layoutAt(FIRST_DAY, 0);
+	const deimos = layout.bodies.find((body) => body.id === "deimos")!;
+	const at = deimos.bases[0];
+	const plan = planJourney(layout, "deimos", "mars", { at, turn: 1, speed: 0.05 });
+	const hover = poseRise(deimos.halo, deimos.outer, "hover");
+	const coupled = poseRise(deimos.halo, deimos.outer, "coupled");
+	expect(coupled <= hover + 1e-9, "the hover sits at least as high as the coupled pose");
+	expect(hover < 0.1, `a small moon's hover is a hull clearance (${hover.toFixed(3)})`);
+	expect(hover <= (deimos.outer - deimos.halo) * 0.15 + 1e-6, "the rise is capped by the gap to the outer orbit");
+	for (const point of plan.climb) {
+		const flat = flatDistance(point, deimos.center);
+		expect(flat < deimos.outer * 1.35, `a Deimos climb stays near the moon (${flat.toFixed(2)}, outer ${deimos.outer.toFixed(2)})`);
+		const off = Math.abs(point.y - deimos.center.y);
+		expect(off < 0.2, `a Deimos climb stays on the moon's plane (off by ${off.toFixed(3)})`);
+	}
+	expect(maxYaw(plan, ORBIT_LEG_SECONDS) < MAX_YAW * 1.35, "a small-moon climb stays under the yaw cap");
+}
+
+// The clock is fixed, and sampling it twice lands on the same pose. The burn ends on the outer orbit.
+{
+	const layout = layoutAt(FIRST_DAY, 0);
+	const earth = layout.bodies.find((body) => body.id === "earth")!;
+	const mars = layout.bodies.find((body) => body.id === "mars")!;
+	const at = earth.bases[0] ?? earth.center.add(new Vector3(EARTH_STATION_RADIUS, 0, 0));
+	const plan = planJourney(layout, "earth", "mars", { at, turn: 1, speed: 0.4 });
+	const length = plan.climb.reduce(
+		(sum, _point, index) => (index === 0 ? 0 : sum + Vector3.Distance(plan.climb[index - 1], plan.climb[index])),
+		0
+	);
+	const clock = flightSchedule(true, length, plan.departSpeed, plan.cruise.total, true);
+	expect(clock.undockSeconds === SOFT_DOCK_SECONDS, "undock is three seconds");
+	expect(clock.climbSeconds === ORBIT_LEG_SECONDS, "the climb is seven seconds");
+	expect(clock.dropSeconds === ORBIT_LEG_SECONDS, "the drop is seven seconds");
+	expect(clock.dockSeconds === SOFT_DOCK_SECONDS, "soft dock is three seconds");
+	expect(
+		Math.abs(clock.total - (clock.undockSeconds + clock.climbSeconds + clock.cruiseSeconds + clock.dropSeconds + clock.dockSeconds)) <
+			1e-9,
+		"the clock is the sum of the phases"
+	);
+	const burnEnd = clock.climbSeconds + clock.cruiseSeconds;
+	const pose = legPose(plan, burnEnd);
+	const again = legPose(plan, burnEnd);
+	expect(near(pose.point, again.point), "sampling the burn twice matches");
+	expect(near(pose.heading, again.heading), "the heading matches the second sample");
+	expect(near(pose.point, plan.cruise.points[plan.cruise.points.length - 1], 1e-2), "the burn ends where the cruise ends");
+	const from = pose.point.subtract(mars.center);
+	const dockClock = { now: 0 };
+	const approach = planApproach(
+		from,
+		plan.arrive.turn || 1,
+		{ docks: dockRing(4, mars.halo, 0.03, dockClock), outer: mars.outer },
+		pose.heading
+	)!;
+	expect(approach.seconds === ORBIT_LEG_SECONDS, "the planned drop takes seven seconds");
+	const { dock } = flyApproach(approach, dockClock);
+	const raised = dock.clone();
+	raised.y += poseRise(Math.hypot(dock.x, dock.z), mars.outer, "hover");
+	expect(near(approachPoint(approach, approach.seconds, raised), raised, 1e-3), "the drop ends on the destination hover");
+	const dockedRise = poseRise(Math.hypot(dock.x, dock.z), mars.outer, "coupled");
+	const hoverRise = poseRise(Math.hypot(dock.x, dock.z), mars.outer, "hover");
+	expect(hoverRise - dockedRise < 0.05, "soft dock only closes the hull clearance");
+}
+
+// Retrograde departures and ordinary climbs yaw no faster than the cap.
+{
+	const layout = layoutAt(FIRST_DAY, 0);
+	const earth = layout.bodies.find((body) => body.id === "earth")!;
+	let checked = 0;
+	for (let step = 0; step < 24; step++) {
+		const angle = (step / 24) * Math.PI * 2;
+		const at = earth.center.add(new Vector3(Math.cos(angle) * EARTH_STATION_RADIUS, 0, Math.sin(angle) * EARTH_STATION_RADIUS));
+		const plan = planJourney(layout, "earth", "mars", { at, turn: 1, speed: 0.5 });
+		const yaw = maxYaw(plan, ORBIT_LEG_SECONDS);
+		let turn = 0;
+		for (let i = 2; i < plan.climb.length; i++) {
+			const before = plan.climb[i - 1].subtract(plan.climb[i - 2]);
+			const after = plan.climb[i].subtract(plan.climb[i - 1]);
+			const bl = before.length();
+			const al = after.length();
+			if (bl < 1e-6 || al < 1e-6) continue;
+			turn += Math.acos(Math.min(1, Math.max(-1, Vector3.Dot(before.scale(1 / bl), after.scale(1 / al)))));
+		}
+		// The floor is the yaw cap, or the climb's own turn spread across the seven seconds when
+		// that turn cannot be made any slower. A kink sits well above either one.
+		const floor = Math.max(MAX_YAW, turn / ORBIT_LEG_SECONDS);
+		expect(yaw < floor * 1.5, `an Earth climb at ${angle.toFixed(2)} stays under the yaw cap (${yaw.toFixed(2)} vs ${floor.toFixed(2)})`);
+		checked += 1;
+	}
+	expect(checked === 24, "every Earth departure was timed");
+}
+
+// Saturn's clearance is one ring thickness along the ring normal, added on top of the planar path.
+// An ecliptic point already sits off the tilted ring plane, so the check is the extra lift, not that height.
+{
+	const layout = layoutAt(FIRST_DAY, 0);
+	const saturn = layout.bodies.find((body) => body.id === "saturn")!;
+	const ring = saturnRing(saturn.center);
+	const inside = saturn.center.add(new Vector3(ring.inner * 0.85, 0, 0));
+	const outside = saturn.center.add(new Vector3(ring.outer + 6, 0, 0));
+	for (const turn of [1, -1]) {
+		const lifted = departureSpiral(saturn.center, inside, outside, turn, [ring]);
+		const plain = departureSpiral(saturn.center, inside, outside, turn, []);
+		expect(lifted.length === plain.length, "the ring lift does not add corners");
+		let worst = 0;
+		for (let i = 0; i < lifted.length; i++) {
+			worst = Math.max(worst, Vector3.Distance(lifted[i], plain[i]));
+		}
+		expect(worst < ring.halfHeight * 3, `a Saturn climb lifts by about one thickness (${worst.toFixed(2)})`);
+		expect(Vector3.Distance(lifted[0], inside) < 1e-4, "the lift leaves the dock where it was");
+	}
+	for (const other of ["earth", "titan"]) {
+		for (const [fromId, toId] of [
+			["saturn", other],
+			[other, "saturn"],
+		] as const) {
+			const plan = planJourney(layout, fromId, toId);
+			const flown = [...plan.climb, ...plan.cruise.points];
+			for (let i = 1; i < flown.length; i++) {
+				expect(!segmentHitsRing(flown[i - 1], flown[i], ring), `${fromId} to ${toId} misses Saturn's rings`);
+			}
+		}
 	}
 }
 

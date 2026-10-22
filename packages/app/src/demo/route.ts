@@ -59,8 +59,13 @@ export const MAX_DETOUR = 0.15;
 export const MAX_TURN = (75 * Math.PI) / 180;
 
 const ARC_STEP = (3 * Math.PI) / 180;
-/** Height of the climb out of a ring's gap, as a share of the ring's outer radius. */
-const RING_CLIMB = 0.5;
+/**
+ * About a third of a radian per second. A handoff at this rate still reads as one turn from the cockpit.
+ * `HANDOFF_SPEED` matches the climb's exit in journey.ts, and `BURN_SPEED` the fast-burn pace.
+ */
+export const MAX_YAW = Math.PI / 9;
+const HANDOFF_SPEED = 3;
+const BURN_SPEED = 14;
 
 type Circle = { center: Vector3; radius: number; turn: number };
 
@@ -122,9 +127,9 @@ export function pointAt(route: Route, distance: number): Vector3 {
 }
 
 /**
- * Unit direction of travel, `distance` along the course. Arcs are runs of short straight segments, so
- * the heading turns across each corner instead of snapping there: from halfway along the shorter
- * neighbor before the corner to halfway along it after. A long straight beside a corner only bends at its end.
+ * Unit tangent of the course, `distance` along it. A fillet is a run of short segments, so the tangent
+ * turns across each corner instead of snapping: halfway along the shorter neighbor before the corner
+ * to halfway along it after. Fillets keep those corners small, so this blend is the tangent of the arc.
  */
 export function headingAt(route: Route, distance: number): Vector3 {
 	const index = segmentAt(route, distance);
@@ -251,13 +256,7 @@ function buildCourse(input: RouteInput, assists: AssistCandidate[], startTurn: n
 	}
 	for (let i = 0; i < tangents.length; i++) {
 		const { leave, arrive } = tangents[i];
-		const climb = climbOutOfRings(leave, arrive, input.rings);
-		const descend = climbOutOfRings(arrive, leave, input.rings);
-		const leg = [
-			leave,
-			...routeAroundBodies(climb ?? leave, descend ?? arrive, input.spheres, input.rings),
-			arrive,
-		];
+		const leg = [leave, ...routeAroundBodies(leave, arrive, input.spheres, input.rings), arrive];
 		for (const point of leg) {
 			push(point, "burn");
 		}
@@ -314,27 +313,6 @@ function tangentBetween(a: Circle, b: Circle): { leave: Vector3; arrive: Vector3
 			leave: new Vector3(a.center.x - a.turn * a.radius * nx, a.center.y, a.center.z - a.turn * a.radius * nz),
 			arrive: new Vector3(b.center.x - b.turn * b.radius * nx, b.center.y, b.center.z - b.turn * b.radius * nz),
 		};
-	}
-	return null;
-}
-
-/**
- * A point inside a ring's gap (Saturn's bases sit there) cannot leave along the planets' plane, because
- * that plane cuts the tilted ring. This is the point straight up the ring's axis, on the side the leg
- * is heading, high enough that the rest of the leg stays clear of the ring.
- */
-function climbOutOfRings(point: Vector3, toward: Vector3, rings: RingBody[]): Vector3 | null {
-	for (const ring of rings) {
-		const normal = ring.normal.normalize();
-		const offset = point.subtract(ring.center);
-		const height = Vector3.Dot(offset, normal);
-		const radial = offset.subtract(normal.scale(height)).length();
-		const lift = ring.outer * RING_CLIMB;
-		if (radial >= ring.inner || Math.abs(height) >= lift) {
-			continue;
-		}
-		const side = Math.sign(Vector3.Dot(toward.subtract(ring.center), normal)) || 1;
-		return point.add(normal.scale(side * lift - height));
 	}
 	return null;
 }
@@ -416,8 +394,8 @@ function ease(u: number): number {
 	return u * u * (3 - 2 * u);
 }
 
-/** How far off a ring's plane a crossing must pass, as a multiple of the ring's thickness. */
-const RING_CLEARANCE = 2.4;
+/** One ring thickness off the plane: two half-heights. The burn, the climb, and the drop share this. */
+const RING_CLEARANCE = 2;
 /** How far outside a ring's edge the climb starts to rise, in world units. */
 const RING_FADE = 3;
 
@@ -478,13 +456,34 @@ function softMax(a: number, b: number, soft: number): number {
 	return 0.5 * (a + b + Math.sqrt((a - b) * (a - b) + soft * soft));
 }
 
-/**
- * Radius of a fillet flown at climb speed. A ship turning on this radius yaws about a quarter turn
- * a second, which is as sharp as a handoff should look from the cockpit.
- */
-const GENTLE_RADIUS = 2;
 /** A heading gap smaller than this is already a smooth join. */
 const GENTLE_GAP = (5 * Math.PI) / 180;
+
+/**
+ * Fillet radius at `speed` that yaws at `MAX_YAW`, shrunk so the turn fits in `zone`.
+ * A small moon's zone is a fraction of a world unit, so the radius shrinks with it.
+ */
+export function turnRadius(speed: number, zone: number): number {
+	const fromSpeed = Math.max(speed, 0.05) / MAX_YAW;
+	const fit = Math.max(zone * 0.35, 0.02);
+	return Math.min(fromSpeed, fit);
+}
+
+/** Radial span of a climb, or the chord when the path is not around `center`. */
+function zoneSpan(points: Vector3[], center?: Vector3): number {
+	if (points.length < 2) {
+		return 1;
+	}
+	if (center) {
+		const inner = Math.hypot(points[0].x - center.x, points[0].z - center.z);
+		const outer = Math.hypot(points[points.length - 1].x - center.x, points[points.length - 1].z - center.z);
+		const span = Math.abs(outer - inner);
+		if (span > 0.05) {
+			return span;
+		}
+	}
+	return Math.max(0.05, Vector3.Distance(points[0], points[points.length - 1]));
+}
 
 /** Unit tangent of the orbit through `point`. `turn` +1 is counterclockwise seen from above. */
 export function tangentHeading(center: Vector3, point: Vector3, turn: number): Vector3 {
@@ -530,9 +529,10 @@ export function curveClimbStart(
 		}
 	}
 	const total = polylineLength(points);
+	const radius = turnRadius(HANDOFF_SPEED, zoneSpan(points, center));
 	for (const scale of [1, 1.7, 2.6, 0.6]) {
 		for (const flip of [false, true]) {
-			const reach = Math.min(total * 0.7, Math.max(GENTLE_RADIUS * gap, 2) * scale);
+			const reach = Math.min(total * 0.7, radius * Math.max(gap, 0.35) * scale);
 			const curved = replacePrefix(points, aimed, reach, scale, flip);
 			if (curved && !polylineHits(curved, spheres, rings)) {
 				return curved;
@@ -552,7 +552,8 @@ export function curveClimbJoin(
 	climb: Vector3[],
 	route: Route,
 	spheres: SphereBody[],
-	rings: RingBody[]
+	rings: RingBody[],
+	center?: Vector3
 ): { climb: Vector3[]; route: Route } {
 	if (climb.length < 2 || route.points.length < 2 || route.total < 0.5) {
 		return { climb, route };
@@ -563,10 +564,11 @@ export function curveClimbJoin(
 	}
 	const burnHeading = burnStep.normalize();
 	const climbLen = polylineLength(climb);
-	const reach = Math.min(climbLen * 0.45, Math.max(GENTLE_RADIUS * 2, 3));
+	const radius = turnRadius(HANDOFF_SPEED, zoneSpan(climb, center));
+	const reach = Math.min(climbLen * 0.45, Math.max(radius * 2, radius));
 	const leave = pointBeforeEnd(climb, Math.min(reach, climbLen * 0.7));
 	let nextClimb = climb;
-	if (leave && Vector3.DistanceSquared(leave.point, route.points[0]) > 0.04) {
+	if (leave && Vector3.DistanceSquared(leave.point, route.points[0]) > 1e-4) {
 		const gap = Math.acos(clampUnit(Vector3.Dot(leave.heading, burnHeading)));
 		if (gap >= GENTLE_GAP) {
 			for (const scale of [1, 1.7, 2.6, 0.6]) {
@@ -597,12 +599,12 @@ function dropSlivers(points: Vector3[]): Vector3[] {
 	}
 	const kept = [points[0]];
 	for (let i = 1; i < points.length - 1; i++) {
-		if (Vector3.Distance(points[i], kept[kept.length - 1]) >= 0.02) {
+		if (Vector3.Distance(points[i], kept[kept.length - 1]) >= 0.002) {
 			kept.push(points[i]);
 		}
 	}
 	const last = points[points.length - 1];
-	if (Vector3.Distance(last, kept[kept.length - 1]) < 0.02) {
+	if (Vector3.Distance(last, kept[kept.length - 1]) < 0.002) {
 		kept[kept.length - 1] = last;
 	} else {
 		kept.push(last);
@@ -631,17 +633,17 @@ function dropRouteSlivers(points: Vector3[], kinds: RouteKind[]): { points: Vect
 	return { points: keptPoints, kinds: keptKinds };
 }
 
-/** Rounds sharp corners in the first stretch of a burn, leaving its first point on the outer orbit. */
+/** Rounds sharp burn corners, leaving assist arcs on their flyby circle and the first point on the outer orbit. */
 function filletCruisePrefix(route: Route, spheres: SphereBody[], rings: RingBody[]): Route {
 	let points = route.points.map((point) => point.clone());
 	let kinds = route.kinds.slice();
-	for (let guard = 0; guard < 6; guard++) {
-		const cumulative = [0];
-		for (let i = 1; i < points.length; i++) {
-			cumulative.push(cumulative[i - 1] + Vector3.Distance(points[i - 1], points[i]));
-		}
+	const ideal = turnRadius(BURN_SPEED, Math.max(zoneSpan(points), 1));
+	for (let guard = 0; guard < 24; guard++) {
 		let changed = false;
-		for (let i = 1; i < points.length - 1 && cumulative[i] < 8; i++) {
+		for (let i = 1; i < points.length - 1; i++) {
+			if (kinds[i - 1] === "assist" || kinds[i] === "assist") {
+				continue;
+			}
 			const incoming = points[i].subtract(points[i - 1]);
 			const outgoing = points[i + 1].subtract(points[i]);
 			const inLen = incoming.length();
@@ -655,10 +657,10 @@ function filletCruisePrefix(route: Route, spheres: SphereBody[], rings: RingBody
 			if (gap < GENTLE_GAP || gap > Math.PI * 0.92) {
 				continue;
 			}
-			let radius = GENTLE_RADIUS;
+			let radius = ideal;
 			for (let attempt = 0; attempt < 5; attempt++) {
 				const trim = radius * Math.tan(gap / 2);
-				if (trim < 0.08 || trim > inLen * 0.45 || trim > outLen * 0.45) {
+				if (trim < 0.002 || trim > inLen * 0.45 || trim > outLen * 0.45) {
 					radius *= 0.55;
 					continue;
 				}
@@ -753,7 +755,8 @@ function openDeparture(
 	}
 	const turn = Math.sign(radial.x * first.z - radial.z * first.x) || 1;
 	const goal = points[points.length - 1];
-	for (const radius of [GENTLE_RADIUS, 3.2, 4.8, 7]) {
+	const base = turnRadius(HANDOFF_SPEED, zoneSpan(points, center));
+	for (const radius of [base, base * 0.65, base * 1.35]) {
 		const arc = turnOntoOrbit(center, points[0], heading, turn, radius);
 		if (!arc || arc.length < 2) {
 			continue;
@@ -832,7 +835,7 @@ function joinIsGentle(arc: Vector3[], spiral: Vector3[]): boolean {
 	}
 	const incoming = arc[arc.length - 1].subtract(arc[arc.length - 2]);
 	const outgoing = spiral[1].subtract(spiral[0]);
-	if (incoming.length() < 0.02 || outgoing.length() < 0.02) {
+	if (incoming.length() < 0.002 || outgoing.length() < 0.002) {
 		return false;
 	}
 	return Vector3.Dot(incoming.normalize(), outgoing.normalize()) > Math.cos((25 * Math.PI) / 180);
@@ -850,7 +853,11 @@ function replacePrefix(points: Vector3[], heading: Vector3, reach: number, scale
 	return dedupePoints([...curve, ...cut.rest]);
 }
 
-/** A curve that leaves `from` along `fromHeading` and arrives at `to`. `scale` widens the turn. */
+/**
+ * A curve that leaves `from` along `fromHeading` and arrives at `to` along `toHeading`.
+ * Both ends keep those tangents, so the join does not grow a kink when the curve is pulled onto `to`.
+ * `scale` widens the turn. `flip` tries the other handle balance when one bulge cuts a body.
+ */
 function headingCurve(
 	from: Vector3,
 	fromHeading: Vector3,
@@ -859,37 +866,46 @@ function headingCurve(
 	scale: number,
 	flip = false
 ): Vector3[] | null {
-	const chord = to.subtract(from);
-	const distance = chord.length();
+	const distance = to.subtract(from).length();
 	if (distance < 1e-4) {
 		return null;
 	}
 	const fromH = fromHeading.normalize();
 	const toH = toHeading.normalize();
-	const axis = turnAxis(fromH, toH, chord).scale(flip ? -1 : 1);
-	const gap = Math.atan2(Vector3.Dot(Vector3.Cross(fromH, toH), axis), Vector3.Dot(fromH, toH));
-	const steps = Math.max(8, Math.ceil(Math.abs(gap) / ARC_STEP));
-	const radius = Math.max(GENTLE_RADIUS, distance / Math.max(Math.abs(gap), 0.2)) * scale;
-	const stepLen = (Math.max(distance, radius * Math.abs(gap)) ) / steps;
-	const points: Vector3[] = [from.clone()];
-	let pos = from.clone();
-	for (let i = 1; i <= steps; i++) {
-		const heading = rotateAround(fromH, axis, gap * ((i - 0.5) / steps));
-		pos = pos.add(heading.scale(stepLen));
-		points.push(pos.clone());
+	const gap = Math.acos(clampUnit(Vector3.Dot(fromH, toH)));
+	const radius =
+		Math.max(turnRadius(HANDOFF_SPEED, Math.max(distance, 0.05)), distance / Math.max(gap, 0.2)) * Math.max(scale, 0.35);
+	const handle = Math.min(distance * 0.48, Math.max(distance * 0.18, radius * Math.tan(Math.min(gap, 1.2) / 2)));
+	const out = handle * (flip ? 0.65 : 1);
+	const inn = handle * (flip ? 1 : 0.65);
+	const p1 = from.add(fromH.scale(out));
+	const p2 = to.subtract(toH.scale(inn));
+	const steps = Math.max(8, Math.ceil(Math.max(gap, 0.25) / ARC_STEP));
+	const points: Vector3[] = [];
+	for (let i = 0; i <= steps; i++) {
+		points.push(bezierPoint(from, p1, p2, to, i / steps));
 	}
-	const error = to.subtract(points[points.length - 1]);
-	const last = points.length - 1;
-	for (let i = 1; i <= last; i++) {
-		const u = i / last;
-		const weight = u * u * (3 - 2 * u);
-		points[i] = points[i].add(error.scale(weight));
-	}
-	points[last] = to.clone();
-	if (!curveIsGentle(points)) {
+	if (!curveIsGentle(points) || !tangentMatches(points, fromH, toH)) {
 		return null;
 	}
 	return points;
+}
+
+/** Cubic Bezier. The first step lies along `p1 - p0` and the last along `p3 - p2`. */
+function bezierPoint(p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, t: number): Vector3 {
+	const u = 1 - t;
+	return p0.scale(u * u * u).add(p1.scale(3 * u * u * t)).add(p2.scale(3 * u * t * t)).add(p3.scale(t * t * t));
+}
+
+/** The curve actually leaves on `fromH` and arrives on `toH`. */
+function tangentMatches(points: Vector3[], fromH: Vector3, toH: Vector3): boolean {
+	const left = points[1].subtract(points[0]);
+	const arrived = points[points.length - 1].subtract(points[points.length - 2]);
+	if (left.lengthSquared() < 1e-10 || arrived.lengthSquared() < 1e-10) {
+		return false;
+	}
+	const limit = Math.cos(GENTLE_GAP);
+	return Vector3.Dot(left.normalize(), fromH) >= limit && Vector3.Dot(arrived.normalize(), toH) >= limit;
 }
 
 function curveIsGentle(points: Vector3[]): boolean {
@@ -897,7 +913,7 @@ function curveIsGentle(points: Vector3[]): boolean {
 	for (let i = 1; i < points.length; i++) {
 		const step = points[i].subtract(points[i - 1]);
 		const len = step.length();
-		if (len < 0.02) {
+		if (len < 0.002) {
 			return false;
 		}
 		const heading = step.scale(1 / len);
@@ -907,19 +923,6 @@ function curveIsGentle(points: Vector3[]): boolean {
 		previous = heading;
 	}
 	return true;
-}
-
-function turnAxis(fromH: Vector3, toH: Vector3, chord: Vector3): Vector3 {
-	const crossed = Vector3.Cross(fromH, toH);
-	if (crossed.lengthSquared() > 1e-8) {
-		return crossed.normalize();
-	}
-	const side = Vector3.Cross(fromH, chord);
-	if (side.lengthSquared() > 1e-8) {
-		return side.normalize();
-	}
-	const up = Math.abs(fromH.y) < 0.9 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0);
-	return Vector3.Cross(fromH, up).normalize();
 }
 
 function pointAlongPoints(

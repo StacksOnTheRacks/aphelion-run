@@ -19,7 +19,7 @@ import type { Scene } from "@babylonjs/core/scene";
 import type { RingBody } from "./camera-path";
 import { CHART_LAYER, PILOT_LAYER } from "./cockpit";
 import type { ShipModel } from "./ranger";
-import { headingAt, pointAt, type Route, type RouteKind } from "./route";
+import { MAX_YAW, headingAt, pointAt, type Route, type RouteKind } from "./route";
 
 /**
  * A ship flying a planned trip. Leaving a dock, it eases out to a hover, then climbs to the origin's
@@ -30,6 +30,10 @@ import { headingAt, pointAt, type Route, type RouteKind } from "./route";
  * whole-system view and from beside a planet alike. From the cockpit the burn is a run of chevrons
  * that fade with distance. The climb out to the outer orbit, and the drop in to dock, stay clear of
  * them. Nothing here moves the camera.
+ *
+ * The clock does not depend on the camera. Soft undock, the climb, the burn, the drop, and soft dock
+ * each last a fixed time, and the path is fixed when the trip starts. A server can sample the same
+ * schedule without a viewport.
  */
 
 /** World units a ship covers per second on a fast burn, on average. Neptune to the Sun takes about 80 seconds. */
@@ -43,6 +47,23 @@ export const CLIMB_PACE = 3;
 export const ORBIT_LEG_SECONDS = 7;
 /** Soft undock and soft dock: the ease between the coupled pose and a hover. */
 export const SOFT_DOCK_SECONDS = 3;
+/**
+ * How far a coupled ship sits above its dock, in world units. One hull. The hover is twice this,
+ * and both shrink when the gap out to the outer orbit is smaller than the hull.
+ */
+export const HULL_CLEARANCE = 0.04;
+
+/**
+ * World rise along the ecliptic normal. `coupled` is the docked pose and `hover` is the pose the
+ * climb leaves from. Neither grows with the camera, so a far chart cannot park the ship above a moon.
+ */
+export function poseRise(dockRadius: number, outerRadius: number, kind: "coupled" | "hover"): number {
+	const wanted = kind === "hover" ? HULL_CLEARANCE * 2 : HULL_CLEARANCE;
+	if (!(outerRadius > dockRadius)) {
+		return wanted;
+	}
+	return Math.min(wanted, (outerRadius - dockRadius) * 0.15);
+}
 /** The ship swings at least this far around the body on the way in, so it closes on its dock from behind. */
 export const APPROACH_MIN_SWEEP = 0.8;
 /** A hop between neighbours still lasts long enough to watch; the longest burns are capped. */
@@ -127,10 +148,160 @@ export function climbDistance(t: number, length: number, departSpeed: number): n
 	return legDistance(t, legProfile(climbDuration(length, departSpeed), length, departSpeed, CLIMB_PACE));
 }
 
-/** Speed at the end of a climb. The burn starts here, so the handoff does not jump. */
-function climbExitSpeed(length: number, departSpeed: number): number {
-	const seconds = climbDuration(length, departSpeed);
-	return legSpeed(seconds, legProfile(seconds, length, departSpeed, CLIMB_PACE));
+/**
+ * How far along a climb the ship is after `t` seconds, and the speed it exits at.
+ * Tight bends are flown no faster than `MAX_YAW`. Spare time is spent on the straighter parts,
+ * and the whole climb still lasts `ORBIT_LEG_SECONDS`.
+ */
+export function climbPace(
+	points: Vector3[],
+	departSpeed: number
+): { distance: (t: number) => number; endSpeed: number } {
+	const segments = yawCaps(points);
+	const total = segments.reduce((sum, segment) => sum + segment.length, 0);
+	const seconds = climbDuration(total, departSpeed);
+	if (seconds < 1e-6 || total < 1e-6) {
+		return { distance: () => 0, endSpeed: Math.max(0, departSpeed) };
+	}
+	const speedsFor = (scale: number, capFactor: number) => {
+		let covered = 0;
+		return segments.map((segment) => {
+			const mid = covered + segment.length * 0.5;
+			covered += segment.length;
+			const profile = legProfile(seconds, total, departSpeed, CLIMB_PACE);
+			const wanted = legSpeed((mid / total) * seconds, profile) * scale;
+			const cap = segment.cap * capFactor;
+			return Math.min(cap, Math.max(wanted, 0.02 * capFactor));
+		});
+	};
+	const duration = (speeds: number[]) =>
+		segments.reduce((sum, segment, index) => sum + segment.length / Math.max(speeds[index], 1e-4), 0);
+	let lo = 0;
+	let hi = 1;
+	let capFactor = 1;
+	if (duration(speedsFor(hi, 1)) > seconds) {
+		while (hi < 64 && duration(speedsFor(hi, 1)) > seconds) {
+			lo = hi;
+			hi *= 2;
+		}
+		if (duration(speedsFor(hi, 1)) > seconds) {
+			capFactor = duration(speedsFor(1e6, 1)) / seconds;
+			hi = 1e6;
+			lo = 1e6;
+		}
+	}
+	for (let attempt = 0; attempt < 28; attempt++) {
+		const mid = (lo + hi) / 2;
+		if (duration(speedsFor(mid, capFactor)) > seconds) {
+			lo = mid;
+		} else {
+			hi = mid;
+		}
+	}
+	const speeds = speedsFor(hi, capFactor);
+	const endSpeed = speeds.length > 0 ? speeds[speeds.length - 1] : departSpeed;
+	return {
+		endSpeed,
+		distance(t: number) {
+			const elapsed = Math.min(Math.max(0, t), seconds);
+			let left = elapsed;
+			let covered = 0;
+			for (let index = 0; index < segments.length; index++) {
+				const speed = Math.max(speeds[index], 1e-4);
+				const span = segments[index].length / speed;
+				if (left <= span) {
+					return Math.min(total, covered + speed * left);
+				}
+				left -= span;
+				covered += segments[index].length;
+			}
+			return total;
+		},
+	};
+}
+
+/** Fastest speed on each segment that keeps the heading blend inside `MAX_YAW`. */
+function yawCaps(points: Vector3[]): { length: number; cap: number }[] {
+	const steps: { length: number; dir: Vector3 }[] = [];
+	for (let i = 1; i < points.length; i++) {
+		const delta = points[i].subtract(points[i - 1]);
+		const length = delta.length();
+		steps.push({ length, dir: length < 1e-8 ? new Vector3(0, 0, 1) : delta.scale(1 / length) });
+	}
+	return steps.map((step, index) => {
+		let cap = Infinity;
+		const consider = (other: number) => {
+			const angle = Math.acos(Math.min(1, Math.max(-1, Vector3.Dot(step.dir, steps[other].dir))));
+			if (angle < 1e-4) {
+				return;
+			}
+			const blend = Math.min(step.length, steps[other].length);
+			cap = Math.min(cap, (MAX_YAW * Math.max(blend, 1e-4)) / angle);
+		};
+		if (index > 0) {
+			consider(index - 1);
+		}
+		if (index + 1 < steps.length) {
+			consider(index + 1);
+		}
+		return { length: step.length, cap };
+	});
+}
+
+/** How long each part of a trip lasts. The sum is the clock a server and the client both sample. */
+export type FlightSchedule = {
+	undockSeconds: number;
+	climbSeconds: number;
+	cruiseSeconds: number;
+	dropSeconds: number;
+	dockSeconds: number;
+	total: number;
+};
+
+/**
+ * Phase lengths for a trip. Soft undock and soft dock are three seconds when the ship is coupled.
+ * The climb and the drop are seven seconds when they have somewhere to go. The burn is
+ * `journeySeconds` of the smoothed cruise.
+ */
+export function flightSchedule(
+	coupled: boolean,
+	climbLength: number,
+	departSpeed: number,
+	cruiseLength: number,
+	docks: boolean
+): FlightSchedule {
+	const undockSeconds = coupled ? SOFT_DOCK_SECONDS : 0;
+	const climbSeconds = climbDuration(climbLength, departSpeed);
+	const cruiseSeconds = journeySeconds(cruiseLength);
+	const dropSeconds = docks ? ORBIT_LEG_SECONDS : 0;
+	const dockSeconds = docks ? SOFT_DOCK_SECONDS : 0;
+	return {
+		undockSeconds,
+		climbSeconds,
+		cruiseSeconds,
+		dropSeconds,
+		dockSeconds,
+		total: undockSeconds + climbSeconds + cruiseSeconds + dropSeconds + dockSeconds,
+	};
+}
+
+/**
+ * Where the ship is on the climb and the burn, `elapsed` seconds after the climb starts.
+ * The same inputs always return the same pose. The drop is planned separately, at arrival.
+ */
+export function legPose(plan: JourneyPlan, elapsed: number): { point: Vector3; heading: Vector3 } {
+	const pace = climbPace(plan.climb, plan.departSpeed);
+	const climbLength = polylineLength(plan.climb);
+	const climbSeconds = climbDuration(climbLength, plan.departSpeed);
+	const cruiseSeconds = journeySeconds(plan.cruise.total);
+	const distance =
+		elapsed <= climbSeconds
+			? pace.distance(elapsed)
+			: climbLength +
+				cruiseDistance(Math.max(0, elapsed - climbSeconds), plan.cruise.total, cruiseSeconds, pace.endSpeed);
+	const path = stitch(plan);
+	const along = Math.min(Math.max(0, distance), path.total);
+	return { point: pointAt(path, along), heading: headingAt(path, along) };
 }
 
 /**
@@ -168,7 +339,7 @@ export type Dock = {
 export type HarborRing = Omit<RingBody, "center">;
 
 /** What a ship can dock with at one body, and the ring it must not cut through on the way in. */
-export type Harbor = { docks: Dock[]; ring?: HarborRing };
+export type Harbor = { docks: Dock[]; ring?: HarborRing; /** Outer-orbit radius. The dock rise is capped against this. */ outer?: number };
 
 /**
  * The drop from the outer orbit to one dock. It is laid out around the dock as it moves: the angle
@@ -193,12 +364,8 @@ export type Approach = {
 	warp?: { times: number[]; params: number[] };
 };
 
-/** A docked ship sits this far above its dock on screen, in CSS pixels, so the dock stays in sight. */
-const DOCK_RISE_PIXELS = 6;
-/** A hovering ship sits this far above its dock. Soft dock eases between this and the coupled rise. */
-const HOVER_RISE_PIXELS = 28;
-/** How far off the ring plane the ship passes, as a multiple of the ring's half height. */
-const RING_LIFT = 2.4;
+/** One ring thickness off the plane, matching the climb and the burn. */
+const RING_LIFT = 2;
 /** How far outside the ring's edge the ship starts to lift, in world units. */
 const RING_LIFT_MARGIN = 3;
 /** Line width on screen, in CSS pixels. */
@@ -302,7 +469,7 @@ export type Journey = {
 	docked: () => { id: string; position: Vector3; turn: number; rate: number; dock?: Dock } | null;
 	/** Where the ship is and which way it is heading, while a trip is under way or docked. */
 	ship: () => { position: Vector3; heading: Vector3 } | null;
-	/** The line being flown and how far along it the ship is, from 0 to 1. Null once the burn has ended. */
+	/** The line being flown and how far along the whole clock the ship is, from 0 to 1. Null once docked. */
 	course: () => { points: readonly Vector3[]; progress: number } | null;
 	/** Shows course chevrons on the windscreen while a burn is underway. */
 	setPiloting: (on: boolean) => void;
@@ -320,8 +487,13 @@ type Flight = {
 	handoff: number;
 	departDock?: Dock;
 	departBody?: string;
+	schedule: FlightSchedule;
+	/** Seconds since the trip started, across undock, climb, burn, drop, and soft dock. */
+	clock: number;
 	elapsed: number;
 	phase: "undock" | "transit" | "approach" | "soft-dock" | "docked";
+	/** Distance along the climb after `t` seconds. The burn's handoff is this pace's exit speed. */
+	alongClimb: (t: number) => number;
 	/** Null when the body has nothing to dock with: the ship stays where it arrived. */
 	approach: Approach | null;
 	/** Seconds since the ship reached the outer orbit. */
@@ -337,7 +509,7 @@ type Flight = {
 
 export function createJourney(
 	scene: Scene,
-	camera: Camera,
+	_camera: Camera,
 	glow: GlowLayer,
 	harborOf: (id: string) => Harbor,
 	ship: ShipModel
@@ -376,11 +548,6 @@ export function createJourney(
 		flight = null;
 	};
 
-	const worldPerPixel = (position: Vector3) => {
-		const cssHeight = engine.getRenderHeight() / pixelRatio();
-		return (2 * Vector3.Distance(camera.globalPosition, position) * Math.tan(camera.fov / 2)) / cssHeight;
-	};
-
 	const placeShip = (position: Vector3, heading: Vector3, deltaSeconds: number) => {
 		if (!flight) {
 			return;
@@ -390,11 +557,19 @@ export function createJourney(
 		ship.place(position, heading, deltaSeconds);
 	};
 
-	/** The dock, lifted by `pixels` on screen. Relative to the body, as `approachPoint` expects. */
-	const raisedDock = (dock: Dock, center: Vector3, pixels: number) => {
+	/** The dock, lifted by a world clearance. Relative to the body, as `approachPoint` expects. */
+	const raisedDock = (dock: Dock, outer: number, kind: "coupled" | "hover") => {
 		const relative = dock.position();
-		relative.y += pixels * worldPerPixel(center.add(relative));
+		relative.y += poseRise(Math.hypot(relative.x, relative.z), outer, kind);
 		return relative;
+	};
+
+	/** Coupled at `share` 0, hover at `share` 1. Soft dock eases the other way. */
+	const easedRise = (dock: Dock, outer: number, share: number) => {
+		const radius = Math.hypot(dock.position().x, dock.position().z);
+		const coupled = poseRise(radius, outer, "coupled");
+		const hover = poseRise(radius, outer, "hover");
+		return coupled + (hover - coupled) * smoothstep(0, 1, Math.min(1, Math.max(0, share)));
 	};
 
 	const orbitHeading = (relative: Vector3, rate: number) => {
@@ -403,36 +578,13 @@ export function createJourney(
 		return new Vector3(-Math.sin(angle) * turn, 0, Math.cos(angle) * turn);
 	};
 
-	const placeCoupled = (current: Flight, center: Vector3, dock: Dock, pixels: number, deltaSeconds: number) => {
-		const relative = raisedDock(dock, center, pixels);
+	const placeCoupled = (current: Flight, center: Vector3, dock: Dock, rise: number, deltaSeconds: number) => {
+		const relative = dock.position();
+		relative.y += rise;
 		const heading = orbitHeading(relative, dock.rate);
 		current.heading = heading;
 		current.last = relative;
 		placeShip(center.add(relative), heading, deltaSeconds);
-	};
-
-	/** The climb was planned from where the dock was. Slide its start onto the hover, and leave the burn put. */
-	const anchorClimb = (current: Flight, center: Vector3) => {
-		const dock = current.departDock;
-		const climb = current.plan.climb;
-		if (!dock || climb.length === 0) {
-			return;
-		}
-		const delta = center.add(raisedDock(dock, center, HOVER_RISE_PIXELS)).subtract(climb[0]);
-		const last = climb.length - 1;
-		for (let i = 0; i < last; i++) {
-			climb[i].addInPlace(delta.scale(1 - i / last));
-		}
-		if (last === 0) {
-			climb[0].addInPlace(delta);
-		}
-		current.climbLength = polylineLength(climb);
-		current.climbSeconds = climbDuration(current.climbLength, current.departSpeed);
-		current.handoff = climbExitSpeed(current.climbLength, current.departSpeed);
-		current.ahead.dispose(false, true);
-		current.path = stitch(current.plan);
-		current.ahead = buildAhead(scene, current.path, pixelRatio());
-		glow.addExcludedMesh(current.ahead);
 	};
 
 	const arrive = (current: Flight, center: Vector3) => {
@@ -468,16 +620,13 @@ export function createJourney(
 		if (current.phase === "approach" || current.phase === "soft-dock") {
 			current.since += deltaSeconds;
 		}
+		const outer = harborOf(current.plan.arrive.id).outer ?? 0;
 		if (current.phase === "soft-dock" || current.phase === "docked") {
-			const pixels =
-				current.phase === "docked"
-					? DOCK_RISE_PIXELS
-					: HOVER_RISE_PIXELS +
-						(DOCK_RISE_PIXELS - HOVER_RISE_PIXELS) * smoothstep(0, 1, current.since / SOFT_DOCK_SECONDS);
-			placeCoupled(current, center, approach.dock, pixels, deltaSeconds);
+			const rise = easedRise(approach.dock, outer, 1 - current.since / SOFT_DOCK_SECONDS);
+			placeCoupled(current, center, approach.dock, rise, deltaSeconds);
 			return;
 		}
-		const dock = raisedDock(approach.dock, center, HOVER_RISE_PIXELS);
+		const dock = raisedDock(approach.dock, outer, "hover");
 		const relative = approachPoint(approach, current.since, dock);
 		const step = relative.subtract(current.last);
 		if (step.lengthSquared() > 1e-12) {
@@ -494,7 +643,9 @@ export function createJourney(
 			const ahead = buildAhead(scene, path, pixelRatio());
 			glow.addExcludedMesh(ahead);
 			const climbLength = polylineLength(plan.climb);
+			const pace = climbPace(plan.climb, plan.departSpeed);
 			const coupled = plan.departDock != null && plan.departBody != null;
+			const docks = harborOf(plan.arrive.id).docks.length > 0 || plan.arrive.dock != null;
 			flight = {
 				plan,
 				path,
@@ -503,9 +654,12 @@ export function createJourney(
 				cruiseLength: plan.cruise.total,
 				cruiseSeconds: journeySeconds(plan.cruise.total),
 				departSpeed: plan.departSpeed,
-				handoff: climbExitSpeed(climbLength, plan.departSpeed),
+				handoff: pace.endSpeed,
+				alongClimb: pace.distance,
 				departDock: plan.departDock,
 				departBody: plan.departBody,
+				schedule: flightSchedule(coupled, climbLength, plan.departSpeed, plan.cruise.total, docks),
+				clock: 0,
 				elapsed: 0,
 				phase: coupled ? "undock" : "transit",
 				approach: null,
@@ -516,8 +670,11 @@ export function createJourney(
 				onDone,
 				ahead,
 			};
-			const position = pointAt(path, 0);
-			placeShip(position, headingAt(path, 0), 0);
+			// A coupled ship stays on its dock until the first update. The climb already starts at the hover.
+			if (!coupled) {
+				const position = pointAt(path, 0);
+				placeShip(position, headingAt(path, 0), 0);
+			}
 		},
 		stop: clear,
 		docked() {
@@ -536,34 +693,34 @@ export function createJourney(
 			return flight ? { position: ship.position.clone(), heading: flight.heading.clone() } : null;
 		},
 		course() {
-			if (!flight || (flight.phase !== "transit" && flight.phase !== "undock")) {
+			if (!flight || flight.phase === "docked") {
 				return null;
 			}
-			const progress =
-				flight.phase === "undock" ? 0 : Math.min(1, distanceAt(flight) / Math.max(flight.path.total, 1e-6));
-			return { points: flight.path.points, progress };
+			const total = Math.max(flight.schedule.total, 1e-6);
+			return { points: flight.path.points, progress: Math.min(1, flight.clock / total) };
 		},
 		update(deltaSeconds, centerOf) {
 			if (!flight) {
 				return;
 			}
+			flight.clock += deltaSeconds;
 			const departDock = flight.departDock;
 			const departBody = flight.departBody;
+			let joinedBurn = false;
 			if (flight.phase === "undock" && departDock && departBody) {
 				const current = flight;
 				current.since += deltaSeconds;
 				const center = centerOf(departBody);
-				const rise =
-					DOCK_RISE_PIXELS +
-					(HOVER_RISE_PIXELS - DOCK_RISE_PIXELS) * smoothstep(0, 1, current.since / SOFT_DOCK_SECONDS);
+				const outer = harborOf(departBody).outer ?? 0;
+				const rise = easedRise(departDock, outer, current.since / SOFT_DOCK_SECONDS);
 				placeCoupled(current, center, departDock, rise, deltaSeconds);
-				if (current.since >= SOFT_DOCK_SECONDS) {
-					anchorClimb(current, center);
-					current.phase = "transit";
-					current.elapsed = 0;
-					current.since = 0;
+				if (current.since < SOFT_DOCK_SECONDS) {
+					return;
 				}
-				return;
+				joinedBurn = true;
+				current.phase = "transit";
+				current.elapsed = current.since - SOFT_DOCK_SECONDS;
+				current.since = 0;
 			}
 			if (flight.phase !== "transit") {
 				hideChevrons();
@@ -580,7 +737,9 @@ export function createJourney(
 				return;
 			}
 
-			flight.elapsed += deltaSeconds;
+			if (!joinedBurn) {
+				flight.elapsed += deltaSeconds;
+			}
 			const distance = distanceAt(flight);
 			if (flight.elapsed >= flight.climbSeconds + flight.cruiseSeconds) {
 				const current = flight;
@@ -621,7 +780,7 @@ export function createJourney(
 
 function distanceAt(flight: Flight): number {
 	if (flight.elapsed <= flight.climbSeconds) {
-		return climbDistance(flight.elapsed, flight.climbLength, flight.departSpeed);
+		return flight.alongClimb(flight.elapsed);
 	}
 	return (
 		flight.climbLength +
@@ -894,6 +1053,13 @@ function yawAround(point: Vector3, angle: number): Vector3 {
 	const cos = Math.cos(angle);
 	const sin = Math.sin(angle);
 	return new Vector3(point.x * cos - point.z * sin, point.y, point.x * sin + point.z * cos);
+}
+
+/** Hover pose, relative to the body, `SOFT_DOCK_SECONDS` after `dock` where it is now. The climb starts here. */
+export function hoverDeparture(dock: Dock, outer: number): Vector3 {
+	const later = yawAround(dock.position(), dock.rate * SOFT_DOCK_SECONDS);
+	later.y += poseRise(Math.hypot(later.x, later.z), outer, "hover");
+	return later;
 }
 
 /**
