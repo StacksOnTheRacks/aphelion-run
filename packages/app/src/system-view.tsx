@@ -17,7 +17,7 @@ import {
 	type ScanTarget,
 } from "./demo/scan";
 import { Dashboard } from "./dashboard";
-import { Hud, useHudAnchors } from "./hud";
+import { Housing, Hud, useHudAnchors } from "./hud";
 import { PILOT_VIEWPORT } from "./pilot-viewport";
 import { ScanModal } from "./scan-card";
 import { SpaceLabels, type LabelItem } from "./space-labels";
@@ -40,7 +40,7 @@ const STEP_TITLE: Record<string, string> = {
  * no picks.
  *
  * The HUD reads the place, the warehouse, and the ranger. Pilot enters the cockpit on a desktop or a
- * large tablet. The ship list then leaves. The round control becomes the exterior view, and Exit sits to its left. A phone stays on the
+ * large tablet. The ship list then leaves. The chamfered control becomes the exterior view, and Exit sits to its left. A phone stays on the
  * chart, and shrinking the window below that leaves the cockpit. Locate opens the ship's orbit.
  * Recall cancels a countdown or stops a burn.
  * The lower right, on a chart, is one step back: System from a planet or the Sun, Planet from a moon
@@ -256,8 +256,9 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 							onClick={togglePilot}
 							aria-label="Exit to the chart"
 							title="Back to the chart"
-							className="pointer-events-auto flex size-14 items-center justify-center rounded-full border border-[#6b4f00] bg-[rgba(17,13,0,0.6)] text-xs font-semibold text-[#ffd73d] backdrop-blur-[12px] hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none lg:border-[#6b5500] lg:bg-[rgba(15,18,0,0.8)]"
+							className="pointer-events-auto relative isolate flex size-14 items-center justify-center text-[12px] font-bold tracking-[1px] text-[#ffd73d] uppercase hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none"
 						>
+							<Housing cut={{ tl: 10, tr: 10, bl: 10, br: 10 }} />
 							Exit
 						</button>
 					) : null
@@ -269,13 +270,10 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 							onClick={() => setViewpoint(viewpoint === "interior" ? "exterior" : "interior")}
 							aria-label={viewpoint === "interior" ? "Switch to exterior view" : "Switch to interior view"}
 							title={viewpoint === "interior" ? "Outside the ship" : "Back in the cockpit"}
-							className="pointer-events-auto flex size-[88px] flex-col items-center justify-center gap-1.5 rounded-full border border-[#6b4f00] bg-[rgba(17,13,0,0.6)] text-xs font-semibold text-[#ffd73d] backdrop-blur-[12px] hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none lg:size-24 lg:border-[#6b5500] lg:bg-[rgba(15,18,0,0.8)] lg:text-sm"
+							className="pointer-events-auto relative isolate flex size-24 flex-col items-center justify-center gap-2 text-sm font-semibold text-[#ffd73d] hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none"
 						>
-							<svg viewBox="0 0 20 20" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-								<circle cx="10" cy="10" r="3" />
-								<path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2" strokeLinecap="round" />
-								<circle cx="10" cy="10" r="6.5" />
-							</svg>
+							<Housing cut={{ tl: 10, tr: 10, bl: 10, br: 10 }} />
+							<img src="/hud/crosshair.svg" alt="" width={20} height={20} />
 							{viewpoint === "interior" ? "Exterior" : "Interior"}
 						</button>
 					) : null

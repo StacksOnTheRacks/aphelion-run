@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { Inter } from "next/font/google";
 
 import type { EnvironmentDemo } from "./demo/environment";
 import { LOCAL_REACH, bearing, bodyLabel, localBody, localPoint, systemPoint, type NavBody, type NavFix } from "./demo/nav";
+import { Housing } from "./hud";
+
+const inter = Inter({ subsets: ["latin"], weight: ["400", "600", "700"] });
 
 const AMBER = "#FCD34D";
 const BONE = "#E8E4D9";
@@ -18,7 +22,8 @@ type Readout = { place: string | null; bearing: string; progress: number | null 
 /**
  * The console under the windscreen: the whole system on the left, the body the ship is at on the right,
  * and the readouts between them. `course` names where the ship is bound. The ship list is gone in the
- * cockpit, so the console is centered on the screen and sits on the bottom edge.
+ * cockpit, so the console is centered on the screen and sits on the bottom edge. Below 900px it shifts
+ * left so it stays clear of Exit and the exterior control.
  */
 export function Dashboard({ system, course }: { system: EnvironmentDemo; course: string | null }) {
 	const systemRef = useRef<HTMLCanvasElement>(null);
@@ -51,21 +56,12 @@ export function Dashboard({ system, course }: { system: EnvironmentDemo; course:
 	return (
 		<section
 			aria-label="Navigation"
-			className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center"
+			className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center max-[900px]:-translate-x-20 ${inter.className}`}
 		>
-			<div
-				className="relative flex items-stretch gap-4 rounded-sm border border-amber-300/20 bg-[#05070c]/75 px-4 py-3 shadow-[0_0_24px_rgba(252,211,77,0.08)] backdrop-blur-sm"
-				style={{
-					backgroundImage: "repeating-linear-gradient(0deg, rgba(232,228,217,0.035) 0 1px, transparent 1px 3px)",
-				}}
-			>
-				{["top-0 left-0 border-t border-l", "top-0 right-0 border-t border-r", "bottom-0 left-0 border-b border-l", "bottom-0 right-0 border-b border-r"].map(
-					(corner) => (
-						<span key={corner} aria-hidden className={`absolute h-3 w-3 border-amber-300 ${corner}`} />
-					)
-				)}
+			<div className="relative isolate flex items-center gap-4 px-4 py-3">
+				<Housing cut={{ tl: 14, tr: 14 }} />
 				<MapPane label="Sol" canvasRef={systemRef} />
-				<dl className="hidden w-40 flex-col justify-center gap-2.5 font-mono text-[10px] tracking-[0.2em] uppercase sm:flex">
+				<dl className="flex w-40 flex-col justify-center gap-2.5 text-[10px] tracking-[1.6px] uppercase">
 					<Reading term="Local" value={readout.place ? `${readout.place} orbit` : "Open space"} />
 					<Reading term="Bearing" value={readout.bearing} />
 					<Reading term="Course" value={course ?? "Holding"} />
@@ -75,7 +71,7 @@ export function Dashboard({ system, course }: { system: EnvironmentDemo; course:
 							<span>{readout.progress === null ? "—" : `${readout.progress}%`}</span>
 						</dt>
 						<dd className="mt-1.5 h-1 w-full overflow-hidden bg-[#E8E4D9]/10">
-							<div className="h-full bg-amber-300" style={{ width: `${readout.progress ?? 0}%` }} />
+							<div className="h-full bg-[#ffd73d]" style={{ width: `${readout.progress ?? 0}%` }} />
 						</dd>
 					</div>
 				</dl>
@@ -87,9 +83,14 @@ export function Dashboard({ system, course }: { system: EnvironmentDemo; course:
 
 function MapPane({ label, canvasRef }: { label: string; canvasRef: RefObject<HTMLCanvasElement> }) {
 	return (
-		<div className="relative" style={{ width: MAP_SIZE, height: MAP_SIZE }}>
+		<div
+			className="relative shrink-0 overflow-hidden rounded-full border border-[rgba(252,211,77,0.45)] bg-[#050a12]"
+			style={{ width: MAP_SIZE, height: MAP_SIZE }}
+		>
 			<canvas ref={canvasRef} aria-hidden width={MAP_SIZE} height={MAP_SIZE} className="h-full w-full" />
-			<span className="absolute top-0 left-0 font-mono text-[9px] tracking-[0.22em] text-amber-300/80 uppercase">{label}</span>
+			<span className="absolute inset-x-0 bottom-[19px] text-center text-[10px] font-semibold tracking-[1.6px] text-[#fcd34d] uppercase">
+				{label}
+			</span>
 		</div>
 	);
 }
@@ -98,7 +99,7 @@ function Reading({ term, value }: { term: string; value: string }) {
 	return (
 		<div>
 			<dt className="text-[#E8E4D9]/45">{term}</dt>
-			<dd className="mt-0.5 truncate text-amber-300">{value}</dd>
+			<dd className="mt-0.5 truncate text-[#e8e4d9]">{value}</dd>
 		</div>
 	);
 }
