@@ -34,10 +34,10 @@ const RING_GAP = 4;
 const RING_MIN = 6;
 /** Names keep this far from the screen's edge and from each other. */
 const EDGE = 4;
-const SPACING = 2;
+const SPACING = 6;
 
 /** Leader lengths and turns away from the preferred direction, cheapest first. */
-const LEADERS = [12, 26, 44];
+const LEADERS = [16, 36, 64, 104];
 const TURNS = [0, 0.45, -0.45, 0.9, -0.9, 1.4, -1.4, 1.9, -1.9, 2.5, -2.5, Math.PI];
 const CANDIDATES = TURNS.flatMap((turn, turnIndex) =>
 	LEADERS.map((length, lengthIndex) => ({ turn, length, cost: turnIndex + lengthIndex * 2.5 }))

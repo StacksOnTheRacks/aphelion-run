@@ -29,14 +29,15 @@ export function GalaxyPlace({
 	const card = openId ? systemCard(openId) : null;
 	const items = useMemo<LabelItem[]>(
 		() => [
-			{ id: SOL_ID, label: "Sol", onSelect: () => setOpenId(SOL_ID) },
+			{ id: SOL_ID, label: "Sol", onSelect: () => setOpenId(SOL_ID), current: openId === SOL_ID },
 			...NEIGHBORS.map((system) => ({
 				id: system.id,
 				label: system.label,
 				onSelect: () => setOpenId(system.id),
+				current: openId === system.id,
 			})),
 		],
-		[]
+		[openId]
 	);
 
 	useEffect(() => galaxy.onSelect(setOpenId), [galaxy]);

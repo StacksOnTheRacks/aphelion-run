@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { AFT_VIEWS, type PilotViewpoint, type ScreenRect } from "./demo/cockpit";
-import { chartButtons, wideChartStep, type ChartButton, type DemoView, type EnvironmentDemo } from "./demo/environment";
+import { chartButtons, viewTrail, wideChartStep, type ChartButton, type DemoView, type EnvironmentDemo } from "./demo/environment";
 import {
 	DEPARTURE_SECONDS,
 	destinationName,
@@ -136,15 +136,17 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		if (piloting) {
 			return [];
 		}
+		const focus = viewTrail(view).filter((body) => !body.id.endsWith("-stop")).at(-1);
 		return found.map((target) => {
 			const label = scanLabel(target);
 			return {
 				id: target.id,
 				label,
 				onSelect: () => pick(target),
+				current: target.id === focus?.id,
 			};
 		});
-	}, [found, piloting, pick]);
+	}, [found, piloting, pick, view]);
 
 	const take = useCallback(
 		(button: ChartButton) => {
