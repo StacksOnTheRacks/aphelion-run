@@ -213,6 +213,7 @@ export function useHudAnchors(): { anchors: HudAnchors; keepOut: RefObject<HTMLE
 export function Hud({
 	anchors,
 	location,
+	energy,
 	pilot,
 	locate,
 	recall,
@@ -222,6 +223,8 @@ export function Hud({
 }: {
 	anchors: HudAnchors;
 	location: { title: string; detail: string | null };
+	/** Energy aboard the active ship. */
+	energy: number;
 	pilot: HudAction;
 	locate: HudAction;
 	recall: HudAction;
@@ -337,7 +340,7 @@ export function Hud({
 												className={`flex w-full items-center justify-center gap-3 rounded-[3px] p-2 text-left focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none min-[900px]:justify-start min-[900px]:gap-2.5 min-[900px]:px-2 min-[900px]:py-1.5 ${active ? "border border-[rgba(92,74,0,0.6)] bg-gradient-to-r from-[rgba(42,30,0,0.8)] to-[rgba(26,19,0,0.7)] min-[900px]:rounded-[0_3px_3px_0] min-[900px]:border-y-0 min-[900px]:border-r-0 min-[900px]:border-l-2 min-[900px]:border-[rgba(107,85,0,0.9)] min-[900px]:from-[#2a1f00] min-[900px]:to-[#1a1200]" : "hover:bg-white/5"}`}
 											>
 												<ShipPortrait ship={ship} listed />
-												<ShipName ship={ship} listed />
+												<ShipName ship={ship} energy={energy} listed />
 											</button>
 										</li>
 									);
@@ -348,7 +351,7 @@ export function Hud({
 						<div role="group" aria-label={`${activeShip.name}, active ship`} className="pointer-events-auto relative isolate flex h-[58px] w-full items-center gap-2 p-2 min-[900px]:h-[52px] min-[900px]:py-1.5 min-[900px]:pr-2.5 min-[900px]:pl-2">
 							<Housing cut={{ tr: 10 }} highlight="top" border="except-bottom" />
 							<ShipPortrait ship={activeShip} />
-							<ShipName ship={activeShip} />
+							<ShipName ship={activeShip} energy={energy} />
 							<ShipAction label="Pilot" action={pilot} icon="/hud/pilot.svg" />
 							<ShipAction label="Locate" action={locate} icon="/hud/locate.svg" />
 							<ShipAction label="Recall" action={recall} icon="/hud/recall.svg" />
@@ -404,11 +407,14 @@ function ShipPortrait({ ship, listed = false }: { ship: (typeof SHIPS)[number]; 
 	);
 }
 
-function ShipName({ ship, listed = false }: { ship: (typeof SHIPS)[number]; listed?: boolean }) {
+function ShipName({ ship, energy, listed = false }: { ship: (typeof SHIPS)[number]; energy: number; listed?: boolean }) {
+	const amount = Math.round(energy).toLocaleString("en-US");
 	return (
 		<div className={listed ? "min-w-0 min-[900px]:flex-1" : "min-w-0 flex-1"}>
 			<p className="truncate text-sm font-bold text-[#ffd73d] min-[900px]:text-[13px] min-[900px]:tracking-[0.3px]">{ship.name}</p>
-			<p className="truncate text-[10px] tracking-[0.5px] text-[#a89060] uppercase">{ship.role}</p>
+			<p className="truncate text-[10px] tracking-[0.5px] text-[#a89060] uppercase">
+				{ship.role} · {amount}
+			</p>
 		</div>
 	);
 }

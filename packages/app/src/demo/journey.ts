@@ -462,15 +462,26 @@ export function courseMarks(route: Route, distance: number): CourseMark[] {
 
 export type Journey = {
 	start: (plan: JourneyPlan, onDone: () => void) => void;
-	/** Clears the ship and the line without calling `onDone`. */
+	/** Ends the flight without calling `onDone` and leaves the ship on the dock it left. */
 	stop: () => void;
+	/** Couples the ship to a dock with no flight. The next update keeps it there as the dock moves. */
+	berth: (bodyId: string, dock: Dock) => void;
 	update: (deltaSeconds: number, centerOf: (id: string) => Vector3) => void;
-	/** Where the ship is docked, which way that satellite circles, and how fast, once a trip has arrived. */
+	/** Where the ship is docked, which way that satellite circles, and how fast. Null while a trip is underway. */
 	docked: () => { id: string; position: Vector3; turn: number; rate: number; dock?: Dock } | null;
-	/** Where the ship is and which way it is heading, while a trip is under way or docked. */
+	/**
+	 * The body whose planetary chart Locate opens. While a burn is underway this is the dock the
+	 * ship left. Once the ship is coupled, it is the body it is coupled to.
+	 */
+	host: () => string | null;
+	/** Where the ship is and which way it is heading, while a trip is under way or the ship is berthed. */
 	ship: () => { position: Vector3; heading: Vector3 } | null;
 	/** The line being flown and how far along the whole clock the ship is, from 0 to 1. Null once docked. */
 	course: () => { points: readonly Vector3[]; progress: number } | null;
+	/** Seconds of photon cruise just flown. The climb, the drop, and a dock spend none. */
+	onPhoton: (listener: (seconds: number) => void) => () => void;
+	/** The photon cruise has finished and the ship is on the drop or already docked. */
+	onCruiseDone: (listener: () => void) => () => void;
 	/** Shows course chevrons on the windscreen while a burn is underway. */
 	setPiloting: (on: boolean) => void;
 };
@@ -516,6 +527,11 @@ export function createJourney(
 ): Journey {
 	const engine = scene.getEngine();
 	let flight: Flight | null = null;
+	/** The dock the ship is coupled to between trips. A flight does not clear it, so a recall can return. */
+	let berthed: { bodyId: string; dock: Dock } | null = null;
+	const berthHeading = new Vector3(1, 0, 0);
+	const photonListeners = new Set<(seconds: number) => void>();
+	const cruiseListeners = new Set<() => void>();
 	let piloting = false;
 	const chevrons = buildChevrons(scene);
 	glow.addExcludedMesh(chevrons);
@@ -576,6 +592,53 @@ export function createJourney(
 		const angle = Math.atan2(relative.z, relative.x);
 		const turn = Math.sign(rate) || 1;
 		return new Vector3(-Math.sin(angle) * turn, 0, Math.cos(angle) * turn);
+	};
+
+	/** Photon seconds that fall inside the cruise, ignoring climb time and any frame that runs past the end. */
+	const photonSpan = (before: number, after: number, climb: number, cruise: number) => {
+		const end = climb + cruise;
+		return Math.max(0, Math.min(after, end) - Math.max(before, climb));
+	};
+
+	const notifyPhoton = (seconds: number) => {
+		if (seconds <= 0) {
+			return;
+		}
+		for (const listener of photonListeners) {
+			listener(seconds);
+		}
+	};
+
+	const notifyCruise = () => {
+		for (const listener of cruiseListeners) {
+			listener();
+		}
+	};
+
+	/** Keeps the hull on a dock that is not part of a flight. `dock.position` is relative to the body. */
+	const placeBerthed = (deltaSeconds: number, centerOf: (id: string) => Vector3) => {
+		if (!berthed) {
+			return;
+		}
+		const center = centerOf(berthed.bodyId);
+		const outer = harborOf(berthed.bodyId).outer ?? 0;
+		const relative = berthed.dock.position();
+		const rise = poseRise(Math.hypot(relative.x, relative.z), outer, "coupled");
+		relative.y += rise;
+		const heading = orbitHeading(relative, berthed.dock.rate);
+		berthHeading.copyFrom(heading);
+		ship.drive("impulse", 0);
+		ship.place(center.add(relative), heading, deltaSeconds);
+	};
+
+	/** The arrival dock becomes the berth a later recall returns to. */
+	const rememberBerth = (current: Flight) => {
+		const dock = current.approach?.dock;
+		if (!dock) {
+			return;
+		}
+		berthed = { bodyId: current.plan.arrive.id, dock };
+		berthHeading.copyFrom(current.heading);
 	};
 
 	const placeCoupled = (current: Flight, center: Vector3, dock: Dock, rise: number, deltaSeconds: number) => {
@@ -677,20 +740,47 @@ export function createJourney(
 			}
 		},
 		stop: clear,
+		berth(bodyId, dock) {
+			berthed = { bodyId, dock };
+		},
 		docked() {
-			if (!flight || flight.phase !== "docked") {
+			if (flight) {
+				if (flight.phase !== "docked") {
+					return null;
+				}
+				return {
+					id: flight.plan.arrive.id,
+					position: ship.position.clone(),
+					turn: flight.turn,
+					rate: flight.approach?.dock.rate ?? 0,
+					dock: flight.approach?.dock,
+				};
+			}
+			if (!berthed) {
 				return null;
 			}
 			return {
-				id: flight.plan.arrive.id,
+				id: berthed.bodyId,
 				position: ship.position.clone(),
-				turn: flight.turn,
-				rate: flight.approach?.dock.rate ?? 0,
-				dock: flight.approach?.dock,
+				turn: Math.sign(berthed.dock.rate) || 1,
+				rate: berthed.dock.rate,
+				dock: berthed.dock,
 			};
 		},
+		host() {
+			if (flight && flight.phase !== "docked") {
+				return flight.departBody ?? berthed?.bodyId ?? null;
+			}
+			if (flight?.phase === "docked") {
+				return flight.plan.arrive.id;
+			}
+			return berthed?.bodyId ?? null;
+		},
 		ship() {
-			return flight ? { position: ship.position.clone(), heading: flight.heading.clone() } : null;
+			if (flight) {
+				return { position: ship.position.clone(), heading: flight.heading.clone() };
+			}
+			return berthed ? { position: ship.position.clone(), heading: berthHeading.clone() } : null;
 		},
 		course() {
 			if (!flight || flight.phase === "docked") {
@@ -701,6 +791,7 @@ export function createJourney(
 		},
 		update(deltaSeconds, centerOf) {
 			if (!flight) {
+				placeBerthed(deltaSeconds, centerOf);
 				return;
 			}
 			flight.clock += deltaSeconds;
@@ -732,20 +823,25 @@ export function createJourney(
 				}
 				if (current.phase === "soft-dock" && current.since >= SOFT_DOCK_SECONDS) {
 					current.phase = "docked";
+					rememberBerth(current);
 					current.onDone();
 				}
 				return;
 			}
 
+			const before = flight.elapsed;
 			if (!joinedBurn) {
 				flight.elapsed += deltaSeconds;
 			}
+			notifyPhoton(photonSpan(before, flight.elapsed, flight.climbSeconds, flight.cruiseSeconds));
 			const distance = distanceAt(flight);
 			if (flight.elapsed >= flight.climbSeconds + flight.cruiseSeconds) {
+				notifyCruise();
 				const current = flight;
 				arrive(current, centerOf(current.plan.arrive.id));
 				settle(current, 0, centerOf(current.plan.arrive.id));
 				if (current.phase === "docked") {
+					rememberBerth(current);
 					current.onDone();
 				}
 				return;
@@ -768,6 +864,18 @@ export function createJourney(
 			} else {
 				showChevrons(flight.path, along);
 			}
+		},
+		onPhoton(listener) {
+			photonListeners.add(listener);
+			return () => {
+				photonListeners.delete(listener);
+			};
+		},
+		onCruiseDone(listener) {
+			cruiseListeners.add(listener);
+			return () => {
+				cruiseListeners.delete(listener);
+			};
 		},
 		setPiloting(on) {
 			piloting = on;

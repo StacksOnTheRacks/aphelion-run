@@ -3,8 +3,8 @@
  * A moon uses its planet's yield. The Sun's collectors and Earth's station are already
  * in the scene, and the Moon yields nothing.
  *
- * The ring sits outside the home bases and inside the outer orbit. Saturn's stays in
- * the gap inside the rings, with the warehouses.
+ * The ring sits outside the base halo and inside the outer orbit. Saturn's stays in
+ * the gap inside the rings. A mine is never larger than the base on that body.
  */
 
 import {
@@ -43,12 +43,13 @@ export const PLANET_YIELDS: Record<string, readonly Mineral[]> = {
 	neptune: ["hydrogen", "nitrogen", "carbon"],
 };
 
-/** A box, small against a planet, on the order of a warehouse. Shrunk when the ring is narrow. */
-const GENERATOR_CAP: BoxSize = { width: 0.22, height: 0.14, depth: 0.22 };
-
-function boxFor(room: number): BoxSize {
-	const width = Math.min(GENERATOR_CAP.width, Math.max(room * 0.5, 0));
-	return { width, height: Math.min(GENERATOR_CAP.height, width * 0.65), depth: width };
+/** A mine no larger than `cap`, shrunk when the ring is too narrow to hold that box. */
+function boxFor(cap: BoxSize, room: number): BoxSize {
+	if (cap.width <= 0 || room <= 0) {
+		return { width: 0, height: 0, depth: 0 };
+	}
+	const scale = Math.min(1, (room * 0.5) / cap.width);
+	return { width: cap.width * scale, height: cap.height * scale, depth: cap.depth * scale };
 }
 
 /** Open annulus the generator ring can use: outside the homes, inside the outer orbit or the rings. */
@@ -67,8 +68,8 @@ function moonRoom(diameter: number): { inner: number; outer: number } {
 	};
 }
 
-function place(resources: readonly Mineral[], room: { inner: number; outer: number }): GeneratorSlot[] {
-	const size = boxFor(room.outer - room.inner);
+function place(resources: readonly Mineral[], room: { inner: number; outer: number }, cap: BoxSize): GeneratorSlot[] {
+	const size = boxFor(cap, room.outer - room.inner);
 	const radius = (room.inner + room.outer) / 2;
 	return resources.map((resource, index) => ({
 		resource,
@@ -81,11 +82,11 @@ function place(resources: readonly Mineral[], room: { inner: number; outer: numb
 /** One dock per mineral the planet yields. None for Earth. */
 export function planetGeneratorSlots(planet: string, input: PlanetBaseInput): GeneratorSlot[] {
 	const resources = PLANET_YIELDS[planet];
-	return resources ? place(resources, planetRoom(input)) : [];
+	return resources ? place(resources, planetRoom(input), WAREHOUSE_SIZE) : [];
 }
 
 /** The same mines as the planet. Earth's Moon has none. */
 export function moonGeneratorSlots(planet: string, diameter: number): GeneratorSlot[] {
 	const resources = PLANET_YIELDS[planet];
-	return resources ? place(resources, moonRoom(diameter)) : [];
+	return resources ? place(resources, moonRoom(diameter), moonBaseSize(diameter)) : [];
 }

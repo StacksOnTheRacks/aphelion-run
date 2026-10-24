@@ -25,7 +25,7 @@ type Readout = { place: string | null; bearing: string; progress: number | null 
  * cockpit, so the console is centered on the screen and sits on the bottom edge. Below 900px it shifts
  * left so it stays clear of Exit and the exterior control.
  */
-export function Dashboard({ system, course }: { system: EnvironmentDemo; course: string | null }) {
+export function Dashboard({ system, course, energy }: { system: EnvironmentDemo; course: string | null; energy: number }) {
 	const systemRef = useRef<HTMLCanvasElement>(null);
 	const localRef = useRef<HTMLCanvasElement>(null);
 	const [readout, setReadout] = useState<Readout>({ place: null, bearing: "—", progress: null });
@@ -62,6 +62,7 @@ export function Dashboard({ system, course }: { system: EnvironmentDemo; course:
 				<Housing cut={{ tl: 14, tr: 14 }} />
 				<MapPane label="Sol" canvasRef={systemRef} />
 				<dl className="flex w-40 flex-col justify-center gap-2.5 text-[10px] tracking-[1.6px] uppercase">
+					<Reading term="Energy" value={Math.round(energy).toLocaleString("en-US")} />
 					<Reading term="Local" value={readout.place ? `${readout.place} orbit` : "Open space"} />
 					<Reading term="Bearing" value={readout.bearing} />
 					<Reading term="Course" value={course ?? "Holding"} />

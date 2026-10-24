@@ -35,7 +35,7 @@ import {
 	SATURN_RING_INNER_SCALE,
 	SATURN_RING_OUTER_SCALE,
 	SUN_OUTER_ORBIT,
-	moonBases,
+	playerHome,
 	moonOuterOrbitRadius,
 	nearBody,
 	outerOrbitRadius,
@@ -46,7 +46,16 @@ import {
 } from "./bases";
 import { daysSinceJ2000, greenwichAngle, moonLongitude, planetLongitude, type EphemerisPlanet } from "./ephemeris";
 import { moonGeneratorSlots, planetGeneratorSlots, type GeneratorSlot, type Mineral } from "./generators";
-import { CLIMB_PACE, createJourney, hoverDeparture, type Dock, type Harbor, type JourneyPlan } from "./journey";
+import {
+	COLLECTOR_CHARGE,
+	STARTING_DOCK_ID,
+	STARTING_ENERGY,
+	burnEnergy,
+	cruiseCost,
+	siphonEnergy,
+	type SolSession,
+} from "./energy";
+import { CLIMB_PACE, createJourney, hoverDeparture, journeySeconds, type Dock, type Harbor, type JourneyPlan } from "./journey";
 import { CHART_LAYER, createCockpit, type PilotViewpoint } from "./cockpit";
 import { HULL_LENGTH, loadRanger } from "./ranger";
 import { awayFrom, type LabelFrame, type LabelSource } from "./labels";
@@ -510,7 +519,7 @@ function baseInput(spec: PlanetSpec): PlanetBaseInput {
 		moons: spec.moons.map((moon) => ({ orbit: moon.orbit, diameter: moon.diameter })),
 		stationRadius: spec.name === "earth" ? EARTH_STATION_RADIUS : undefined,
 		warehouseRadius: spec.name === "earth" ? EARTH_WAREHOUSE_RADIUS : undefined,
-		homes: spec.name !== "earth",
+		homes: false,
 		ringInnerScale: spec.name === "saturn" ? SATURN_RING_INNER_SCALE : undefined,
 	};
 }
@@ -712,12 +721,12 @@ export function holdClose(radius: number, closeRadius: number, wasClose: boolean
 
 export type ChartTarget = DemoView | "galaxy" | "ship" | "wide";
 
-/** One corner step: the word on the button, and where it goes. `ship` is the ship's inner orbit. */
+/** One corner step: the word on the button, and where it goes. `ship` is the planetary chart where the ship is docked. */
 export type ChartButton = { label: string; target: ChartTarget };
 
 /**
  * The corner steps for a chart, top to bottom.
- * The system chart has Home, to the ship's orbit, and Galaxy, to leave Sol.
+ * The system chart has Home, to the planetary chart where the ship is docked, and Galaxy, to leave Sol.
  * A planet or the Sun steps back to the system. A moon steps back to its planet.
  * An inner orbit steps back to that same place: a planet's own outer orbit, or its planet's when the
  * orbit belongs to a moon. The Sun's inner orbit steps back to the Sun.
@@ -954,12 +963,12 @@ export type EnvironmentDemo = LabelSource & {
 	/** The chart on screen. */
 	view: () => DemoView;
 	/**
-	 * Opens the inner orbit of the body the ship is at and rides with the ship.
-	 * The chart learns the view through `onSelect`.
+	 * Opens the outer chart of the body the ship is docked at, without riding the hull.
+	 * While a burn is underway that body is the dock the ship left. The chart learns the view through `onSelect`.
 	 */
 	home: () => void;
-	/** Calls back when the chart is sent to a body, by View or by Home. Returns a stop function. */
-	onSelect: (listener: (target: BodyTarget) => void) => () => void;
+	/** Calls back when the chart is sent to a body, by View or by Home. `riding` is the craft the camera follows. */
+	onSelect: (listener: (target: BodyTarget & { riding?: ScanTarget | null }) => void) => () => void;
 	/**
 	 * While on, the scene names what is near the camera through `onScanFound`, and a click names what it
 	 * lands on through `onScan`. Only what was named can be picked. A body click is entered by the chart.
@@ -988,8 +997,21 @@ export type EnvironmentDemo = LabelSource & {
 	 * Flies the ship from where it sits, its dock or its orbit at Earth, to the target's body and docks
 	 * it there: with the target itself when that is a craft. `onDone` runs once it has docked.
 	 */
-	travel: (target: ScanTarget, onDone: () => void) => void;
-	/** Ends the flight early and clears it. */
+	travel: (target: ScanTarget, onDone: () => void, cost?: number) => void;
+	/** Energy the photon cruise to `target` would spend from where the ship is berthed. */
+	quote: (target: ScanTarget) => number;
+	/** The craft the ship is berthed at. During a burn this is still the dock it left. */
+	berth: () => ScanTarget | null;
+	/** Energy aboard, whether a siphon is running, and the charge of a collector the ship is on. */
+	hold: () => ShipHold;
+	onHold: (listener: (hold: ShipHold) => void) => () => void;
+	/** Energy still in a collector. A collector that has not been siphoned is full. */
+	charge: (id: string) => number;
+	/** Starts or stops siphoning. Starting does nothing unless the ship is docked at a collector that still holds energy. */
+	setSiphoning: (on: boolean) => void;
+	/** Dock, energy, and collector charges, so leaving Sol can come back to the same berth. */
+	session: () => SolSession;
+	/** Ends the flight early and puts the ship back on the dock it left. Energy already burned stays spent. */
 	land: () => void;
 	/** Puts the camera in the ranger's cockpit, with both aft views, or back on the chart where it left. */
 	setPiloting: (on: boolean) => void;
@@ -1004,11 +1026,26 @@ export type EnvironmentDemo = LabelSource & {
 	onNav: (listener: (fix: NavFix) => void) => () => void;
 };
 
+/** Energy the ship is carrying, and the collector it is siphoning when it is docked at one. */
+export type ShipHold = {
+	energy: number;
+	siphoning: boolean;
+	dockId: string | null;
+	/** Energy still in the collector the ship is docked at. Null at any other dock. */
+	charge: number | null;
+};
+
+export type EnvironmentOptions = {
+	/** Open on the planetary chart of the ship's dock. Otherwise the camera opens on the whole system. */
+	atBerth?: boolean;
+	session?: SolSession;
+};
+
 export async function createEnvironment(
 	engine: Engine,
 	scene: Scene,
 	canvas: HTMLCanvasElement,
-	options?: { atShip?: boolean }
+	options?: EnvironmentOptions
 ): Promise<EnvironmentDemo> {
 	scene.clearColor = new Color4(0.02, 0.03, 0.07, 1);
 
@@ -1143,13 +1180,49 @@ export async function createEnvironment(
 	}
 
 	const journey = createJourney(scene, camera, glow, harborOf, ranger);
-	const cockpit = createCockpit(scene, ranger.mounts, camera, glow);
-	// The ship is Earth's until it docks somewhere else. Home opens that body's inner orbit.
-	const berthPlayer = () => {
-		const docked = journey.docked();
-		player.host = docked?.id ?? "earth";
-		player.view = docked ? orbitView(docked.id, "inner") : planetOrbitView("earth", "inner");
+	const session = options?.session;
+	let energy = session?.energy ?? STARTING_ENERGY;
+	let dockId = session?.dockId ?? STARTING_DOCK_ID;
+	let siphoning = session?.siphoning ?? false;
+	const collectorCharges = new Map<string, number>(Object.entries(session?.collectors ?? {}));
+	let departEnergy = energy;
+	let quoted = 0;
+	let burning = false;
+	const holdListeners = new Set<(hold: ShipHold) => void>();
+	let publishedHold = "";
+	const chargeOf = (id: string) => collectorCharges.get(id) ?? COLLECTOR_CHARGE;
+	const currentHold = (): ShipHold => {
+		const craft = crafts.find((item) => item.id === dockId);
+		const charge = craft?.kind === "collector" ? chargeOf(dockId) : null;
+		return { energy, siphoning, dockId, charge };
 	};
+	const publishHold = () => {
+		const hold = currentHold();
+		const key = `${Math.round(hold.energy)}|${hold.siphoning}|${hold.dockId}|${hold.charge === null ? "" : Math.round(hold.charge)}`;
+		if (key === publishedHold) {
+			return;
+		}
+		publishedHold = key;
+		for (const listener of holdListeners) {
+			listener(hold);
+		}
+	};
+	journey.onPhoton((seconds) => {
+		if (!burning) {
+			return;
+		}
+		energy = burnEnergy(energy, departEnergy, quoted, seconds);
+		publishHold();
+	});
+	journey.onCruiseDone(() => {
+		if (!burning) {
+			return;
+		}
+		energy = departEnergy - quoted;
+		burning = false;
+		publishHold();
+	});
+	const cockpit = createCockpit(scene, ranger.mounts, camera, glow);
 
 	const journeyBody = (id: string, center: Vector3, radius: number, anchor: TransformNode): JourneyBody => {
 		const riding = spinningBases.filter((base) => base.mesh.parent === anchor);
@@ -1552,6 +1625,21 @@ export async function createEnvironment(
 		const before = sunAngle(focusPosition(SHOTS[active].focus));
 		placeBodies(deltaSeconds);
 		journey.update(deltaSeconds, focusPosition);
+		if (siphoning) {
+			const coupled = journey.docked();
+			const craft = crafts.find((item) => item.id === dockId);
+			if (!coupled || craft?.kind !== "collector") {
+				siphoning = false;
+			} else {
+				const next = siphonEnergy(energy, chargeOf(dockId), deltaSeconds);
+				energy = next.ship;
+				collectorCharges.set(dockId, next.collector);
+				if (next.collector <= 0) {
+					siphoning = false;
+				}
+			}
+			publishHold();
+		}
 		cockpit.update();
 		// An arrival can open another view from inside the update, so the shot is read after it.
 		const shot = SHOTS[active];
@@ -1806,9 +1894,15 @@ export async function createEnvironment(
 		return best;
 	};
 
-	const selectListeners = new Set<(target: BodyTarget) => void>();
+	const selectListeners = new Set<(target: BodyTarget & { riding?: ScanTarget | null }) => void>();
 	const scanListeners = new Set<(target: ScanTarget) => void>();
 	const foundListeners = new Set<(found: ScanTarget[]) => void>();
+	/** The player craft follows the berth, so a click on the hull opens that body's inner orbit. */
+	const syncPlayer = () => {
+		const host = journey.host() ?? player.host;
+		player.host = host;
+		player.view = orbitView(host, "inner");
+	};
 	const picker = trackPicks(
 		canvas,
 		scene,
@@ -1816,7 +1910,7 @@ export async function createEnvironment(
 			if (!scanning) {
 				return null;
 			}
-			berthPlayer();
+			syncPlayer();
 			const craft = craftAt(x, y);
 			const body = hitAt(x, y)?.target.id ?? null;
 			// The body the view is on is named along with the craft that circle it, so the craft wins.
@@ -1908,17 +2002,23 @@ export async function createEnvironment(
 
 	placeBodies(0);
 	picker.setIdleCursor("crosshair");
-	if (options?.atShip) {
-		berthPlayer();
-		active = player.view;
-		riding = player;
-		const goal = goalFor(player.view);
-		goal.alpha = player.angle();
+	// Coupled to the saved dock, or to Earth's corporate station. The planetary chart is that body's outer orbit.
+	const openingDock = dockById.get(dockId);
+	const openingCraft = crafts.find((item) => item.id === dockId);
+	if (!openingDock || !openingCraft) {
+		throw new Error(`No dock named ${dockId}.`);
+	}
+	journey.berth(openingCraft.host, openingDock);
+	player.host = openingCraft.host;
+	player.view = orbitView(openingCraft.host, "inner");
+	if (options?.atBerth) {
+		active = bodyTarget(openingCraft.host).view;
+		const goal = goalFor(active);
 		camera.alpha = goal.alpha;
 		camera.beta = goal.beta;
 		camera.radius = goal.radius;
 		camera.target.copyFrom(goal.target);
-		const shot = SHOTS[player.view];
+		const shot = SHOTS[active];
 		setOrbitLines(shot.closeUp ? 0 : 1);
 		setCorona(shot.corona ?? 1);
 		restoreCamera();
@@ -1938,14 +2038,42 @@ export async function createEnvironment(
 		dolly = { from: camera.radius, to, t: 0 };
 	};
 
+	const idForDock = (dock: Dock | undefined): string | null => {
+		if (!dock) {
+			return null;
+		}
+		for (const [id, candidate] of dockById) {
+			if (candidate === dock) {
+				return id;
+			}
+		}
+		return null;
+	};
+
+	/** The cruise from the ship's current dock to `target`, using where the bodies are right now. */
+	const departurePlan = (target: ScanTarget): JourneyPlan => {
+		placeBodies(0);
+		const docked = journey.docked();
+		const fromId = docked?.id ?? journey.host() ?? "earth";
+		const at = docked?.position ?? ranger.position.clone();
+		const turn = docked?.turn ?? 1;
+		const home = journeyLayout().bodies.find((body) => body.id === fromId);
+		const origin = docked?.dock && home ? home.center.add(hoverDeparture(docked.dock, home.outer)) : at;
+		const radius = home ? Math.hypot(origin.x - home.center.x, origin.z - home.center.z) : 0;
+		const rate = docked?.rate ?? 0.35 * ORBIT_PACE;
+		const depart = { at: origin, turn, speed: Math.abs(rate) * radius };
+		return planJourney(journeyLayout(), fromId, target.host, depart);
+	};
+
 	return {
 		go: animateTo,
 		view: () => active,
 		home() {
-			berthPlayer();
-			chosen = player;
+			chosen = null;
+			const id = journey.host() ?? player.host;
+			const place = bodyTarget(id);
 			for (const listener of selectListeners) {
-				listener({ id: player.host, label: player.host, view: player.view });
+				listener({ ...place, riding: null });
 			}
 		},
 		onLabels(listener) {
@@ -1990,7 +2118,9 @@ export async function createEnvironment(
 					return;
 				}
 			}
-			const place = craft ? { id: craft.host, label: craft.host, view: craft.view } : bodyTarget(target.id);
+			const place = craft
+				? { id: craft.host, label: craft.host, view: craft.view, riding: craftFound(craft) }
+				: { ...bodyTarget(target.id), riding: null };
 			// The listener starts the camera move, which takes the craft chosen here.
 			chosen = craft ?? null;
 			for (const listener of selectListeners) {
@@ -2007,21 +2137,23 @@ export async function createEnvironment(
 				framingListeners.delete(listener);
 			};
 		},
-		travel(target, onDone) {
-			placeBodies(0);
-			// Undocked and not flying, the ship is circling Earth, the way the bases turn.
+		quote(target) {
+			const fromId = journey.docked()?.id ?? journey.host() ?? "earth";
+			if (fromId === target.host) {
+				return 0;
+			}
+			return cruiseCost(journeySeconds(departurePlan(target).cruise.total));
+		},
+		travel(target, onDone, cost) {
+			siphoning = false;
 			const docked = journey.docked();
 			const fromId = docked?.id ?? "earth";
-			const at = docked?.position ?? ranger.position.clone();
-			const turn = docked?.turn ?? 1;
-			const home = journeyLayout().bodies.find((body) => body.id === fromId);
-			const origin =
-				docked?.dock && home ? home.center.add(hoverDeparture(docked.dock, home.outer)) : at;
-			const radius = home ? Math.hypot(origin.x - home.center.x, origin.z - home.center.z) : 0;
-			const rate = docked?.rate ?? 0.35 * ORBIT_PACE;
-			const depart = { at: origin, turn, speed: Math.abs(rate) * radius };
-			const plan = planJourney(journeyLayout(), fromId, target.host, depart);
+			const plan = departurePlan(target);
 			const dock = target.id === target.host ? undefined : dockById.get(target.id);
+			quoted = cost ?? cruiseCost(journeySeconds(plan.cruise.total));
+			departEnergy = energy;
+			burning = true;
+			publishHold();
 			journey.start(
 				{
 					...plan,
@@ -2029,10 +2161,57 @@ export async function createEnvironment(
 					departDock: docked?.dock,
 					departBody: docked?.dock ? fromId : undefined,
 				},
-				onDone
+				() => {
+					const arrived = journey.docked();
+					dockId = idForDock(arrived?.dock) ?? (target.id !== target.host ? target.id : dockId);
+					const host = journey.host();
+					if (host) {
+						player.host = host;
+						player.view = orbitView(host, "inner");
+					}
+					onDone();
+					publishHold();
+				}
 			);
 		},
-		land: journey.stop,
+		berth() {
+			const craft = craftById.get(dockId);
+			return craft && craft.kind !== "ship" ? craftFound(craft) : null;
+		},
+		hold: currentHold,
+		onHold(listener) {
+			holdListeners.add(listener);
+			listener(currentHold());
+			return () => {
+				holdListeners.delete(listener);
+			};
+		},
+		charge: chargeOf,
+		setSiphoning(on) {
+			if (on) {
+				const craft = crafts.find((item) => item.id === dockId);
+				if (!journey.docked() || craft?.kind !== "collector" || chargeOf(dockId) <= 0) {
+					return;
+				}
+			}
+			siphoning = on;
+			publishHold();
+		},
+		session() {
+			const collectors: Record<string, number> = {};
+			for (const [id, charge] of collectorCharges) {
+				if (charge < COLLECTOR_CHARGE) {
+					collectors[id] = charge;
+				}
+			}
+			return { energy, dockId, collectors, siphoning: siphoning && journey.docked() !== null };
+		},
+		land() {
+			burning = false;
+			siphoning = false;
+			journey.stop();
+			publishHold();
+		},
 		setPiloting(on) {
 			if (piloting === on) {
 				return;
@@ -2929,7 +3108,7 @@ function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[]): Spi
 			diameter: body.spec.diameter,
 			moons: body.spec.moons.map((moon) => ({ orbit: moon.orbit, diameter: moon.diameter })),
 			stationRadius: body.spec.name === "earth" ? EARTH_STATION_RADIUS : undefined,
-			homes: body.spec.name !== "earth",
+			homes: false,
 			ringInnerScale: body.spec.name === "saturn" ? SATURN_RING_INNER_SCALE : undefined,
 		};
 		const placed = planetBases(input);
@@ -2948,10 +3127,11 @@ function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[]): Spi
 		);
 		for (const moon of body.moons) {
 			const moonInner = moonView(body.spec.name, moon.mesh.name, "inner");
+			const home = moon.mesh.name === "moon" ? [playerHome(moon.radius * 2)] : [];
 			addBaseSlots(
 				scene,
 				moon.baseAnchor,
-				moonBases(moon.radius * 2),
+				home,
 				materials,
 				`${moon.mesh.name}-base`,
 				spinning,

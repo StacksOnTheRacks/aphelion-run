@@ -14,13 +14,15 @@ const STAR_COLOR: Record<StarClass, string> = {
 	M: "#FF8F6B",
 };
 
-/** The galaxy: its HUD, the systems named on the scene, and the card a click opens. Locate opens the ship's orbit in Sol. */
+/** The galaxy: its HUD, the systems named on the scene, and the card a click opens. Locate opens the planetary chart where the ship is docked. */
 export function GalaxyPlace({
 	galaxy,
+	energy,
 	onEnterSol,
 	onHome,
 }: {
 	galaxy: GalaxyDemo;
+	energy: number;
 	onEnterSol: () => void;
 	onHome: () => void;
 }) {
@@ -48,8 +50,9 @@ export function GalaxyPlace({
 			<Hud
 				anchors={anchors}
 				location={{ title: "Galaxy", detail: null }}
+				energy={energy}
 				pilot={{ onClick: () => {}, disabled: true, title: "Pilot from inside Sol" }}
-				locate={{ onClick: onHome, title: "Your ship's orbit" }}
+				locate={{ onClick: onHome, title: "Where your ship is docked" }}
 				recall={{ onClick: () => {}, disabled: true, title: "The ship is holding" }}
 			/>
 			{card ? <SystemModal card={card} onClose={() => setOpenId(null)} onEnter={onEnterSol} /> : null}

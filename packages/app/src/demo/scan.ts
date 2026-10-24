@@ -30,7 +30,7 @@ export type ScanCard = {
 };
 
 /** Where the ship is, as far as Travel To cares. `at` is the body it sits at, or null while it is out. */
-export type ShipState = { at: string | null; departing: boolean };
+export type ShipState = { at: string | null; departing: boolean; energy?: number };
 
 const KIND_LABEL: Record<ScanKind, string> = {
 	star: "Star",
@@ -70,13 +70,13 @@ function bodyText(target: ScanTarget): string {
 		return "Its station is the black market. Earth yields nothing a ship can mine.";
 	}
 	if (target.id === "moon") {
-		return "Earth's Moon is not a combat zone. Like Earth, it yields nothing a ship can mine.";
+		return "Earth's Moon is not a combat zone. The ship's home base is here. Like Earth, it yields nothing a ship can mine.";
 	}
 	if (target.kind === "moon") {
 		const planet = moonPlanet(target.id);
-		return `A moon of ${planet ? stopLabel(planet) : "a planet"}. Home bases circle it, and its minerals are mined there.`;
+		return `A moon of ${planet ? stopLabel(planet) : "a planet"}. Its minerals are mined there.`;
 	}
-	return "Home bases circle in its inner orbit, and its minerals are mined there.";
+	return "Its minerals are mined in the inner orbit.";
 }
 
 function craftText(target: ScanTarget): string {
@@ -180,10 +180,15 @@ export function viewAction(target: ScanTarget, view: DemoView, close = false): {
 }
 
 /**
- * The card's travel action. A trip leaves only from a dock or the ship's orbit at Earth: it is not
- * re-routed in flight, and a trip within one body's orbit is not a burn.
+ * The card's travel action. A trip leaves only from a dock: it is not re-routed in flight, and a trip
+ * within one body's orbit is not a burn. `cost` is the energy the cruise would spend. When the ship
+ * does not have it, the trip stays on the card and cannot be set.
  */
-export function travelAction(target: ScanTarget, ship: ShipState): { label: string; enabled: boolean } {
+export function travelAction(
+	target: ScanTarget,
+	ship: ShipState,
+	cost?: number | null
+): { label: string; enabled: boolean } {
 	if (ship.departing) {
 		return { label: "Departure set", enabled: false };
 	}
@@ -193,7 +198,37 @@ export function travelAction(target: ScanTarget, ship: ShipState): { label: stri
 	if (ship.at === target.host) {
 		return { label: target.id === target.host ? "The ship is here" : "In the ship's orbit", enabled: false };
 	}
+	if (cost != null && ship.energy != null && Math.round(ship.energy) < cost) {
+		return { label: `Need ${cost}`, enabled: false };
+	}
+	if (cost != null) {
+		return { label: `Travel · ${cost}`, enabled: true };
+	}
 	return { label: "Travel To", enabled: true };
+}
+
+/**
+ * Siphon is only on a collector. It runs when the ship is docked at that collector and the collector
+ * still holds energy. Anywhere else the control says so and stays off.
+ */
+export function siphonAction(
+	target: ScanTarget,
+	ship: { dockedId: string | null; siphoning: boolean },
+	charge: number
+): { label: string; enabled: boolean } | null {
+	if (target.kind !== "collector") {
+		return null;
+	}
+	if (ship.dockedId !== target.id) {
+		return { label: "Dock to siphon", enabled: false };
+	}
+	if (charge <= 0) {
+		return { label: "Empty", enabled: false };
+	}
+	if (ship.siphoning) {
+		return { label: "Stop siphon", enabled: true };
+	}
+	return { label: "Siphon", enabled: true };
 }
 
 /** Whole seconds left on the departure countdown, counting 5, 4, 3, 2, 1, then 0 when it is time to go. */

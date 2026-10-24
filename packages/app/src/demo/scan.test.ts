@@ -6,6 +6,7 @@ import {
 	scanLabel,
 	showsCard,
 	secondsLeft,
+	siphonAction,
 	travelAction,
 	viewAction,
 	type ScanTarget,
@@ -58,6 +59,35 @@ expect(!travelAction(mars, { at: null, departing: false }).enabled, "a ship in f
 expect(travelAction(mars, { at: null, departing: false }).label === "En route", "a ship in flight says it is en route");
 expect(!travelAction(mars, { at: "earth", departing: true }).enabled, "a second course cannot be set during the countdown");
 expect(travelAction(bodyScan("earth"), { at: "titan", departing: false }).enabled, "a ship docked at Titan can head home");
+expect(
+	travelAction(mars, { at: "earth", departing: false, energy: 1000 }, 84).label === "Travel · 84",
+	"a trip the ship can afford shows its cost"
+);
+expect(
+	!travelAction(mars, { at: "earth", departing: false, energy: 40 }, 84).enabled &&
+		travelAction(mars, { at: "earth", departing: false, energy: 40 }, 84).label === "Need 84",
+	"a trip the ship cannot cover stays on the card"
+);
+
+expect(siphonAction(mars, { dockedId: null, siphoning: false }, 2000) === null, "a planet has no siphon");
+expect(
+	siphonAction(collector, { dockedId: null, siphoning: false }, 2000)?.label === "Dock to siphon" &&
+		siphonAction(collector, { dockedId: null, siphoning: false }, 2000)?.enabled === false,
+	"a collector that is not the ship's dock cannot be siphoned"
+);
+expect(
+	siphonAction(collector, { dockedId: collector.id, siphoning: false }, 2000)?.label === "Siphon",
+	"a docked collector can be siphoned"
+);
+expect(
+	siphonAction(collector, { dockedId: collector.id, siphoning: true }, 500)?.label === "Stop siphon",
+	"a running siphon can be stopped"
+);
+expect(
+	siphonAction(collector, { dockedId: collector.id, siphoning: false }, 0)?.label === "Empty" &&
+		siphonAction(collector, { dockedId: collector.id, siphoning: true }, 0)?.enabled === false,
+	"an empty collector offers no siphon"
+);
 
 expect(scanLabel(mars) === "Mars", "a scanned body is named on the scene");
 expect(scanLabel(collector) === "Unoccupied collector", "a scanned collector reads by who holds it");

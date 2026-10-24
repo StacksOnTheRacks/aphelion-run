@@ -9,7 +9,7 @@
     "dev": "next dev --port 3001",
     "build": "next build",
     "start": "next start --port 3001",
-    "test": "tsx src/demo/bases.test.ts && tsx src/demo/generators.test.ts && tsx src/demo/camera-path.test.ts && tsx src/demo/views.test.ts && tsx src/demo/route.test.ts && tsx src/demo/course-marks.test.ts && tsx src/demo/cockpit.test.ts && tsx src/pilot-viewport.test.ts && tsx src/demo/galaxy.test.ts && tsx src/demo/thrust.test.ts && tsx src/demo/scan.test.ts && tsx src/demo/nav.test.ts"
+    "test": "tsx src/demo/bases.test.ts && tsx src/demo/generators.test.ts && tsx src/demo/camera-path.test.ts && tsx src/demo/views.test.ts && tsx src/demo/route.test.ts && tsx src/demo/course-marks.test.ts && tsx src/demo/cockpit.test.ts && tsx src/pilot-viewport.test.ts && tsx src/demo/galaxy.test.ts && tsx src/demo/thrust.test.ts && tsx src/demo/scan.test.ts && tsx src/demo/nav.test.ts && tsx src/demo/energy.test.ts"
   },
   "dependencies": {
     "@babylonjs/core": "9.27.1",

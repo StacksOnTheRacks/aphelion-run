@@ -6,16 +6,16 @@ import { AFT_VIEWS, type PilotViewpoint, type ScreenRect } from "./demo/cockpit"
 import { chartButtons, viewTrail, wideChartStep, type ChartButton, type DemoView, type EnvironmentDemo } from "./demo/environment";
 import {
 	DEPARTURE_SECONDS,
-	destinationName,
-	placeName,
 	scanCard,
 	scanLabel,
 	showsCard,
 	secondsLeft,
+	siphonAction,
 	travelAction,
 	viewAction,
 	type ScanTarget,
 } from "./demo/scan";
+import { viewPlaque } from "./demo/view-plaque";
 import { Dashboard } from "./dashboard";
 import { Housing, Hud, useHudAnchors } from "./hud";
 import { PILOT_VIEWPORT } from "./pilot-viewport";
@@ -39,10 +39,11 @@ const STEP_TITLE: Record<string, string> = {
  * To counts down and then flies the ship there from wherever it sits. The cockpit has no names and
  * no picks.
  *
- * The HUD reads the place, the warehouse, and the ranger. Pilot enters the cockpit on a desktop or a
- * large tablet. The ship list then leaves. The chamfered control becomes the exterior view, and Exit sits to its left. A phone stays on the
- * chart, and shrinking the window below that leaves the cockpit. Locate opens the ship's orbit.
- * Recall cancels a countdown or stops a burn.
+ * The HUD reads the chart on screen, the warehouse, and the ranger. The plaque names that chart:
+ * Sol System, a wide planetary chart such as Earth System, or the body or craft once the camera is closer.
+ * Pilot enters the cockpit on a desktop or a large tablet. The ship list then leaves. The chamfered control becomes the exterior view, and Exit sits to its left. A phone stays on the
+ * chart, and shrinking the window below that leaves the cockpit. Locate opens the planetary chart where the ship is docked.
+ * Recall cancels a countdown or stops a burn and returns the ship to the dock it left.
  * The lower right, on a chart, is one step back: System from a planet or the Sun, Planet from a moon
  * or from an inner orbit, and Galaxy from the system. It stays down while piloting. Escape takes the
  * first chart step, Home on the system chart and otherwise that lower-right step, and leaves the
@@ -51,14 +52,17 @@ const STEP_TITLE: Record<string, string> = {
 export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLeave: () => void }) {
 	const { anchors, keepOut } = useHudAnchors();
 	const [view, setView] = useState<DemoView>(() => system.view());
+	const [riding, setRiding] = useState<ScanTarget | null>(null);
 	const [mode, setMode] = useState<Mode>("chart");
 	const [viewpoint, setViewpoint] = useState<PilotViewpoint>("interior");
 	const [found, setFound] = useState<ScanTarget[]>([]);
 	const [scanned, setScanned] = useState<ScanTarget | null>(null);
-	const [departure, setDeparture] = useState<{ target: ScanTarget; endsAt: number } | null>(null);
+	const [departure, setDeparture] = useState<{ target: ScanTarget; endsAt: number; cost: number } | null>(null);
 	const [now, setNow] = useState(() => Date.now());
 	const [flight, setFlight] = useState<ScanTarget | null>(null);
-	const [docked, setDocked] = useState<ScanTarget | null>(null);
+	const [docked, setDocked] = useState<ScanTarget | null>(() => system.berth());
+	const [hold, setHold] = useState(() => system.hold());
+	const [quote, setQuote] = useState<number | null>(null);
 	const [close, setClose] = useState(false);
 	const pilotFits = usePilotFits();
 	const piloting = mode === "pilot" && pilotFits;
@@ -68,7 +72,8 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const trail = steps.filter((button) => button.target !== "ship");
 
 	const go = useCallback(
-		(next: DemoView) => {
+		(next: DemoView, ride: ScanTarget | null = null) => {
+			setRiding(ride);
 			setView(next);
 			system.go(next);
 		},
@@ -87,10 +92,11 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		[system]
 	);
 
-	useEffect(() => system.onSelect((target) => go(target.view)), [system, go]);
+	useEffect(() => system.onSelect((target) => go(target.view, target.riding ?? null)), [system, go]);
 	useEffect(() => system.onScan(pick), [system, pick]);
 	useEffect(() => system.onScanFound(setFound), [system]);
 	useEffect(() => system.onFraming(setClose), [system]);
+	useEffect(() => system.onHold(setHold), [system]);
 	useEffect(() => system.setScanning(!piloting), [system, piloting]);
 	useEffect(() => system.setPiloting(piloting), [system, piloting]);
 	useEffect(() => {
@@ -102,14 +108,14 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	useEffect(() => system.setViewpoint(viewpoint), [system, viewpoint]);
 
 	const launch = useCallback(
-		(target: ScanTarget) => {
+		(target: ScanTarget, cost: number) => {
 			setDeparture(null);
 			setFlight(target);
 			setDocked(null);
 			system.travel(target, () => {
 				setFlight(null);
-				setDocked(target);
-			});
+				setDocked(system.berth());
+			}, cost);
 		},
 		[system]
 	);
@@ -123,14 +129,24 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 			setNow(time);
 			if (secondsLeft(departure.endsAt, time) === 0) {
 				window.clearInterval(tick);
-				launch(departure.target);
+				launch(departure.target, departure.cost);
 			}
 		}, 100);
 		return () => window.clearInterval(tick);
 	}, [departure, launch]);
 
-	const ship = { at: flight ? null : (docked?.host ?? "earth"), departing: departure !== null };
-	const bound = departure?.target ?? flight;
+	const ship = {
+		at: flight ? null : (docked?.host ?? "earth"),
+		departing: departure !== null,
+		energy: hold.energy,
+	};
+	useEffect(() => {
+		if (!scanned) {
+			setQuote(null);
+			return;
+		}
+		setQuote(system.quote(scanned));
+	}, [scanned, docked, flight, system]);
 
 	const labels = useMemo<LabelItem[]>(() => {
 		if (piloting) {
@@ -203,7 +219,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const stop = () => {
 		system.land();
 		setFlight(null);
-		setDocked(null);
+		setDocked(system.berth());
 	};
 
 	const recall = () => {
@@ -216,27 +232,34 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		}
 	};
 
-	const location = shipLocation(
-		departure ? { target: departure.target, seconds: secondsLeft(departure.endsAt, now) } : null,
-		flight,
-		docked
-	);
+	const bound = departure?.target ?? flight;
+	const location = viewPlaque(view, close, riding);
+	const siphon = scanned
+		? siphonAction(
+				scanned,
+				{ dockedId: flight ? null : (docked?.id ?? null), siphoning: hold.siphoning },
+				scanned.kind === "collector" ? system.charge(scanned.id) : 0
+			)
+		: null;
+	const collectorCharge =
+		scanned?.kind === "collector" ? `${Math.round(system.charge(scanned.id)).toLocaleString("en-US")} in the collector` : null;
 
 	return (
 		<>
 			<SpaceLabels source={system} items={labels} title="Scanned" keepOut={keepOut} />
 			{piloting && viewpoint === "interior" ? <AftFrames /> : null}
-			{piloting ? <Dashboard system={system} course={bound ? scanCard(bound).label : null} /> : null}
+			{piloting ? <Dashboard system={system} course={bound ? scanCard(bound).label : null} energy={hold.energy} /> : null}
 			<Hud
 				anchors={anchors}
 				location={location}
+				energy={hold.energy}
 				pilot={{
 					onClick: togglePilot,
 					disabled: !pilotFits && !piloting,
 					pressed: piloting,
 					title: piloting ? "Back to the chart" : pilotFits ? "Into the cockpit" : "The cockpit needs a larger screen",
 				}}
-				locate={{ onClick: () => take({ label: "Home", target: "ship" }), title: "Your ship's orbit" }}
+				locate={{ onClick: () => take({ label: "Home", target: "ship" }), title: "Where your ship is docked" }}
 				recall={{
 					onClick: recall,
 					disabled: departure === null && flight === null,
@@ -284,18 +307,22 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 			{scanned ? (
 				<ScanModal
 					card={scanCard(scanned)}
+					note={collectorCharge}
 					view={viewAction(scanned, view, close)}
-					travel={travelAction(scanned, ship)}
+					travel={travelAction(scanned, ship, quote)}
+					siphon={siphon}
 					onClose={() => setScanned(null)}
 					onView={() => {
 						system.visit(scanned);
 						setScanned(null);
 					}}
 					onTravel={() => {
-						setDeparture({ target: scanned, endsAt: Date.now() + DEPARTURE_SECONDS * 1000 });
+						const cost = quote ?? system.quote(scanned);
+						setDeparture({ target: scanned, endsAt: Date.now() + DEPARTURE_SECONDS * 1000, cost });
 						setNow(Date.now());
 						setScanned(null);
 					}}
+					onSiphon={() => system.setSiphoning(!hold.siphoning)}
 				/>
 			) : null}
 		</>
@@ -313,27 +340,6 @@ function usePilotFits(): boolean {
 		() => window.matchMedia(PILOT_VIEWPORT).matches,
 		() => false
 	);
-}
-
-/** The location bar: the place on the left, and what the ship is doing there. */
-function shipLocation(
-	departure: { target: ScanTarget; seconds: number } | null,
-	flight: ScanTarget | null,
-	docked: ScanTarget | null
-): { title: string; detail: string } {
-	if (departure) {
-		return { title: destinationName(departure.target), detail: `Departing in ${departure.seconds}` };
-	}
-	if (flight) {
-		return { title: destinationName(flight), detail: "En route" };
-	}
-	if (docked) {
-		return {
-			title: placeName(docked.host),
-			detail: docked.id === docked.host ? "With a satellite" : destinationName(docked),
-		};
-	}
-	return { title: "Earth", detail: "In orbit" };
 }
 
 /** A frame and a name around each aft view. The views themselves are drawn by the scene, under these. */

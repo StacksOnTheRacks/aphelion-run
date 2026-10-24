@@ -1,6 +1,8 @@
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 
 import { isDoubleTap } from "./cockpit";
+import { viewPlaque } from "./view-plaque";
+import type { ScanTarget } from "./scan";
 import { isPick } from "./pointer";
 import { WHEEL_ZOOM_FRACTION, wheelNotch } from "./zoom";
 import {
@@ -156,7 +158,26 @@ expect(SCAN_LIMIT === 10, "a scan names at most ten things");
 
 const systemSteps = chartButtons("system");
 expect(systemSteps.map((button) => button.label).join() === "Home,Galaxy", "the system chart offers Home, then Galaxy");
-expect(systemSteps[0]?.target === "ship", "Home opens the ship's orbit");
+expect(systemSteps[0]?.target === "ship", "Home opens the ship's chart");
+expect(bodyTarget("earth").view === "earth-outer", "an Earth station's planetary chart is Earth's outer orbit");
+expect(bodyTarget("sun").view === "sun-outer", "a Sun collector's planetary chart is the Sun's outer orbit");
+expect(bodyTarget("triton").view === "neptune-triton-outer", "a moon dock's planetary chart is that moon's outer orbit");
+
+const corporateStation: ScanTarget = {
+	id: "earth-station-corporate-0",
+	host: "earth",
+	kind: "station",
+	owner: "corporate",
+};
+expect(viewPlaque("system", false, null).title === "Sol System", "the system chart is Sol System");
+expect(viewPlaque("system", false, null).detail === null, "the plaque has no ship status");
+expect(viewPlaque("neptune-outer", false, null).title === "Neptune System", "a wide planet chart names that system");
+expect(viewPlaque("sun-outer", false, null).title === "Sun System", "the Sun's wide chart names the Sun's system");
+expect(viewPlaque("earth-outer", false, null).title === "Earth System", "Earth's wide chart names Earth's system");
+expect(viewPlaque("neptune-outer", true, null).title === "Neptune", "a planet zoomed in names the planet");
+expect(viewPlaque("neptune-triton-outer", false, null).title === "Triton", "a moon chart names the moon");
+expect(viewPlaque("earth-inner", false, null).title === "Earth", "an inner orbit names the body");
+expect(viewPlaque("earth-outer", false, corporateStation).title === "Corporate station", "riding a craft names that craft");
 expect(systemSteps[1]?.target === "galaxy", "Galaxy leaves Sol");
 expect(
 	chartButtons("earth-outer")[0]?.label === "System" && chartButtons("earth-outer")[0]?.target === "system",

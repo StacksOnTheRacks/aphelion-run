@@ -2,10 +2,11 @@
  * Where warehouse bases, Earth's energy stations, and outer orbits sit. Layout only: no Babylon
  * types, so the clearance rules can be checked without starting the scene.
  *
- * A planet's warehouses ride a halo between the surface and the innermost moon. Mercury and Venus
- * have no moons, so the halo is a fixed multiple of the radius. Saturn's moons sit outside the
- * rings, so its halo uses the gap inside the ring instead. Earth has no homes. Its inner ring
- * holds the two faction stations.
+ * A planet's warehouse halo is the ring mines sit outside: between the surface and the innermost
+ * moon. Mercury and Venus have no moons, so the halo is a fixed multiple of the radius. Saturn's
+ * moons sit outside the rings, so its halo uses the gap inside the ring instead. The demo places
+ * no home on a planet. Earth holds the two faction stations. The one home is the player's, on
+ * Earth's Moon.
  *
  * The outer orbit is the battle surface and the circle ships burn between. It sits outside the
  * bases and Saturn's rings, and inside the innermost moon's own outer orbit, so two zones never
@@ -152,6 +153,16 @@ export function planetBases(input: PlanetBaseInput): { warehouses: BaseSlot[]; s
 
 export function moonBases(diameter: number): BaseSlot[] {
 	return ring(MOON_BASES_PER_FACTION, moonBaseRadius(diameter), moonBaseSize(diameter));
+}
+
+/** The ship's home: one corporate base on Earth's Moon, the same size as any moon base. */
+export function playerHome(diameter: number): BaseSlot {
+	return {
+		faction: "corporate",
+		angle: 0,
+		radius: moonBaseRadius(diameter),
+		size: moonBaseSize(diameter),
+	};
 }
 
 function ring(perFaction: number, radius: number, size: BoxSize): BaseSlot[] {

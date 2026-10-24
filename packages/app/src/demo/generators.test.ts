@@ -117,6 +117,12 @@ for (const planet of PLANETS) {
 		expect(slot.radius - reach > homeOuter, `${planet.name} ${slot.resource} generator clears the homes`);
 		expect(slot.radius + reach < limit, `${planet.name} ${slot.resource} generator stays inside the inner orbit`);
 		expect(slot.size.width > 0 && slot.size.height > 0 && slot.size.depth > 0, `${planet.name} generator is a box`);
+		expect(
+			slot.size.width <= WAREHOUSE_SIZE.width &&
+				slot.size.height <= WAREHOUSE_SIZE.height &&
+				slot.size.depth <= WAREHOUSE_SIZE.depth,
+			`${planet.name} ${slot.resource} mine is no bigger than a base`
+		);
 	}
 	const angles = new Set(slots.map((slot) => slot.angle.toFixed(6)));
 	expect(angles.size === slots.length, `${planet.name} generators do not share an angle`);
@@ -134,6 +140,11 @@ for (const planet of PLANETS) {
 			expect(slot.radius - reach > bases, `${moon.name} ${slot.resource} generator clears the homes`);
 			expect(slot.radius + reach < outer, `${moon.name} ${slot.resource} generator stays inside the outer orbit`);
 			expect(slot.size.width < moon.diameter, `${moon.name} generator is smaller than the moon`);
+			const base = moonBaseSize(moon.diameter);
+			expect(
+				slot.size.width <= base.width && slot.size.height <= base.height && slot.size.depth <= base.depth,
+				`${moon.name} ${slot.resource} mine is no bigger than a base`
+			);
 		}
 	}
 }

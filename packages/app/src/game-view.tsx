@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { Scene } from "@babylonjs/core/scene";
 
+import { freshSession, STARTING_ENERGY, type SolSession } from "./demo/energy";
 import { createEnvironment, type EnvironmentDemo } from "./demo/environment";
 import { createGalaxy, type GalaxyDemo } from "./demo/galaxy";
 import { GalaxyPlace } from "./galaxy-view";
@@ -30,8 +31,10 @@ const READY_TIMEOUT_MS = 20_000;
 const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
 /**
- * The game: the galaxy first, then Sol once the player selects it. Each place is its own scene. Crossing
- * between them releases the one on screen, shows the loading screen, and brings the next one up.
+ * The game opens in Sol, on the planetary chart where the ship is docked. The galaxy is a step back
+ * from the system chart. Each place is its own scene. Crossing between them releases the one on screen,
+ * shows the loading screen, and brings the next one up. The dock and the energy aboard come back with
+ * the pilot until the page is reloaded.
  */
 export function GameView() {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -40,15 +43,18 @@ export function GameView() {
 	const sceneRef = useRef<Scene | null>(null);
 	/** Bumped by every load and on unmount, so a load that has been overtaken stops. */
 	const loadRef = useRef(0);
+	const sessionRef = useRef<SolSession>(freshSession());
+	const solRef = useRef<EnvironmentDemo | null>(null);
+	const [shipEnergy, setShipEnergy] = useState(STARTING_ENERGY);
 	const [loaded, setLoaded] = useState<Loaded | null>(null);
 	const [loading, setLoading] = useState<{ place: Place; progress: number; visible: boolean }>({
-		place: "galaxy",
+		place: "system",
 		progress: 0,
 		visible: true,
 	});
 	const [error, setError] = useState<string | null>(null);
 
-	const load = useCallback(async (place: Place, crossing: boolean, atShip = false) => {
+	const load = useCallback(async (place: Place, crossing: boolean, atBerth = false) => {
 		const engine = engineRef.current;
 		const canvas = canvasRef.current;
 		if (!engine || !canvas) {
@@ -67,6 +73,12 @@ export function GameView() {
 
 		const previous = sceneRef.current;
 		sceneRef.current = null;
+		if (solRef.current) {
+			const saved = solRef.current.session();
+			sessionRef.current = saved;
+			setShipEnergy(saved.energy);
+			solRef.current = null;
+		}
 		setLoaded(null);
 		previous?.dispose();
 
@@ -78,7 +90,7 @@ export function GameView() {
 			next =
 				place === "galaxy"
 					? { place, galaxy: createGalaxy(engine, scene, canvas, { opening: !crossing }) }
-					: { place, system: await createEnvironment(engine, scene, canvas, { atShip }) };
+					: { place, system: await createEnvironment(engine, scene, canvas, { atBerth, session: sessionRef.current }) };
 		} catch (caught) {
 			scene.dispose();
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -108,6 +120,10 @@ export function GameView() {
 			return;
 		}
 		sceneRef.current = scene;
+		if (next.place === "system") {
+			solRef.current = next.system;
+			setShipEnergy(next.system.hold().energy);
+		}
 		setLoaded(next);
 		setLoading((shown) => ({ ...shown, progress: 1, visible: false }));
 	}, []);
@@ -137,7 +153,7 @@ export function GameView() {
 		};
 		document.addEventListener("gesturestart", blockGesture, { capture: true });
 		document.addEventListener("gesturechange", blockGesture, { capture: true });
-		void load("galaxy", false);
+		void load("system", false, true);
 
 		return () => {
 			loadRef.current += 1;
@@ -150,7 +166,7 @@ export function GameView() {
 		};
 	}, [load]);
 
-	const enterSol = useCallback(() => void load("system", true), [load]);
+	const enterSol = useCallback(() => void load("system", true, false), [load]);
 	const enterShip = useCallback(() => void load("system", true, true), [load]);
 	const leaveSol = useCallback(() => void load("galaxy", true), [load]);
 
@@ -158,7 +174,7 @@ export function GameView() {
 		<div className="absolute inset-0 touch-none overflow-hidden overscroll-none bg-black text-white">
 			<canvas ref={canvasRef} className="h-full w-full touch-none outline-none select-none" />
 			{loaded?.place === "galaxy" ? (
-				<GalaxyPlace galaxy={loaded.galaxy} onEnterSol={enterSol} onHome={enterShip} />
+				<GalaxyPlace galaxy={loaded.galaxy} energy={shipEnergy} onEnterSol={enterSol} onHome={enterShip} />
 			) : null}
 			{loaded?.place === "system" ? <SystemPlace system={loaded.system} onLeave={leaveSol} /> : null}
 			{!loaded ? <GameChrome /> : null}
