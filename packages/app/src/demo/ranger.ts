@@ -1,4 +1,5 @@
 import type { Camera } from "@babylonjs/core/Cameras/camera";
+import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { LoadAssetContainerAsync } from "@babylonjs/core/Loading/sceneLoader";
 import { Material } from "@babylonjs/core/Materials/material";
@@ -33,6 +34,11 @@ export const HULL_LENGTH = 0.04;
  * model has no real cabin, and its nose and canopy would sit in the view.
  */
 export const SHIP_LAYER = 0x10000000;
+/**
+ * The dash blocked in ahead of the pilot. The windscreen draws this and not the hull: the canopy
+ * and the nose fill the seat, and the world near plane is too far out for a panel in front of the eye.
+ */
+export const COCKPIT_LAYER = 0x80000000;
 
 /**
  * Mounts are in the ship's own units: the nose is +Z, starboard is +X, and the hull is about 17 long.
@@ -133,6 +139,54 @@ export type Ranger = ShipModel & {
 };
 
 /**
+ * The dash is exported in the Ranger empty's own space, with that empty's scale already on each node
+ * and no extra rotation. It is parented beside the hull so the scale is not applied twice.
+ */
+async function attachCockpit(scene: Scene, facing: TransformNode): Promise<void> {
+	const container = await LoadAssetContainerAsync("/models/cockpit.glb", scene);
+	container.addAllToScene();
+	for (const mesh of container.meshes) {
+		mesh.isPickable = false;
+		mesh.alwaysSelectAsActiveMesh = true;
+		mesh.layerMask = COCKPIT_LAYER;
+		if (mesh.getTotalVertices() === 0) {
+			continue;
+		}
+		// No sun reaches the seat. A flat glow keeps the panels up, and where the plastic has a grain
+		// that glow uses the same picture so the mottling survives in the shadow.
+		const material = mesh.material;
+		if (material instanceof PBRMaterial && material.name !== "Cockpit Screen") {
+			material.emissiveColor.copyFrom(material.albedoColor);
+			material.emissiveTexture = material.albedoTexture;
+			material.emissiveIntensity = 0.3;
+		}
+		if (material instanceof PBRMaterial && material.name === "Cockpit Screen") {
+			// A flat quad against the curved coaming shares pixels. Pull the glass toward the eye
+			// so a remaining kiss still loses to the screen.
+			material.zOffset = 2;
+		}
+	}
+	for (const node of container.rootNodes) {
+		node.parent = facing;
+	}
+	// The grain is a normal map. It needs a light of its own: the sun never reaches the seat, and the
+	// hull fill is on the ship layer. Both lights ride the ship, skimming down toward the panel.
+	const fill = new HemisphericLight("cockpit-fill", new Vector3(0, 1, 0), scene);
+	fill.parent = facing;
+	fill.includeOnlyWithLayerMask = COCKPIT_LAYER;
+	fill.intensity = 0.28;
+	fill.diffuse = new Color3(0.72, 0.74, 0.78);
+	fill.groundColor = new Color3(0.03, 0.03, 0.04);
+	fill.specular = new Color3(0.05, 0.05, 0.05);
+	const skim = new DirectionalLight("cockpit-skim", new Vector3(0.15, -0.8, 0.55).normalize(), scene);
+	skim.parent = facing;
+	skim.includeOnlyWithLayerMask = COCKPIT_LAYER;
+	skim.intensity = 0.55;
+	skim.diffuse = new Color3(0.86, 0.87, 0.9);
+	skim.specular = new Color3(0.42, 0.42, 0.45);
+}
+
+/**
  * The ranger from the Blender file. The glTF is geometry and materials only: scene lights are
  * dropped, and the engine glow materials stay dark until a plume, which is drawn here, is firing.
  * The nose is turned onto +Z so `lookAt` points it along the heading.
@@ -199,6 +253,7 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 		throw new Error("The ranger hull has no length.");
 	}
 	ship.scaling.setAll(HULL_LENGTH / length);
+	await attachCockpit(scene, facing);
 
 	const fan = mountEngineFan(scene, container.meshes);
 	const plumes = new Map<Hardpoint, Plume>();

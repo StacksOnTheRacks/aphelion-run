@@ -1,0 +1,14 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="700" height="360" viewBox="0 0 700 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="center-pedestal" clip-path="url(#clip0_0_69)">
+<path id="Vector" d="M30 0H670L700 360H0L30 0Z" fill="#1D2330"/>
+<g id="Vector_2">
+<path d="M30 0H670Z" fill="black"/>
+<path d="M30 0H670" stroke-width="2" stroke="#2E3646"/>
+</g>
+</g>
+<defs>
+<clipPath id="clip0_0_69">
+<rect width="700" height="360" fill="white"/>
+</clipPath>
+</defs>
+</svg>

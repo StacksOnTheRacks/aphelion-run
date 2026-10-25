@@ -56,7 +56,7 @@ import {
 	type SolSession,
 } from "./energy";
 import { CLIMB_PACE, createJourney, hoverDeparture, journeySeconds, type Dock, type Harbor, type JourneyPlan } from "./journey";
-import { CHART_LAYER, createCockpit, type PilotViewpoint } from "./cockpit";
+import { CHART_LAYER, createCockpit, type CenterPaint, type PilotViewpoint, type ScreenRect } from "./cockpit";
 import { HULL_LENGTH, loadRanger } from "./ranger";
 import { awayFrom, type LabelFrame, type LabelSource } from "./labels";
 import type { NavBody, NavFix, NavPoint } from "./nav";
@@ -456,7 +456,8 @@ const OUTER_VIEW_MARGIN = 1.25;
 const ZONE_FADE_SECONDS = 0.35;
 const INNER_RING_COLOR = new Color3(0.85, 0.55, 0.25);
 
-const SATELLITE_COUNT = 300;
+/** Collectors in the Sun's inner band. Half the original swarm, split across the three owners. */
+const SATELLITE_COUNT = 150;
 const SATELLITE_BAND_INNER = 19;
 const SATELLITE_BAND_OUTER = 30;
 const SATELLITE_SIZE = { width: 0.24, height: 0.04, depth: 0.12 };
@@ -1007,8 +1008,11 @@ export type EnvironmentDemo = LabelSource & {
 	onHold: (listener: (hold: ShipHold) => void) => () => void;
 	/** Energy still in a collector. A collector that has not been siphoned is full. */
 	charge: (id: string) => number;
-	/** Starts or stops siphoning. Starting does nothing unless the ship is docked at a collector that still holds energy. */
-	setSiphoning: (on: boolean) => void;
+	/**
+	 * Starts siphoning `collectorId`, or stops when `on` is false. Any collector works once the ship
+	 * is docked at the Sun. Starting does nothing while the ship is elsewhere or the collector is empty.
+	 */
+	setSiphoning: (on: boolean, collectorId?: string) => void;
 	/** Dock, energy, and collector charges, so leaving Sol can come back to the same berth. */
 	session: () => SolSession;
 	/** Ends the flight early and puts the ship back on the dock it left. Energy already burned stays spent. */
@@ -1020,17 +1024,23 @@ export type EnvironmentDemo = LabelSource & {
 	 * Takes effect while piloting; the chart stays put until then.
 	 */
 	setViewpoint: (viewpoint: PilotViewpoint) => void;
+	/** Moves the aft cameras onto the side-display glass. Shares of the canvas, from its top left. */
+	setAftRects: (rects: { port: ScreenRect; starboard: ScreenRect }) => void;
 	/** One notch of the chart wheel, held to this chart's limits. Ignored in the cockpit and while the camera is flying. */
 	zoom: (direction: ZoomDirection) => void;
 	/** Calls back every frame while piloting with where the ship is in the system. Returns a stop function. */
 	onNav: (listener: (fix: NavFix) => void) => () => void;
+	/** Redraws the center screen. Does nothing when that glass is missing. */
+	paintCenter: (paint: CenterPaint) => void;
 };
 
-/** Energy the ship is carrying, and the collector it is siphoning when it is docked at one. */
+/** Energy the ship is carrying, and the collector it is siphoning while docked at the Sun. */
 export type ShipHold = {
 	energy: number;
 	siphoning: boolean;
 	dockId: string | null;
+	/** The collector being siphoned. Null when the siphon is off. */
+	siphonId: string | null;
 	/** Energy still in the collector the ship is docked at. Null at any other dock. */
 	charge: number | null;
 };
@@ -1183,7 +1193,8 @@ export async function createEnvironment(
 	const session = options?.session;
 	let energy = session?.energy ?? STARTING_ENERGY;
 	let dockId = session?.dockId ?? STARTING_DOCK_ID;
-	let siphoning = session?.siphoning ?? false;
+	let siphonId: string | null = session?.siphonId ?? (session?.siphoning ? session.dockId : null);
+	let siphoning = (session?.siphoning ?? false) && siphonId !== null;
 	const collectorCharges = new Map<string, number>(Object.entries(session?.collectors ?? {}));
 	let departEnergy = energy;
 	let quoted = 0;
@@ -1194,11 +1205,12 @@ export async function createEnvironment(
 	const currentHold = (): ShipHold => {
 		const craft = crafts.find((item) => item.id === dockId);
 		const charge = craft?.kind === "collector" ? chargeOf(dockId) : null;
-		return { energy, siphoning, dockId, charge };
+		return { energy, siphoning, dockId, siphonId, charge };
 	};
 	const publishHold = () => {
 		const hold = currentHold();
-		const key = `${Math.round(hold.energy)}|${hold.siphoning}|${hold.dockId}|${hold.charge === null ? "" : Math.round(hold.charge)}`;
+		const draining = siphonId ? Math.round(chargeOf(siphonId)) : "";
+		const key = `${Math.round(hold.energy)}|${hold.siphoning}|${hold.dockId}|${hold.siphonId}|${hold.charge === null ? "" : Math.round(hold.charge)}|${draining}`;
 		if (key === publishedHold) {
 			return;
 		}
@@ -1625,17 +1637,19 @@ export async function createEnvironment(
 		const before = sunAngle(focusPosition(SHOTS[active].focus));
 		placeBodies(deltaSeconds);
 		journey.update(deltaSeconds, focusPosition);
-		if (siphoning) {
-			const coupled = journey.docked();
-			const craft = crafts.find((item) => item.id === dockId);
-			if (!coupled || craft?.kind !== "collector") {
+		if (siphoning && siphonId) {
+			const atSun = journey.docked() !== null && journey.host() === "sun";
+			const craft = crafts.find((item) => item.id === siphonId);
+			if (!atSun || craft?.kind !== "collector") {
 				siphoning = false;
+				siphonId = null;
 			} else {
-				const next = siphonEnergy(energy, chargeOf(dockId), deltaSeconds);
+				const next = siphonEnergy(energy, chargeOf(siphonId), deltaSeconds);
 				energy = next.ship;
-				collectorCharges.set(dockId, next.collector);
+				collectorCharges.set(siphonId, next.collector);
 				if (next.collector <= 0) {
 					siphoning = false;
+					siphonId = null;
 				}
 			}
 			publishHold();
@@ -1968,6 +1982,8 @@ export async function createEnvironment(
 	const navEdge = Math.max(...PLANETS.map((spec) => spec.orbit));
 	/** The course in the plane, made once per flight. */
 	const navCourse: { from: readonly Vector3[] | null; points: NavPoint[] } = { from: null, points: [] };
+	/** Where the current burn is headed, in the short form the center screen shows. */
+	let courseName: string | null = null;
 	scene.onAfterRenderObservable.add(() => {
 		if (!piloting || navListeners.size === 0) {
 			return;
@@ -1993,7 +2009,7 @@ export async function createEnvironment(
 			ship: { x: ranger.position.x, z: ranger.position.z, hx: heading.x, hz: heading.z },
 			bodies: navBodies,
 			edge: navEdge,
-			course: course ? { points: navCourse.points, progress: course.progress } : null,
+			course: course ? { points: navCourse.points, progress: course.progress, name: courseName ?? "En route" } : null,
 		};
 		for (const listener of navListeners) {
 			listener(fix);
@@ -2145,7 +2161,9 @@ export async function createEnvironment(
 			return cruiseCost(journeySeconds(departurePlan(target).cruise.total));
 		},
 		travel(target, onDone, cost) {
+			courseName = courseLabel(target);
 			siphoning = false;
+			siphonId = null;
 			const docked = journey.docked();
 			const fromId = docked?.id ?? "earth";
 			const plan = departurePlan(target);
@@ -2164,6 +2182,11 @@ export async function createEnvironment(
 				() => {
 					const arrived = journey.docked();
 					dockId = idForDock(arrived?.dock) ?? (target.id !== target.host ? target.id : dockId);
+					const arrivedCraft = crafts.find((item) => item.id === dockId);
+					if (arrivedCraft?.kind === "collector" && chargeOf(dockId) > 0) {
+						siphoning = true;
+						siphonId = dockId;
+					}
 					const host = journey.host();
 					if (host) {
 						player.host = host;
@@ -2187,14 +2210,21 @@ export async function createEnvironment(
 			};
 		},
 		charge: chargeOf,
-		setSiphoning(on) {
-			if (on) {
-				const craft = crafts.find((item) => item.id === dockId);
-				if (!journey.docked() || craft?.kind !== "collector" || chargeOf(dockId) <= 0) {
-					return;
-				}
+		setSiphoning(on, collectorId) {
+			if (!on) {
+				siphoning = false;
+				siphonId = null;
+				publishHold();
+				return;
 			}
-			siphoning = on;
+			const source = collectorId ?? dockId;
+			const craft = crafts.find((item) => item.id === source);
+			const atSun = journey.docked() !== null && journey.host() === "sun";
+			if (!atSun || craft?.kind !== "collector" || chargeOf(source) <= 0) {
+				return;
+			}
+			siphoning = true;
+			siphonId = source;
 			publishHold();
 		},
 		session() {
@@ -2204,11 +2234,18 @@ export async function createEnvironment(
 					collectors[id] = charge;
 				}
 			}
-			return { energy, dockId, collectors, siphoning: siphoning && journey.docked() !== null };
+			return {
+				energy,
+				dockId,
+				collectors,
+				siphonId: siphoning ? siphonId : null,
+				siphoning: siphoning && journey.docked() !== null && journey.host() === "sun",
+			};
 		},
 		land() {
 			burning = false;
 			siphoning = false;
+			siphonId = null;
 			journey.stop();
 			publishHold();
 		},
@@ -2227,6 +2264,7 @@ export async function createEnvironment(
 			}
 		},
 		setViewpoint: cockpit.setViewpoint,
+		setAftRects: cockpit.setAftRects,
 		zoom(direction) {
 			if (piloting || travel < 1 || dolly) {
 				return;
@@ -2239,7 +2277,32 @@ export async function createEnvironment(
 				navListeners.delete(listener);
 			};
 		},
+		paintCenter: cockpit.paintCenter,
 	};
+}
+
+const MINERAL_NAME: Record<string, string> = {
+	hydrogen: "Hydrogen",
+	ore: "Ore",
+	nitrogen: "Nitrogen",
+	carbon: "Carbon",
+};
+
+/** The destination as the center screen reads it: a place, or the kind of craft. */
+function courseLabel(target: ScanTarget): string {
+	const named = (id: string) => JOURNEY_STOPS.find((stop) => stop.id === id)?.label ?? id;
+	switch (target.kind) {
+		case "station":
+			return `${named(target.host)} station`;
+		case "home":
+			return `${named(target.host)} home`;
+		case "collector":
+			return "Collector";
+		case "generator":
+			return `${MINERAL_NAME[target.resource ?? ""] ?? "Mineral"} mine`;
+		default:
+			return named(target.id);
+	}
 }
 
 function pointAlong(flight: Flight, amount: number): Vector3 {
@@ -3254,7 +3317,7 @@ type SatelliteOrbit = {
 };
 
 /**
- * Every satellite of one owner is a thin instance of a single box, so hundreds cost three draw calls.
+ * Every satellite of one owner is a thin instance of a single box, so the swarm costs three draw calls.
  * Their matrices are rewritten each frame as they orbit.
  */
 function buildSatelliteSwarm(

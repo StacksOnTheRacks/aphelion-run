@@ -16,11 +16,14 @@ export function Housing({
 	cut,
 	highlight,
 	border = "all",
+	bleed = false,
 }: {
 	cut: HousingCut;
 	highlight?: "top" | "bottom" | "left";
 	/** `bottom` strokes only the lower edge. `except-bottom` and `except-top` leave that edge open so a plate can sit on the screen. */
 	border?: "all" | "bottom" | "except-bottom" | "except-top";
+	/** Pull the fill past the top and sides, so a plate on the screen edge cannot leave a hairline of the scene. */
+	bleed?: boolean;
 }) {
 	const ref = useRef<SVGSVGElement>(null);
 	const [size, setSize] = useState({ w: 0, h: 0 });
@@ -47,12 +50,10 @@ export function Housing({
 		<svg ref={ref} aria-hidden className="pointer-events-none absolute inset-0 -z-10 h-full w-full overflow-visible">
 			{size.w > 0 && size.h > 0 ? (
 				<>
-					<path
-						d={platePath(size.w, size.h, fitted)}
-						fill={`url(#${gradientId})`}
-						stroke={border === "all" ? "#FFD73D" : "none"}
-						strokeOpacity={0.48}
-					/>
+					<path d={platePath(size.w, size.h, fitted, bleed ? 1 : 0)} fill={`url(#${gradientId})`} />
+					{border === "all" ? (
+						<path d={platePath(size.w, size.h, fitted, 0, 0.5)} fill="none" stroke="#FFD73D" strokeOpacity={0.48} />
+					) : null}
 					{border === "bottom" ? (
 						<path d={edgePath(size.w, size.h, fitted, "bottom")} fill="none" stroke="#FFD73D" strokeOpacity={0.48} />
 					) : null}
@@ -84,12 +85,15 @@ function clampCut(cut: HousingCut, width: number, height: number): Required<Hous
 	return { tl: cap(cut.tl), tr: cap(cut.tr), bl: cap(cut.bl), br: cap(cut.br) };
 }
 
-/** A closed outline, inset half a pixel so the centered stroke stays inside the plate. */
-function platePath(width: number, height: number, cut: Required<HousingCut>): string {
-	const x0 = 0.5;
-	const y0 = 0.5;
-	const x1 = width - 0.5;
-	const y1 = height - 0.5;
+/**
+ * A closed outline. `bleed` pulls the top and sides past the box so a plate on the screen edge
+ * covers the hairline the scene would otherwise show. The bottom stays on the box, where the stroke is.
+ */
+function platePath(width: number, height: number, cut: Required<HousingCut>, bleed = 0, inset = 0): string {
+	const x0 = inset - bleed;
+	const y0 = inset - bleed;
+	const x1 = width - inset + bleed;
+	const y1 = height - inset;
 	return [
 		`M${x0 + cut.tl} ${y0}`,
 		`H${x1 - cut.tr}`,
@@ -207,7 +211,7 @@ export function useHudAnchors(): { anchors: HudAnchors; keepOut: RefObject<HTMLE
  * the row on a desktop and just under the plaque on a phone, and slide off the right edge. The active ship
  * sits flush on the lower left, open along the bottom edge, with pilot, locate, and recall on its row. That bar opens into the fleet; choosing
  * a ship makes it active and closes the list. The chart's step back sits at the lower right, in the
- * chamfered control. In the cockpit that corner holds the exterior view, with Exit on its left.
+ * chamfered control. `leading` and `corner` can take that corner over.
  * One ship is listed: the ranger.
  */
 export function Hud({
@@ -220,6 +224,7 @@ export function Hud({
 	steps = [],
 	leading,
 	corner,
+	fleet = true,
 }: {
 	anchors: HudAnchors;
 	location: { title: string; detail: string | null };
@@ -230,10 +235,12 @@ export function Hud({
 	recall: HudAction;
 	/** The chart steps that used to sit in the lower right. Empty while piloting, and on the galaxy. */
 	steps?: { label: string; title: string; onClick: () => void }[];
-	/** A cockpit control drawn to the left of `corner`, such as the way back to the chart. */
+	/** A control drawn to the left of `corner`. */
 	leading?: ReactNode;
-	/** Replaces the ship list. In the cockpit this is the exterior control, on the lower right. */
+	/** Drawn at the lower right when the chart step is not. The exterior view uses it for the way back into the cockpit. */
 	corner?: ReactNode;
+	/** The active ship and its list. Off in the cockpit, where the console takes the bottom edge. */
+	fleet?: boolean;
 }) {
 	const [shipsOpen, setShipsOpen] = useState(false);
 	const [activeShipId, setActiveShipId] = useState<ShipId>("ranger");
@@ -252,7 +259,7 @@ export function Hud({
 		>
 			<div className="absolute inset-x-0 top-0">
 				<div ref={anchors.header} className="pointer-events-none absolute inset-x-0 top-0 h-8 min-[900px]:h-7">
-					<Housing cut={{}} border="bottom" />
+					<Housing cut={{}} border="bottom" bleed />
 				</div>
 				<div
 					ref={anchors.location}
@@ -309,7 +316,7 @@ export function Hud({
 				</div>
 			</div>
 
-			{corner ? null : (
+			{fleet ? (
 				<div ref={anchors.ships} className="absolute bottom-0 left-0 w-[min(286px,calc(100%-6.5rem))] min-[900px]:w-[352px] min-[900px]:max-w-[calc(100%-8rem)]">
 					{shipsOpen ? (
 						<div className="pointer-events-auto relative isolate flex w-full flex-col gap-1.5 p-2 min-[900px]:gap-1 min-[900px]:p-1.5">
@@ -367,7 +374,7 @@ export function Hud({
 						</div>
 					)}
 				</div>
-			)}
+			) : null}
 
 			{steps.length > 0 ? (
 				<div ref={anchors.system} className="absolute right-3 bottom-3 flex flex-col items-end gap-2 min-[900px]:right-6 min-[900px]:bottom-6">

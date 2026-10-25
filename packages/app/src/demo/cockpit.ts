@@ -1,21 +1,31 @@
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import { TargetCamera } from "@babylonjs/core/Cameras/targetCamera";
+import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import type { GlowLayer } from "@babylonjs/core/Layers/glowLayer";
+import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
+import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Viewport } from "@babylonjs/core/Maths/math.viewport";
+import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 
-import { HULL_LENGTH, SHIP_LAYER, type ShipMounts } from "./ranger";
+import { COCKPIT_LAYER, HULL_LENGTH, SHIP_LAYER, type ShipMounts } from "./ranger";
 
 /** A rectangle on screen as shares of the canvas, from its top left. */
 export type ScreenRect = { left: number; top: number; width: number; height: number };
 
-/** Where the two aft views sit over the windscreen: port on the left, starboard on the right. */
+/**
+ * The side-display rectangles from the flat console, as shares of a 1440×1024 screen.
+ * The aft pictures are on the side screens, so these no longer place a viewport.
+ */
 export const AFT_VIEWS: Record<"port" | "starboard", ScreenRect> = {
-	port: { left: 0.015, top: 0.2, width: 0.25, height: 0.2 },
-	starboard: { left: 0.735, top: 0.2, width: 0.25, height: 0.2 },
+	port: { left: 68 / 1440, top: 704 / 1024, width: 300 / 1440, height: 176 / 1024 },
+	starboard: { left: 1068 / 1440, top: 704 / 1024, width: 300 / 1440, height: 176 / 1024 },
 };
 
 /** Everything but the ship. Babylon's default mask, without the ship's bit. */
@@ -33,6 +43,8 @@ export const PILOT_LAYER = 0x20000000;
 const WINDSCREEN_FOV = 1.15;
 /** Wide enough that a side plume fits in its aft view from base to tip. */
 const AFT_FOV = 1;
+/** Pixels across the picture drawn on a side screen. Height follows the glass. */
+const FEED_WIDTH = 512;
 /**
  * The world is drawn from this far out, so its depth range still separates a moon from its planet.
  * Anything nearer is part of the ship, which the aft views draw after it with a near plane that fits the hull.
@@ -139,6 +151,11 @@ type Rig = {
 	mirrored: boolean;
 	/** Where the world camera faces: the mount's rotation, eased. */
 	steady: Quaternion;
+	/**
+	 * Width over height of the glass this view is drawn on.
+	 * The canvas aspect would stretch the picture across a panel that is not the shape of the window.
+	 */
+	aspect: number | null;
 };
 
 /** The pilot's head, turned by dragging across the windscreen. */
@@ -148,6 +165,123 @@ function clampHead(head: Head): Head {
 	return {
 		yaw: Math.max(-LOOK_YAW, Math.min(LOOK_YAW, head.yaw)),
 		pitch: Math.max(-LOOK_UP, Math.min(LOOK_DOWN, head.pitch)),
+	};
+}
+
+/**
+ * Width over height of a screen quad. The glass stands in the ship's space, so up is local Y.
+ * The two lower corners are the bottom edge.
+ */
+function screenAspect(mesh: AbstractMesh): number | null {
+	const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+	if (!positions || positions.length < 12) {
+		return null;
+	}
+	const corners: Array<[number, number, number]> = [];
+	for (let i = 0; i < positions.length; i += 3) {
+		const point: [number, number, number] = [positions[i], positions[i + 1], positions[i + 2]];
+		const known = corners.some(
+			(corner) => Math.abs(corner[0] - point[0]) < 1e-5 && Math.abs(corner[1] - point[1]) < 1e-5 && Math.abs(corner[2] - point[2]) < 1e-5
+		);
+		if (!known) {
+			corners.push(point);
+		}
+	}
+	if (corners.length < 4) {
+		return null;
+	}
+	corners.sort((a, b) => a[1] - b[1]);
+	const bottom = corners.slice(0, 2);
+	const top = corners.slice(-2);
+	const span = (a: [number, number, number], b: [number, number, number]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+	const width = span(bottom[0], bottom[1]);
+	const low: [number, number, number] = [(bottom[0][0] + bottom[1][0]) / 2, (bottom[0][1] + bottom[1][1]) / 2, (bottom[0][2] + bottom[1][2]) / 2];
+	const high: [number, number, number] = [(top[0][0] + top[1][0]) / 2, (top[0][1] + top[1][1]) / 2, (top[0][2] + top[1][2]) / 2];
+	const height = span(low, high);
+	if (width < 1e-5 || height < 1e-5) {
+		return null;
+	}
+	return width / height;
+}
+
+/**
+ * Draws this rig into the named screen. Both of its cameras write the same target: the world first,
+ * then the hull over it. Without a screen the cameras stay off the frame, so they cannot cover the windscreen.
+ */
+function feed(scene: Scene, each: Rig, meshName: string): void {
+	const mesh = scene.getMeshByName(meshName);
+	const aspect = mesh ? screenAspect(mesh) : null;
+	if (!mesh || aspect === null) {
+		return;
+	}
+	each.aspect = aspect;
+	const target = new RenderTargetTexture(
+		`${meshName} feed`,
+		{ width: FEED_WIDTH, height: Math.max(1, Math.round(FEED_WIDTH / aspect)) },
+		scene,
+		{ generateMipMaps: false, doNotChangeAspectRatio: true }
+	);
+	target.ignoreCameraViewport = true;
+	target.wrapU = Texture.CLAMP_ADDRESSMODE;
+	target.wrapV = Texture.CLAMP_ADDRESSMODE;
+	target.clearColor = scene.clearColor.clone();
+	for (const view of each.cameras) {
+		view.outputRenderTarget = target;
+	}
+	const glass = new StandardMaterial(`${meshName} glass`, scene);
+	glass.disableLighting = true;
+	glass.diffuseColor = Color3.Black();
+	glass.specularColor = Color3.Black();
+	glass.ambientColor = Color3.Black();
+	// The texture is the picture. A white emissive color would be added to it and the glass would clip to white.
+	glass.emissiveColor = Color3.Black();
+	glass.emissiveTexture = target;
+	glass.useEmissiveAsIllumination = true;
+	// The blockout glass is double sided. Culling the back would hide the picture if the normal faces away.
+	glass.backFaceCulling = false;
+	// The quad sits on the curved coaming. The same bias the blockout used, so the picture still wins a shared pixel.
+	glass.zOffset = 2;
+	mesh.material = glass;
+}
+
+/** Draws one frame of the center screen. The canvas origin is the top left of the glass. */
+export type CenterPaint = (context: CanvasRenderingContext2D, width: number, height: number) => void;
+
+/**
+ * Puts a picture on the center screen and returns the way to redraw it.
+ * The shared screen material stays as it is; only this mesh gets the new glass.
+ * A missing screen leaves the painter as a no-op.
+ */
+function centerGlass(scene: Scene): (paint: CenterPaint) => void {
+	const mesh = scene.getMeshByName("Cockpit MFD Center");
+	const aspect = mesh ? screenAspect(mesh) : null;
+	if (!mesh || aspect === null) {
+		return () => {};
+	}
+	const width = 1024;
+	const height = Math.max(1, Math.round(width / aspect));
+	const texture = new DynamicTexture("Cockpit MFD Center picture", { width, height }, scene, false);
+	texture.wrapU = Texture.CLAMP_ADDRESSMODE;
+	texture.wrapV = Texture.CLAMP_ADDRESSMODE;
+	const context = texture.getContext() as CanvasRenderingContext2D;
+	context.fillStyle = "#050a12";
+	context.fillRect(0, 0, width, height);
+	// The screen's v runs top to bottom already, so the canvas is uploaded without a second flip.
+	texture.update(false);
+	const glass = new StandardMaterial("Cockpit MFD Center glass", scene);
+	glass.disableLighting = true;
+	glass.diffuseColor = Color3.Black();
+	glass.specularColor = Color3.Black();
+	glass.ambientColor = Color3.Black();
+	glass.emissiveColor = Color3.Black();
+	glass.emissiveTexture = texture;
+	glass.useEmissiveAsIllumination = true;
+	glass.backFaceCulling = false;
+	glass.zOffset = 2;
+	mesh.material = glass;
+	return (paint) => {
+		paint(context, width, height);
+		texture.update(false);
 	};
 }
 
@@ -161,6 +295,13 @@ export type Cockpit = {
 	 * The exterior camera leaves out the course: chevrons and the path line stay on the windscreen.
 	 */
 	setViewpoint: (viewpoint: PilotViewpoint) => void;
+	/**
+	 * Kept so the console can still report where its glass sat.
+	 * The aft pictures are on the side screens now, so the rectangles are not used.
+	 */
+	setAftRects: (rects: { port: ScreenRect; starboard: ScreenRect }) => void;
+	/** Redraws the center screen. Does nothing when that glass is missing. */
+	paintCenter: (paint: CenterPaint) => void;
 };
 
 export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, glow: GlowLayer): Cockpit {
@@ -195,6 +336,7 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 		],
 		mirrored: hull,
 		steady: new Quaternion(),
+		aspect: null,
 	});
 
 	const windscreen = rig(
@@ -205,15 +347,19 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 		false,
 		WORLD_LAYER | PILOT_LAYER
 	);
+	// The dash sits centimeters from the eye, inside the near plane that clips the world.
+	// This camera is second, so it clears depth only and the panel lands on the world already drawn.
+	windscreen.cameras.push(camera("cockpit-dash", COCKPIT_LAYER, WINDSCREEN_FOV, SHIP_NEAR, SHIP_FAR, null));
 	// The world and the hull, and neither the course nor the orbit lines. Those are drawn on the glass.
 	const exterior = camera("cockpit-exterior", WORLD_LAYER | SHIP_LAYER, EXTERIOR_FOV, WORLD_NEAR, WORLD_FAR, null);
-	const rigs = [
-		windscreen,
-		rig("cockpit-aft-port", mounts.port, AFT_FOV, AFT_VIEWS.port, true),
-		rig("cockpit-aft-starboard", mounts.starboard, AFT_FOV, AFT_VIEWS.starboard, true),
-	];
-	// Each camera after the first clears depth only, so the ship always lands on top of the world it was drawn over.
-	const cameras = rigs.flatMap((each) => each.cameras);
+	const aftPort = rig("cockpit-aft-port", mounts.port, AFT_FOV, null, true);
+	const aftStarboard = rig("cockpit-aft-starboard", mounts.starboard, AFT_FOV, null, true);
+	// The world pass and the hull pass share one picture. The second camera clears depth only, so the
+	// plume lands on the sky already drawn. The dash camera is later in the frame and samples this.
+	feed(scene, aftPort, "Cockpit MFD Port");
+	feed(scene, aftStarboard, "Cockpit MFD Starboard");
+	const paintCenter = centerGlass(scene);
+	const rigs = [windscreen, aftPort, aftStarboard];
 	const mirrored = new Set<Camera>(rigs.filter((each) => each.mirrored).flatMap((each) => each.cameras));
 	// The glow costs a full pass per camera, and the aft views are too small to need it.
 	const glowing = new Set<Camera>([chart, windscreen.cameras[0], exterior]);
@@ -226,8 +372,10 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 	// Dragging grabs the view: the world follows the pointer, so the head turns the other way.
 	// A second tap in the same place looks ahead. The browser's double-tap zoom is the same gesture,
 	// so this is recognized here instead of from a dblclick.
-	let aim: Head = { yaw: 0, pitch: 0 };
-	let head: Head = { yaw: 0, pitch: 0 };
+	// Straight ahead looks over the brow. The seat starts tipped down so the panel is in frame.
+	const rest: Head = { yaw: 0, pitch: 0.3 };
+	let aim: Head = { ...rest };
+	let head: Head = { ...rest };
 	let aimOrbit: ExteriorOrbit = { ...EXTERIOR_HOME };
 	let orbit: ExteriorOrbit = { ...EXTERIOR_HOME };
 	let drag: { id: number; x: number; y: number; originX: number; originY: number } | null = null;
@@ -358,8 +506,11 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 			scene.activeCamera = exterior;
 			return;
 		}
-		scene.activeCameras = cameras;
-		scene.activeCamera = cameras[0];
+		// The aft cameras fill their textures before the dash camera samples them. They draw to those
+		// targets, not the canvas, and the windscreen underneath is already on the default framebuffer.
+		const feeds = [aftPort, aftStarboard].filter((each) => each.cameras[0].outputRenderTarget);
+		scene.activeCameras = [windscreen.cameras[0], ...feeds.flatMap((each) => each.cameras), ...windscreen.cameras.slice(1)];
+		scene.activeCamera = windscreen.cameras[0];
 	};
 
 	// A mirrored projection turns every triangle's winding around, so those views cull the other face.
@@ -367,7 +518,8 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 		glow.isEnabled = glowing.has(current);
 		engine.cullBackFaces = mirrored.has(current) ? false : null;
 		// scissorClear lives on the WebGL engine. The scene's engine handle is the wider base type.
-		if (aftWorld.has(current) && engine instanceof Engine) {
+		// A render target clears itself. Scissoring that camera would erase a rectangle of the picture.
+		if (aftWorld.has(current) && !current.outputRenderTarget && engine instanceof Engine) {
 			const view = current.viewport;
 			const width = engine.getRenderWidth();
 			const height = engine.getRenderHeight();
@@ -419,7 +571,7 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 					// Set before the frame, because Babylon reads the projection before a camera's render hooks run.
 					Matrix.PerspectiveFovLHToRef(
 						view.fov,
-						engine.getAspectRatio(view),
+						each.aspect ?? engine.getAspectRatio(view),
 						view.minZ,
 						view.maxZ,
 						projection,
@@ -439,7 +591,7 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 			active = on;
 			drag = null;
 			if (on) {
-				aim = { yaw: 0, pitch: 0 };
+				aim = { ...rest };
 				aimOrbit = { ...EXTERIOR_HOME };
 				orbit = { ...EXTERIOR_HOME };
 				update(true);
@@ -458,5 +610,9 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 				show();
 			}
 		},
+		setAftRects() {
+			// The side screens carry the aft pictures. A rectangle on the page no longer places them.
+		},
+		paintCenter,
 	};
 }

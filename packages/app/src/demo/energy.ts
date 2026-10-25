@@ -1,7 +1,7 @@
 /**
  * Energy aboard the ship. These figures belong to the demo. The brief still sets no amounts.
- * A photon cruise spends the burn rate for each second it runs. A collector fills the ship
- * only while the ship is docked there and the pilot is siphoning.
+ * A photon cruise spends the burn rate for each second it runs. Any collector fills the ship
+ * once the ship is docked at the Sun, until that collector is empty or the pilot stops.
  */
 
 /** Energy aboard a new ship. */
@@ -21,6 +21,8 @@ export type SolSession = {
 	dockId: string;
 	/** Collectors that are below a full charge. A missing id is still full. */
 	collectors: Record<string, number>;
+	/** The collector being siphoned. Null when the siphon is off. */
+	siphonId: string | null;
 	siphoning: boolean;
 };
 
@@ -29,6 +31,7 @@ export function freshSession(): SolSession {
 		energy: STARTING_ENERGY,
 		dockId: STARTING_DOCK_ID,
 		collectors: {},
+		siphonId: null,
 		siphoning: false,
 	};
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
-import { AFT_VIEWS, type PilotViewpoint, type ScreenRect } from "./demo/cockpit";
+import type { PilotViewpoint } from "./demo/cockpit";
 import { chartButtons, viewTrail, wideChartStep, type ChartButton, type DemoView, type EnvironmentDemo } from "./demo/environment";
 import {
 	DEPARTURE_SECONDS,
@@ -16,8 +16,9 @@ import {
 	type ScanTarget,
 } from "./demo/scan";
 import { viewPlaque } from "./demo/view-plaque";
-import { Dashboard } from "./dashboard";
-import { Housing, Hud, useHudAnchors } from "./hud";
+import { PilotCornerDock } from "./dashboard";
+import { paintCenterPanel } from "./nav-glass";
+import { Hud, useHudAnchors } from "./hud";
 import { PILOT_VIEWPORT } from "./pilot-viewport";
 import { ScanModal } from "./scan-card";
 import { SpaceLabels, type LabelItem } from "./space-labels";
@@ -41,11 +42,11 @@ const STEP_TITLE: Record<string, string> = {
  *
  * The HUD reads the chart on screen, the warehouse, and the ranger. The plaque names that chart:
  * Sol System, a wide planetary chart such as Earth System, or the body or craft once the camera is closer.
- * Pilot enters the cockpit on a desktop or a large tablet. The ship list then leaves. The chamfered control becomes the exterior view, and Exit sits to its left. A phone stays on the
+ * Pilot enters the cockpit on a desktop or a large tablet. The ship list then leaves. The dash is geometry in the scene, and it turns with the head. Exit and the exterior view sit at the lower right, and stay there, the same size, outside the ship. The ship list stays hidden out there too. A phone stays on the
  * chart, and shrinking the window below that leaves the cockpit. Locate opens the planetary chart where the ship is docked.
  * Recall cancels a countdown or stops a burn and returns the ship to the dock it left.
  * The lower right, on a chart, is one step back: System from a planet or the Sun, Planet from a moon
- * or from an inner orbit, and Galaxy from the system. It stays down while piloting. Escape takes the
+ * or from an inner orbit, and Galaxy from the system. While piloting that corner is Exit and the view switch. Escape takes the
  * first chart step, Home on the system chart and otherwise that lower-right step, and leaves the
  * cockpit for the chart. Dragging turns the pilot's head, or swings the exterior camera around the ship.
  */
@@ -99,6 +100,13 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	useEffect(() => system.onHold(setHold), [system]);
 	useEffect(() => system.setScanning(!piloting), [system, piloting]);
 	useEffect(() => system.setPiloting(piloting), [system, piloting]);
+	useEffect(
+		() =>
+			system.onNav((fix) => {
+				system.paintCenter((context, width, height) => paintCenterPanel(context, width, height, fix));
+			}),
+		[system]
+	);
 	useEffect(() => {
 		if (!pilotFits && mode === "pilot") {
 			setViewpoint("interior");
@@ -232,23 +240,27 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		}
 	};
 
-	const bound = departure?.target ?? flight;
 	const location = viewPlaque(view, close, riding);
+	const atSun = !flight && docked?.host === "sun" && docked.kind === "collector";
 	const siphon = scanned
 		? siphonAction(
 				scanned,
-				{ dockedId: flight ? null : (docked?.id ?? null), siphoning: hold.siphoning },
+				{ atSun, siphonId: hold.siphoning ? hold.siphonId : null },
 				scanned.kind === "collector" ? system.charge(scanned.id) : 0
 			)
 		: null;
 	const collectorCharge =
 		scanned?.kind === "collector" ? `${Math.round(system.charge(scanned.id)).toLocaleString("en-US")} in the collector` : null;
-
 	return (
 		<>
 			<SpaceLabels source={system} items={labels} title="Scanned" keepOut={keepOut} />
-			{piloting && viewpoint === "interior" ? <AftFrames /> : null}
-			{piloting ? <Dashboard system={system} course={bound ? scanCard(bound).label : null} energy={hold.energy} /> : null}
+			{piloting ? (
+				<PilotCornerDock
+					viewpoint={viewpoint}
+					onExit={togglePilot}
+					onToggleViewpoint={() => setViewpoint(viewpoint === "interior" ? "exterior" : "interior")}
+				/>
+			) : null}
 			<Hud
 				anchors={anchors}
 				location={location}
@@ -274,35 +286,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 								onClick: () => take(button),
 							}))
 				}
-				leading={
-					piloting ? (
-						<button
-							type="button"
-							onClick={togglePilot}
-							aria-label="Exit to the chart"
-							title="Back to the chart"
-							className="pointer-events-auto relative isolate flex size-14 items-center justify-center text-[12px] font-bold tracking-[1px] text-[#ffd73d] uppercase hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none"
-						>
-							<Housing cut={{ tl: 10, tr: 10, bl: 10, br: 10 }} />
-							Exit
-						</button>
-					) : null
-				}
-				corner={
-					piloting ? (
-						<button
-							type="button"
-							onClick={() => setViewpoint(viewpoint === "interior" ? "exterior" : "interior")}
-							aria-label={viewpoint === "interior" ? "Switch to exterior view" : "Switch to interior view"}
-							title={viewpoint === "interior" ? "Outside the ship" : "Back in the cockpit"}
-							className="pointer-events-auto relative isolate flex size-24 flex-col items-center justify-center gap-2 text-sm font-semibold text-[#ffd73d] hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none"
-						>
-							<Housing cut={{ tl: 10, tr: 10, bl: 10, br: 10 }} />
-							<img src="/hud/crosshair.svg" alt="" width={20} height={20} />
-							{viewpoint === "interior" ? "Exterior" : "Interior"}
-						</button>
-					) : null
-				}
+				fleet={!piloting}
 			/>
 			{scanned ? (
 				<ScanModal
@@ -322,7 +306,10 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 						setNow(Date.now());
 						setScanned(null);
 					}}
-					onSiphon={() => system.setSiphoning(!hold.siphoning)}
+					onSiphon={() => {
+						const running = hold.siphoning && hold.siphonId === scanned.id;
+						system.setSiphoning(!running, scanned.id);
+					}}
 				/>
 			) : null}
 		</>
@@ -342,30 +329,3 @@ function usePilotFits(): boolean {
 	);
 }
 
-/** A frame and a name around each aft view. The views themselves are drawn by the scene, under these. */
-function AftFrames() {
-	const frames: { label: string; rect: ScreenRect }[] = [
-		{ label: "Port aft", rect: AFT_VIEWS.port },
-		{ label: "Starboard aft", rect: AFT_VIEWS.starboard },
-	];
-	return (
-		<div aria-hidden className="pointer-events-none absolute inset-0">
-			{frames.map((frame) => (
-				<div
-					key={frame.label}
-					className="absolute rounded-md border border-[#E8E4D9]/30 shadow-[0_0_0_1px_rgba(0,0,0,0.6)]"
-					style={{
-						left: `${frame.rect.left * 100}%`,
-						top: `${frame.rect.top * 100}%`,
-						width: `${frame.rect.width * 100}%`,
-						height: `${frame.rect.height * 100}%`,
-					}}
-				>
-					<span className="absolute -top-5 left-0 text-[10px] tracking-[0.22em] text-[#E8E4D9]/70 uppercase [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
-						{frame.label}
-					</span>
-				</div>
-			))}
-		</div>
-	);
-}

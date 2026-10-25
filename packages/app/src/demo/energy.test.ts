@@ -34,7 +34,10 @@ expect(empty.ship === 100 && empty.collector === 0, "an empty collector gives no
 const session = freshSession();
 expect(session.energy === STARTING_ENERGY, "a new session starts with 1,000 energy");
 expect(session.dockId === "earth-station-corporate-0", "a new session berths at Earth's corporate station");
-expect(session.siphoning === false && Object.keys(session.collectors).length === 0, "a new session has full collectors and is not siphoning");
+expect(
+	session.siphoning === false && session.siphonId === null && Object.keys(session.collectors).length === 0,
+	"a new session has full collectors and is not siphoning"
+);
 
 if (failures.length > 0) {
 	for (const failure of failures) {

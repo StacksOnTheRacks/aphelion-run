@@ -1,5 +1,5 @@
 /**
- * The cockpit lays two aft views across the windscreen and a dashboard along the bottom.
+ * The cockpit lays a console along the bottom, with the aft views in its side displays.
  * A desktop clears that, and so does a large tablet in either orientation. A phone does not:
  * portrait is narrower than `PILOT_MIN_WIDTH`, and landscape is shorter than `PILOT_MIN_HEIGHT`.
  */

@@ -1,0 +1,12 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="1440" height="112" viewBox="0 0 1440 112" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="glareshield" clip-path="url(#clip0_0_45)">
+<path id="Vector" d="M0 74C420 66 560 4 720 4C880 4 1020 66 1440 74V112H0V74Z" fill="#0C0F15"/>
+<path id="Vector_2" d="M0 94C420 88 560 34 720 34C880 34 1020 88 1440 94" stroke-width="2" stroke="#1C222D"/>
+<path id="Vector_3" opacity="0.55" d="M0 74C420 66 560 4 720 4C880 4 1020 66 1440 74" stroke-width="1.5" stroke="#FFD73D"/>
+</g>
+<defs>
+<clipPath id="clip0_0_45">
+<rect width="1440" height="112" fill="white"/>
+</clipPath>
+</defs>
+</svg>

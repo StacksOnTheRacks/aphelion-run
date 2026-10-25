@@ -23,8 +23,8 @@ export type NavFix = {
 	bodies: NavBody[];
 	/** Radius of the outermost planet's orbit: the edge of the system map. */
 	edge: number;
-	/** The line being flown and how far along it the ship is, while it is burning. */
-	course: { points: NavPoint[]; progress: number } | null;
+	/** The line being flown, how far along it the ship is, and where it is headed, while it is burning. */
+	course: { points: NavPoint[]; progress: number; name: string } | null;
 };
 
 /** Beyond the outermost orbit the map stops growing, and the ship sits on its rim. */

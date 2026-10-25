@@ -1,34 +1,125 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { Inter } from "next/font/google";
 
+import type { PilotViewpoint, ScreenRect } from "./demo/cockpit";
 import type { EnvironmentDemo } from "./demo/environment";
-import { LOCAL_REACH, bearing, bodyLabel, localBody, localPoint, systemPoint, type NavBody, type NavFix } from "./demo/nav";
+import { bearing, bodyLabel, localBody } from "./demo/nav";
 import { Housing } from "./hud";
+import { MAP_SIZE, drawLocal, drawSystem } from "./nav-glass";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "600", "700"] });
-
-const AMBER = "#FCD34D";
-const BONE = "#E8E4D9";
-/** CSS pixels across each round map. */
-const MAP_SIZE = 148;
-/** One turn of the sweep across the system map, in seconds. */
-const SWEEP_SECONDS = 6;
 
 /** `place` is the body the ship is at, or null out between them. */
 type Readout = { place: string | null; bearing: string; progress: number | null };
 
+/** The console is drawn at the cockpit design size, then scaled to the window. */
+const STAGE_W = 1440;
+/** The combiner sits this far above the panel, in the glareshield notch. */
+const COMBINER_LIFT = 70;
+const PANEL_H = 464;
+const STAGE_H = PANEL_H + COMBINER_LIFT;
+/** The header plaque. Scaling leaves at least this much of the window above the console. */
+const HEADER_H = 36;
+
+const AFT_KEYS = ["ZOOM", "GAIN", "IR", "FRZ"] as const;
+const AFT_KEYS_LOWER = ["PAN", "TRK", "REC"] as const;
+const NAV_KEYS = ["NAV", "SOL", "EARTH", "RUN", "SYS"] as const;
+const NAV_KEYS_LOWER = ["TAC", "COM", "AFT", "DCLT", "MENU"] as const;
+const LAMPS = ["FUEL", "HYD", "O2", "He-3", "SHLD", "COMM"] as const;
+const TOGGLES = [
+	{ label: "LTS", left: 200 },
+	{ label: "DEFOG", left: 250 },
+	{ label: "ARM", left: 300 },
+] as const;
+
+/** The aft glass, in the panel's own pixels. The mask cuts these out so the cameras show through. */
+const GLASS_TOP = 144;
+const GLASS_W = 300;
+const GLASS_H = 176;
+const PORT_GLASS = 68;
+const STBD_GLASS = 1068;
+
+function consoleScale(width: number, height: number): number {
+	const byWidth = width / STAGE_W;
+	const byHeight = Math.max(0, height - HEADER_H) / STAGE_H;
+	return Math.min(byWidth, byHeight);
+}
+
+/** Design pixels from the console's right and bottom edges to the Exit and view buttons. */
+const CORNER_RIGHT = 50;
+const CORNER_BOTTOM = 6;
+
 /**
- * The console under the windscreen: the whole system on the left, the body the ship is at on the right,
- * and the readouts between them. `course` names where the ship is bound. The ship list is gone in the
- * cockpit, so the console is centered on the screen and sits on the bottom edge. Below 900px it shifts
- * left so it stays clear of Exit and the exterior control.
+ * The console under the windscreen. Side displays hold the aft cameras and the center display holds the
+ * charts. Exit and the view switch are drawn apart from the plate, so they keep their size outside the
+ * ship. The bezel keys, lamps, and toggles are drawn and do not act. The plate is the design size,
+ * scaled to the window, and sits on the bottom edge.
  */
-export function Dashboard({ system, course, energy }: { system: EnvironmentDemo; course: string | null; energy: number }) {
+export function Dashboard({
+	system,
+	course,
+	viewpoint,
+	onAftRects,
+}: {
+	system: EnvironmentDemo;
+	course: string | null;
+	viewpoint: PilotViewpoint;
+	onAftRects: (rects: { port: ScreenRect; starboard: ScreenRect }) => void;
+}) {
 	const systemRef = useRef<HTMLCanvasElement>(null);
 	const localRef = useRef<HTMLCanvasElement>(null);
+	const portRef = useRef<HTMLDivElement>(null);
+	const stbdRef = useRef<HTMLDivElement>(null);
+	const [scale, setScale] = useState(1);
 	const [readout, setReadout] = useState<Readout>({ place: null, bearing: "—", progress: null });
+	const live = viewpoint === "interior";
+	const maskId = `aft-glass-${useId().replace(/:/g, "")}`;
+
+	useLayoutEffect(() => {
+		const apply = () => setScale(consoleScale(window.innerWidth, window.innerHeight));
+		apply();
+		window.addEventListener("resize", apply);
+		return () => window.removeEventListener("resize", apply);
+	}, []);
+
+	useLayoutEffect(() => {
+		const port = portRef.current;
+		const stbd = stbdRef.current;
+		const canvas = port?.ownerDocument.querySelector("canvas:not([aria-hidden])");
+		if (!port || !stbd || !(canvas instanceof HTMLCanvasElement)) {
+			return;
+		}
+		const share = (glass: HTMLElement): ScreenRect | null => {
+			const box = canvas.getBoundingClientRect();
+			const rect = glass.getBoundingClientRect();
+			if (box.width < 1 || box.height < 1 || rect.width < 1 || rect.height < 1) {
+				return null;
+			}
+			return {
+				left: (rect.left - box.left) / box.width,
+				top: (rect.top - box.top) / box.height,
+				width: rect.width / box.width,
+				height: rect.height / box.height,
+			};
+		};
+		const publish = () => {
+			const portRect = share(port);
+			const starboard = share(stbd);
+			if (portRect && starboard) {
+				onAftRects({ port: portRect, starboard });
+			}
+		};
+		publish();
+		const observer = new ResizeObserver(publish);
+		observer.observe(canvas);
+		window.addEventListener("resize", publish);
+		return () => {
+			observer.disconnect();
+			window.removeEventListener("resize", publish);
+		};
+	}, [onAftRects, scale, live]);
 
 	useEffect(() => {
 		const still = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -54,32 +145,276 @@ export function Dashboard({ system, course, energy }: { system: EnvironmentDemo;
 	}, [system]);
 
 	return (
-		<section
-			aria-label="Navigation"
-			className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center max-[900px]:-translate-x-20 ${inter.className}`}
-		>
-			<div className="relative isolate flex items-center gap-4 px-4 py-3">
-				<Housing cut={{ tl: 14, tr: 14 }} />
-				<MapPane label="Sol" canvasRef={systemRef} />
-				<dl className="flex w-40 flex-col justify-center gap-2.5 text-[10px] tracking-[1.6px] uppercase">
-					<Reading term="Energy" value={Math.round(energy).toLocaleString("en-US")} />
-					<Reading term="Local" value={readout.place ? `${readout.place} orbit` : "Open space"} />
-					<Reading term="Bearing" value={readout.bearing} />
-					<Reading term="Course" value={course ?? "Holding"} />
-					<div>
-						<dt className="flex justify-between text-[#E8E4D9]/45">
-							<span>Run</span>
-							<span>{readout.progress === null ? "—" : `${readout.progress}%`}</span>
-						</dt>
-						<dd className="mt-1.5 h-1 w-full overflow-hidden bg-[#E8E4D9]/10">
-							<div className="h-full bg-[#ffd73d]" style={{ width: `${readout.progress ?? 0}%` }} />
-						</dd>
+		<div className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-end justify-center ${inter.className}`}>
+			<div
+				className="relative shrink-0"
+				style={{ width: STAGE_W, height: STAGE_H, transform: `scale(${scale})`, transformOrigin: "bottom center" }}
+			>
+				<div className="absolute top-[70px] left-0 h-[464px] w-[1440px]">
+					<svg width="0" height="0" className="absolute">
+						<defs>
+							<mask id={maskId} maskUnits="objectBoundingBox" maskContentUnits="objectBoundingBox" x="0" y="0" width="1" height="1">
+								<rect width="1" height="1" fill="white" />
+								<rect x={PORT_GLASS / STAGE_W} y={GLASS_TOP / PANEL_H} width={GLASS_W / STAGE_W} height={GLASS_H / PANEL_H} fill="black" />
+								<rect x={STBD_GLASS / STAGE_W} y={GLASS_TOP / PANEL_H} width={GLASS_W / STAGE_W} height={GLASS_H / PANEL_H} fill="black" />
+							</mask>
+						</defs>
+					</svg>
+					<div
+						className="absolute inset-0"
+						style={
+							live
+								? { maskImage: `url(#${maskId})`, WebkitMaskImage: `url(#${maskId})` }
+								: undefined
+						}
+					>
+					<div className="absolute top-[96px] left-0 h-[368px] w-[1440px] bg-gradient-to-b from-[#1b2029] to-[#0a0c10]" />
+					<img
+						src="/hud/center-pedestal.svg"
+						alt=""
+						width={700}
+						height={360}
+						className="pointer-events-none absolute top-[104px] left-[370px]"
+					/>
+					<div className="absolute top-[104px] left-0 h-10 w-[1440px] bg-gradient-to-b from-black/70 to-transparent" />
+					<img
+						src="/hud/glareshield.svg"
+						alt=""
+						width={1440}
+						height={112}
+						className="pointer-events-none absolute top-0 left-0"
+					/>
+					<Lamp label={"MASTER\nCAUTION"} className="absolute top-[71px] left-[528px] h-[26px] w-[70px]" />
+					<Lamp label={"MASTER\nARM"} className="absolute top-[71px] left-[842px] h-[26px] w-[70px]" />
+
+					<SideDisplay left={50} />
+					<SideDisplay left={1050} />
+
+					<div className="absolute top-[116px] left-[420px] h-[262px] w-[600px] rounded-[10px] border-2 border-[#2c3340] bg-[#0a0c11] drop-shadow-[0_6px_8px_rgba(0,0,0,0.63)]">
+						<KeyRow labels={NAV_KEYS} className="top-1.5" />
+						<section
+							aria-label="Navigation"
+							className="absolute top-7 left-[22px] h-[200px] w-[552px] overflow-hidden rounded-[3px] border border-[rgba(255,215,61,0.25)] bg-[#050a12]"
+						>
+							<div className="absolute top-3 left-3.5 flex h-[174px] w-[522px] items-center gap-4 px-4 py-3">
+								<MapPane label="Sol" canvasRef={systemRef} />
+								<dl className="flex w-40 flex-col justify-center gap-2.5 text-[10px] tracking-[1.6px] uppercase">
+									<Reading term="Local" value={readout.place ? `${readout.place} orbit` : "Open space"} />
+									<Reading term="Bearing" value={readout.bearing} />
+									<Reading term="Course" value={course ?? "Holding"} />
+									<div>
+										<dt className="flex justify-between text-[#E8E4D9]/45">
+											<span>Run</span>
+											<span>{readout.progress === null ? "—" : `${readout.progress}%`}</span>
+										</dt>
+										<dd className="mt-1.5 h-1 w-full overflow-hidden bg-[#E8E4D9]/10">
+											<div className="h-full bg-[#ffd73d]" style={{ width: `${readout.progress ?? 0}%` }} />
+										</dd>
+									</div>
+								</dl>
+								<MapPane label={readout.place ?? "Open space"} canvasRef={localRef} />
+							</div>
+							<div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-white/[0.08] via-transparent via-45% to-transparent" />
+						</section>
+						<KeyRow labels={NAV_KEYS_LOWER} className="top-[235px]" />
+						<Screws spots={[[4, 4], [587, 4], [4, 249], [587, 249]]} />
 					</div>
-				</dl>
-				<MapPane label={readout.place ?? "Open space"} canvasRef={localRef} />
+
+					<div aria-hidden className="absolute top-[396px] left-[420px] flex w-[600px] justify-center gap-3">
+						{LAMPS.map((label) => (
+							<Lamp key={label} label={label} className="h-[22px] w-[84px]" />
+						))}
+					</div>
+
+					<div aria-hidden className="absolute top-[372px] left-[50px] flex h-7 w-[120px] items-center justify-center rounded-[3px] border border-[#2c3340] bg-[#11141a]">
+						<span className="text-[11px] font-semibold tracking-[2.4px] text-[rgba(232,228,217,0.45)]">RANGER</span>
+					</div>
+					{TOGGLES.map((toggle) => (
+						<Toggle key={toggle.label} label={toggle.label} left={toggle.left} />
+					))}
+
+					</div>
+					<AftGlass left={PORT_GLASS} title="AFT  ·  PORT" titleClass="left-[25px]" feedRef={portRef} live={live} />
+					<AftGlass left={STBD_GLASS} title="AFT  ·  STBD" titleClass="right-[27px] text-right" feedRef={stbdRef} live={live} />
+				</div>
+				<img
+					src="/hud/hud-combiner.svg"
+					alt=""
+					width={168}
+					height={78}
+					className="pointer-events-none absolute top-0 left-[636px]"
+				/>
 			</div>
-		</section>
+		</div>
 	);
+}
+
+/**
+ * Exit and the view switch. Drawn at the console's design size. `PilotCornerDock` scales that pair onto
+ * the screen, so the cockpit and the exterior view show the same buttons at the same size.
+ */
+export function PilotCornerDock({
+	viewpoint,
+	onExit,
+	onToggleViewpoint,
+}: {
+	viewpoint: PilotViewpoint;
+	onExit: () => void;
+	onToggleViewpoint: () => void;
+}) {
+	const [box, setBox] = useState({ scale: 1, right: CORNER_RIGHT, bottom: CORNER_BOTTOM });
+
+	useLayoutEffect(() => {
+		const apply = () => {
+			const scale = consoleScale(window.innerWidth, window.innerHeight);
+			const stageWidth = STAGE_W * scale;
+			setBox({
+				scale,
+				right: (window.innerWidth - stageWidth) / 2 + CORNER_RIGHT * scale,
+				bottom: CORNER_BOTTOM * scale,
+			});
+		};
+		apply();
+		window.addEventListener("resize", apply);
+		return () => window.removeEventListener("resize", apply);
+	}, []);
+
+	return (
+		<div
+			className={`pointer-events-none absolute z-10 ${inter.className}`}
+			style={{ right: box.right, bottom: box.bottom, transform: `scale(${box.scale})`, transformOrigin: "bottom right" }}
+		>
+			<PilotCorner viewpoint={viewpoint} onExit={onExit} onToggleViewpoint={onToggleViewpoint} />
+		</div>
+	);
+}
+
+function PilotCorner({
+	viewpoint,
+	onExit,
+	onToggleViewpoint,
+}: {
+	viewpoint: PilotViewpoint;
+	onExit: () => void;
+	onToggleViewpoint: () => void;
+}) {
+	const outside = viewpoint === "exterior";
+	return (
+		<div className="flex items-end gap-3">
+			<button
+				type="button"
+				onClick={onExit}
+				aria-label="Exit to the chart"
+				title="Back to the chart"
+				className="pointer-events-auto relative isolate flex size-14 items-center justify-center text-[12px] font-bold tracking-[1px] text-[#ffd73d] uppercase hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none"
+			>
+				<Housing cut={{ tl: 10, tr: 10, bl: 10, br: 10 }} />
+				Exit
+			</button>
+			<button
+				type="button"
+				onClick={onToggleViewpoint}
+				aria-label={outside ? "Switch to interior view" : "Switch to exterior view"}
+				title={outside ? "Back in the cockpit" : "Outside the ship"}
+				className="pointer-events-auto relative isolate flex size-24 flex-col items-center justify-center gap-2 text-sm font-semibold text-[#ffd73d] hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none"
+			>
+				<Housing cut={{ tl: 10, tr: 10, bl: 10, br: 10 }} />
+				<img src="/hud/crosshair.svg" alt="" width={20} height={20} />
+				{outside ? "Interior" : "Exterior"}
+			</button>
+		</div>
+	);
+}
+
+/** The bezel around an aft display. The glass itself sits outside the mask, so the camera can show through. */
+function SideDisplay({ left }: { left: number }) {
+	return (
+		<div
+			aria-hidden
+			className="absolute top-[116px] h-[234px] w-[340px] rounded-[10px] border-2 border-[#2c3340] bg-[#0a0c11] drop-shadow-[0_6px_8px_rgba(0,0,0,0.63)]"
+			style={{ left }}
+		>
+			<KeyRow labels={AFT_KEYS} className="top-1.5" />
+			<KeyRow labels={AFT_KEYS_LOWER} className="top-[211px]" />
+			<Screws spots={[[4, 4], [327, 4], [4, 221], [327, 221]]} />
+		</div>
+	);
+}
+
+function AftGlass({
+	left,
+	title,
+	titleClass,
+	feedRef,
+	live,
+}: {
+	left: number;
+	title: string;
+	titleClass: string;
+	feedRef: RefObject<HTMLDivElement>;
+	live: boolean;
+}) {
+	return (
+		<div
+			ref={feedRef}
+			aria-hidden
+			className={`absolute h-[176px] w-[300px] overflow-hidden rounded-[3px] ${live ? "bg-transparent" : "bg-[#07080c]"}`}
+			style={{ left, top: GLASS_TOP }}
+		>
+			<p className={`absolute top-[11px] text-[10px] font-semibold tracking-[1.6px] whitespace-nowrap text-[#ffd73d] ${titleClass}`}>{title}</p>
+			<span className="absolute inset-0 rounded-[3px] border border-[rgba(255,215,61,0.6)]" />
+		</div>
+	);
+}
+
+function KeyRow({ labels, className }: { labels: readonly string[]; className: string }) {
+	return (
+		<div aria-hidden className={`absolute inset-x-0 flex items-start justify-center gap-4 ${className}`}>
+			{labels.map((label) => (
+				<span
+					key={label}
+					className="flex h-[14px] w-[38px] items-center justify-center rounded-[3px] border border-[#3a4352] bg-[#1f2530] text-[7px] font-semibold text-[rgba(255,215,61,0.7)]"
+				>
+					{label}
+				</span>
+			))}
+		</div>
+	);
+}
+
+function Lamp({ label, className }: { label: string; className: string }) {
+	return (
+		<span
+			aria-hidden
+			className={`flex items-center justify-center rounded-[2px] border border-[rgba(255,215,61,0.25)] bg-[#16120a] text-center text-[7px] leading-[9px] font-semibold text-[rgba(255,215,61,0.55)] ${className}`}
+		>
+			<span>
+				{label.split("\n").map((line) => (
+					<span key={line} className="block">
+						{line}
+					</span>
+				))}
+			</span>
+		</span>
+	);
+}
+
+function Toggle({ label, left }: { label: string; left: number }) {
+	return (
+		<div aria-hidden className="absolute top-[368px] h-[46px] w-4" style={{ left }}>
+			<img src="/hud/toggle-base.svg" alt="" width={16} height={16} className="absolute top-3 left-0" />
+			<span className="absolute top-0 left-1.5 h-[18px] w-1 rounded-[2px] bg-[#9aa3b2]" />
+			<span className="absolute top-[34px] left-1/2 w-7 -translate-x-1/2 text-center text-[7px] font-semibold text-[rgba(232,228,217,0.45)]">
+				{label}
+			</span>
+		</div>
+	);
+}
+
+function Screws({ spots }: { spots: readonly (readonly [number, number])[] }) {
+	return spots.map(([x, y]) => (
+		<img key={`${x}-${y}`} src="/hud/screw.svg" alt="" width={5} height={5} className="pointer-events-none absolute" style={{ left: x, top: y }} />
+	));
 }
 
 function MapPane({ label, canvasRef }: { label: string; canvasRef: RefObject<HTMLCanvasElement> }) {
@@ -105,199 +440,3 @@ function Reading({ term, value }: { term: string; value: string }) {
 	);
 }
 
-/** Sizes the canvas to the screen's pixels and returns a context drawing in CSS pixels from the center. */
-function prepare(canvas: HTMLCanvasElement): CanvasRenderingContext2D | null {
-	const ratio = window.devicePixelRatio || 1;
-	const pixels = Math.round(MAP_SIZE * ratio);
-	if (canvas.width !== pixels) {
-		canvas.width = pixels;
-		canvas.height = pixels;
-	}
-	const context = canvas.getContext("2d");
-	if (!context) {
-		return null;
-	}
-	context.setTransform(ratio, 0, 0, ratio, 0, 0);
-	context.clearRect(0, 0, MAP_SIZE, MAP_SIZE);
-	context.translate(MAP_SIZE / 2, MAP_SIZE / 2);
-	return context;
-}
-
-/** The frame both maps share: a rim with ticks every 30°, heavier at the four quarters. */
-function drawRim(context: CanvasRenderingContext2D, radius: number): void {
-	context.strokeStyle = "rgba(252,211,77,0.35)";
-	context.lineWidth = 1;
-	context.beginPath();
-	context.arc(0, 0, radius, 0, Math.PI * 2);
-	context.stroke();
-	for (let step = 0; step < 12; step++) {
-		const angle = (step * Math.PI) / 6;
-		const inner = radius - (step % 3 === 0 ? 6 : 3);
-		context.beginPath();
-		context.moveTo(Math.cos(angle) * inner, Math.sin(angle) * inner);
-		context.lineTo(Math.cos(angle) * radius, Math.sin(angle) * radius);
-		context.stroke();
-	}
-}
-
-/** The ship: a chevron pointing along its heading. */
-function drawShip(context: CanvasRenderingContext2D, x: number, y: number, fix: NavFix): void {
-	const angle = Math.atan2(-fix.ship.hz, fix.ship.hx);
-	context.save();
-	context.translate(x, y);
-	context.rotate(angle);
-	context.shadowColor = AMBER;
-	context.shadowBlur = 6;
-	context.fillStyle = AMBER;
-	context.beginPath();
-	context.moveTo(6, 0);
-	context.lineTo(-4, 4);
-	context.lineTo(-2, 0);
-	context.lineTo(-4, -4);
-	context.closePath();
-	context.fill();
-	context.restore();
-}
-
-function drawCourse(context: CanvasRenderingContext2D, fix: NavFix, place: (point: { x: number; z: number }) => { x: number; y: number }): void {
-	if (!fix.course || fix.course.points.length < 2) {
-		return;
-	}
-	context.strokeStyle = "rgba(252,211,77,0.55)";
-	context.lineWidth = 1;
-	context.setLineDash([3, 3]);
-	context.beginPath();
-	fix.course.points.forEach((point, index) => {
-		const at = place(point);
-		if (index === 0) {
-			context.moveTo(at.x, at.y);
-		} else {
-			context.lineTo(at.x, at.y);
-		}
-	});
-	context.stroke();
-	context.setLineDash([]);
-	const end = place(fix.course.points[fix.course.points.length - 1]);
-	context.strokeStyle = AMBER;
-	context.strokeRect(end.x - 3, end.y - 3, 6, 6);
-}
-
-function drawSystem(canvas: HTMLCanvasElement, fix: NavFix, local: NavBody | null, seconds: number | null): void {
-	const context = prepare(canvas);
-	if (!context) {
-		return;
-	}
-	const radius = MAP_SIZE / 2 - 4;
-	const inner = radius - 8;
-	const place = (point: { x: number; z: number }) => systemPoint(point, fix.edge, inner);
-
-	if (seconds !== null) {
-		const angle = ((seconds % SWEEP_SECONDS) / SWEEP_SECONDS) * Math.PI * 2;
-		const sweep = context.createConicGradient(angle, 0, 0);
-		sweep.addColorStop(0, "rgba(252,211,77,0.16)");
-		sweep.addColorStop(0.12, "rgba(252,211,77,0)");
-		sweep.addColorStop(1, "rgba(252,211,77,0)");
-		context.fillStyle = sweep;
-		context.beginPath();
-		context.arc(0, 0, radius, 0, Math.PI * 2);
-		context.fill();
-	}
-	drawRim(context, radius);
-
-	const planets = fix.bodies.filter((body) => body.parent === null && body.id !== "sun");
-	context.strokeStyle = "rgba(232,228,217,0.14)";
-	for (const planet of planets) {
-		const at = place(planet);
-		context.beginPath();
-		context.arc(0, 0, Math.hypot(at.x, at.y), 0, Math.PI * 2);
-		context.stroke();
-	}
-
-	drawCourse(context, fix, place);
-
-	context.fillStyle = AMBER;
-	context.shadowColor = AMBER;
-	context.shadowBlur = 8;
-	context.beginPath();
-	context.arc(0, 0, 3, 0, Math.PI * 2);
-	context.fill();
-	context.shadowBlur = 0;
-
-	for (const planet of planets) {
-		const at = place(planet);
-		context.fillStyle = planet === local ? AMBER : BONE;
-		context.beginPath();
-		context.arc(at.x, at.y, planet === local ? 2.5 : 1.8, 0, Math.PI * 2);
-		context.fill();
-	}
-
-	const ship = place(fix.ship);
-	drawShip(context, ship.x, ship.y, fix);
-}
-
-function drawLocal(canvas: HTMLCanvasElement, fix: NavFix, local: NavBody | null): void {
-	const context = prepare(canvas);
-	if (!context) {
-		return;
-	}
-	const radius = MAP_SIZE / 2 - 4;
-	drawRim(context, radius);
-
-	if (!local) {
-		// Out between the bodies there is nothing near to draw: the ship, centered, pointing its way.
-		context.strokeStyle = "rgba(232,228,217,0.14)";
-		for (const ring of [0.33, 0.66]) {
-			context.beginPath();
-			context.arc(0, 0, radius * ring, 0, Math.PI * 2);
-			context.stroke();
-		}
-		drawShip(context, 0, 0, fix);
-		return;
-	}
-
-	const inner = radius - 4;
-	const place = (point: { x: number; z: number }) => localPoint(point, local, inner);
-	const scale = inner / (local.outer * LOCAL_REACH);
-
-	context.save();
-	context.beginPath();
-	context.arc(0, 0, radius - 1, 0, Math.PI * 2);
-	context.clip();
-
-	context.strokeStyle = "rgba(252,211,77,0.3)";
-	context.setLineDash([2, 4]);
-	context.beginPath();
-	context.arc(0, 0, local.outer * scale, 0, Math.PI * 2);
-	context.stroke();
-	context.setLineDash([]);
-
-	const moons = fix.bodies.filter((body) => body.parent === local.id);
-	context.strokeStyle = "rgba(232,228,217,0.12)";
-	for (const moon of moons) {
-		const at = place(moon);
-		context.beginPath();
-		context.arc(0, 0, Math.hypot(at.x, at.y), 0, Math.PI * 2);
-		context.stroke();
-	}
-
-	drawCourse(context, fix, place);
-
-	context.fillStyle = local.id === "sun" ? AMBER : "rgba(232,228,217,0.85)";
-	context.beginPath();
-	context.arc(0, 0, Math.max(3, local.radius * scale), 0, Math.PI * 2);
-	context.fill();
-
-	context.fillStyle = BONE;
-	for (const moon of moons) {
-		const at = place(moon);
-		context.beginPath();
-		context.arc(at.x, at.y, Math.max(1.5, moon.radius * scale), 0, Math.PI * 2);
-		context.fill();
-	}
-	context.restore();
-
-	const ship = place(fix.ship);
-	const reach = Math.hypot(ship.x, ship.y);
-	const pinned = reach > radius - 6 ? (radius - 6) / reach : 1;
-	drawShip(context, ship.x * pinned, ship.y * pinned, fix);
-}

@@ -69,23 +69,25 @@ expect(
 	"a trip the ship cannot cover stays on the card"
 );
 
-expect(siphonAction(mars, { dockedId: null, siphoning: false }, 2000) === null, "a planet has no siphon");
+const otherCollector: ScanTarget = { id: "satellites-corporate-2", host: "sun", kind: "collector", owner: "corporate" };
+expect(siphonAction(mars, { atSun: true, siphonId: null }, 2000) === null, "a planet has no siphon");
 expect(
-	siphonAction(collector, { dockedId: null, siphoning: false }, 2000)?.label === "Dock to siphon" &&
-		siphonAction(collector, { dockedId: null, siphoning: false }, 2000)?.enabled === false,
-	"a collector that is not the ship's dock cannot be siphoned"
+	siphonAction(collector, { atSun: false, siphonId: null }, 2000)?.label === "Dock to siphon" &&
+		siphonAction(collector, { atSun: false, siphonId: null }, 2000)?.enabled === false,
+	"a collector cannot be siphoned until the ship is at the Sun"
 );
 expect(
-	siphonAction(collector, { dockedId: collector.id, siphoning: false }, 2000)?.label === "Siphon",
-	"a docked collector can be siphoned"
+	siphonAction(collector, { atSun: true, siphonId: null }, 2000)?.label === "Siphon" &&
+		siphonAction(otherCollector, { atSun: true, siphonId: collector.id }, 2000)?.enabled === true,
+	"every collector can be siphoned once the ship is at the Sun"
 );
 expect(
-	siphonAction(collector, { dockedId: collector.id, siphoning: true }, 500)?.label === "Stop siphon",
+	siphonAction(collector, { atSun: true, siphonId: collector.id }, 500)?.label === "Stop siphon",
 	"a running siphon can be stopped"
 );
 expect(
-	siphonAction(collector, { dockedId: collector.id, siphoning: false }, 0)?.label === "Empty" &&
-		siphonAction(collector, { dockedId: collector.id, siphoning: true }, 0)?.enabled === false,
+	siphonAction(collector, { atSun: true, siphonId: null }, 0)?.label === "Empty" &&
+		siphonAction(collector, { atSun: true, siphonId: collector.id }, 0)?.enabled === false,
 	"an empty collector offers no siphon"
 );
 

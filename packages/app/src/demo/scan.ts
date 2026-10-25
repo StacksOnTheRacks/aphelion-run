@@ -208,24 +208,24 @@ export function travelAction(
 }
 
 /**
- * Siphon is only on a collector. It runs when the ship is docked at that collector and the collector
- * still holds energy. Anywhere else the control says so and stays off.
+ * Siphon is only on a collector. Once the ship is docked at the Sun, every collector can be siphoned.
+ * Anywhere else the control says so and stays off. An empty collector stays off.
  */
 export function siphonAction(
 	target: ScanTarget,
-	ship: { dockedId: string | null; siphoning: boolean },
+	ship: { atSun: boolean; siphonId: string | null },
 	charge: number
 ): { label: string; enabled: boolean } | null {
 	if (target.kind !== "collector") {
 		return null;
 	}
-	if (ship.dockedId !== target.id) {
+	if (!ship.atSun) {
 		return { label: "Dock to siphon", enabled: false };
 	}
 	if (charge <= 0) {
 		return { label: "Empty", enabled: false };
 	}
-	if (ship.siphoning) {
+	if (ship.siphonId === target.id) {
 		return { label: "Stop siphon", enabled: true };
 	}
 	return { label: "Siphon", enabled: true };
