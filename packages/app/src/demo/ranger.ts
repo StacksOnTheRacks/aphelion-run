@@ -152,13 +152,13 @@ async function attachCockpit(scene: Scene, facing: TransformNode): Promise<void>
 		if (mesh.getTotalVertices() === 0) {
 			continue;
 		}
-		// No sun reaches the seat. A flat glow keeps the panels up, and where the plastic has a grain
-		// that glow uses the same picture so the mottling survives in the shadow.
+		// No sun reaches the seat. A faint glow keeps the plastic from going pure black. The grain
+		// can disappear into that shadow; the screens carry their own light.
 		const material = mesh.material;
 		if (material instanceof PBRMaterial && material.name !== "Cockpit Screen") {
 			material.emissiveColor.copyFrom(material.albedoColor);
 			material.emissiveTexture = material.albedoTexture;
-			material.emissiveIntensity = 0.3;
+			material.emissiveIntensity = 0.04;
 		}
 		if (material instanceof PBRMaterial && material.name === "Cockpit Screen") {
 			// A flat quad against the curved coaming shares pixels. Pull the glass toward the eye
@@ -169,21 +169,21 @@ async function attachCockpit(scene: Scene, facing: TransformNode): Promise<void>
 	for (const node of container.rootNodes) {
 		node.parent = facing;
 	}
-	// The grain is a normal map. It needs a light of its own: the sun never reaches the seat, and the
-	// hull fill is on the ship layer. Both lights ride the ship, skimming down toward the panel.
+	// The sun never reaches the seat, and the hull fill is on the ship layer. These ride the ship
+	// and stay dim: a little shape on the coaming, not a lit cabin.
 	const fill = new HemisphericLight("cockpit-fill", new Vector3(0, 1, 0), scene);
 	fill.parent = facing;
 	fill.includeOnlyWithLayerMask = COCKPIT_LAYER;
-	fill.intensity = 0.28;
+	fill.intensity = 0.05;
 	fill.diffuse = new Color3(0.72, 0.74, 0.78);
-	fill.groundColor = new Color3(0.03, 0.03, 0.04);
-	fill.specular = new Color3(0.05, 0.05, 0.05);
+	fill.groundColor = new Color3(0.02, 0.02, 0.025);
+	fill.specular = new Color3(0.02, 0.02, 0.02);
 	const skim = new DirectionalLight("cockpit-skim", new Vector3(0.15, -0.8, 0.55).normalize(), scene);
 	skim.parent = facing;
 	skim.includeOnlyWithLayerMask = COCKPIT_LAYER;
-	skim.intensity = 0.55;
-	skim.diffuse = new Color3(0.86, 0.87, 0.9);
-	skim.specular = new Color3(0.42, 0.42, 0.45);
+	skim.intensity = 0.08;
+	skim.diffuse = new Color3(0.55, 0.56, 0.58);
+	skim.specular = new Color3(0.08, 0.08, 0.09);
 }
 
 /**
