@@ -1,0 +1,6 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="sun" stroke="#FFD73D" stroke-width="1.6" stroke-linecap="round">
+<path d="M10 1.7V4.1M10 15.9V18.3M1.7 10H4.1M15.9 10H18.3M4.15 4.15L5.85 5.85M14.15 14.15L15.85 15.85M15.85 4.15L14.15 5.85M5.85 14.15L4.15 15.85"/>
+<circle cx="10" cy="10" r="2.55" fill="#FFD73D" stroke="none"/>
+</g>
+</svg>

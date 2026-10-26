@@ -7,7 +7,7 @@ import type { PilotViewpoint, ScreenRect } from "./demo/cockpit";
 import type { EnvironmentDemo } from "./demo/environment";
 import { bearing, bodyLabel, localBody } from "./demo/nav";
 import { Housing } from "./hud";
-import { MAP_SIZE, drawLocal, drawSystem } from "./nav-glass";
+import { MAP_SIZE, drawLocal, drawSystem, holdStock } from "./nav-glass";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "600", "700"] });
 
@@ -47,14 +47,10 @@ function consoleScale(width: number, height: number): number {
 	return Math.min(byWidth, byHeight);
 }
 
-/** Design pixels from the console's right and bottom edges to the Exit and view buttons. */
-const CORNER_RIGHT = 50;
-const CORNER_BOTTOM = 6;
-
 /**
  * The console under the windscreen. Side displays hold the aft cameras and the center display holds the
- * charts. Exit and the view switch are drawn apart from the plate, so they keep their size outside the
- * ship. The bezel keys, lamps, and toggles are drawn and do not act. The plate is the design size,
+ * chart and the hold. Exit and the view switch sit in the same screen corner as the chart step, apart from
+ * the plate. The bezel keys, lamps, and toggles are drawn and do not act. The plate is the design size,
  * scaled to the window, and sits on the bottom edge.
  */
 export function Dashboard({
@@ -68,12 +64,12 @@ export function Dashboard({
 	viewpoint: PilotViewpoint;
 	onAftRects: (rects: { port: ScreenRect; starboard: ScreenRect }) => void;
 }) {
-	const systemRef = useRef<HTMLCanvasElement>(null);
-	const localRef = useRef<HTMLCanvasElement>(null);
+	const chartRef = useRef<HTMLCanvasElement>(null);
 	const portRef = useRef<HTMLDivElement>(null);
 	const stbdRef = useRef<HTMLDivElement>(null);
 	const [scale, setScale] = useState(1);
 	const [readout, setReadout] = useState<Readout>({ place: null, bearing: "—", progress: null });
+	const [energy, setEnergy] = useState(() => Math.round(system.hold().energy));
 	const live = viewpoint === "interior";
 	const maskId = `aft-glass-${useId().replace(/:/g, "")}`;
 
@@ -125,14 +121,16 @@ export function Dashboard({
 		const still = window.matchMedia("(prefers-reduced-motion: reduce)");
 		return system.onNav((fix) => {
 			const local = localBody(fix);
-			const systemCanvas = systemRef.current;
-			const localCanvas = localRef.current;
-			if (systemCanvas) {
-				drawSystem(systemCanvas, fix, local, still.matches ? null : performance.now() / 1000);
+			const chart = chartRef.current;
+			if (chart) {
+				if (local) {
+					drawLocal(chart, fix, local);
+				} else {
+					drawSystem(chart, fix, null, still.matches ? null : performance.now() / 1000);
+				}
 			}
-			if (localCanvas) {
-				drawLocal(localCanvas, fix, local);
-			}
+			const aboard = Math.round(system.hold().energy);
+			setEnergy((last) => (last === aboard ? last : aboard));
 			const next: Readout = {
 				place: local ? bodyLabel(local.id) : null,
 				bearing: `${String(bearing(fix)).padStart(3, "0")}°`,
@@ -197,7 +195,7 @@ export function Dashboard({
 							className="absolute top-7 left-[22px] h-[200px] w-[552px] overflow-hidden rounded-[3px] border border-[rgba(255,215,61,0.25)] bg-[#050a12]"
 						>
 							<div className="absolute top-3 left-3.5 flex h-[174px] w-[522px] items-center gap-4 px-4 py-3">
-								<MapPane label="Sol" canvasRef={systemRef} />
+								<MapPane label={readout.place ?? "Sol"} canvasRef={chartRef} />
 								<dl className="flex w-40 flex-col justify-center gap-2.5 text-[10px] tracking-[1.6px] uppercase">
 									<Reading term="Local" value={readout.place ? `${readout.place} orbit` : "Open space"} />
 									<Reading term="Bearing" value={readout.bearing} />
@@ -212,7 +210,7 @@ export function Dashboard({
 										</dd>
 									</div>
 								</dl>
-								<MapPane label={readout.place ?? "Open space"} canvasRef={localRef} />
+								<HoldPane energy={energy} />
 							</div>
 							<div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-white/[0.08] via-transparent via-45% to-transparent" />
 						</section>
@@ -234,8 +232,8 @@ export function Dashboard({
 					))}
 
 					</div>
-					<AftGlass left={PORT_GLASS} title="AFT  ·  PORT" titleClass="left-[25px]" feedRef={portRef} live={live} />
-					<AftGlass left={STBD_GLASS} title="AFT  ·  STBD" titleClass="right-[27px] text-right" feedRef={stbdRef} live={live} />
+					<AftGlass left={PORT_GLASS} title="AFT  ·  PORT" titleClass="right-3.5 text-right" feedRef={portRef} live={live} />
+					<AftGlass left={STBD_GLASS} title="AFT  ·  STBD" titleClass="left-3.5" feedRef={stbdRef} live={live} />
 				</div>
 				<img
 					src="/hud/hud-combiner.svg"
@@ -250,8 +248,8 @@ export function Dashboard({
 }
 
 /**
- * Exit and the view switch. Drawn at the console's design size. `PilotCornerDock` scales that pair onto
- * the screen, so the cockpit and the exterior view show the same buttons at the same size.
+ * Exit and the view switch, in the lower right. The view switch matches the chart step. Exit stays the
+ * smaller plate beside it. The same pair is used in the cockpit and outside the ship.
  */
 export function PilotCornerDock({
 	viewpoint,
@@ -262,28 +260,8 @@ export function PilotCornerDock({
 	onExit: () => void;
 	onToggleViewpoint: () => void;
 }) {
-	const [box, setBox] = useState({ scale: 1, right: CORNER_RIGHT, bottom: CORNER_BOTTOM });
-
-	useLayoutEffect(() => {
-		const apply = () => {
-			const scale = consoleScale(window.innerWidth, window.innerHeight);
-			const stageWidth = STAGE_W * scale;
-			setBox({
-				scale,
-				right: (window.innerWidth - stageWidth) / 2 + CORNER_RIGHT * scale,
-				bottom: CORNER_BOTTOM * scale,
-			});
-		};
-		apply();
-		window.addEventListener("resize", apply);
-		return () => window.removeEventListener("resize", apply);
-	}, []);
-
 	return (
-		<div
-			className={`pointer-events-none absolute z-10 ${inter.className}`}
-			style={{ right: box.right, bottom: box.bottom, transform: `scale(${box.scale})`, transformOrigin: "bottom right" }}
-		>
+		<div className={`pointer-events-none absolute right-3 bottom-3 z-10 min-[900px]:right-6 min-[900px]:bottom-6 ${inter.className}`}>
 			<PilotCorner viewpoint={viewpoint} onExit={onExit} onToggleViewpoint={onToggleViewpoint} />
 		</div>
 	);
@@ -316,9 +294,9 @@ function PilotCorner({
 				onClick={onToggleViewpoint}
 				aria-label={outside ? "Switch to interior view" : "Switch to exterior view"}
 				title={outside ? "Back in the cockpit" : "Outside the ship"}
-				className="pointer-events-auto relative isolate flex size-24 flex-col items-center justify-center gap-2 text-sm font-semibold text-[#ffd73d] hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none"
+				className="pointer-events-auto relative isolate flex size-20 flex-col items-center justify-center gap-1.5 text-[13px] font-bold tracking-[1px] text-[#ffd73d] uppercase hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none min-[900px]:size-[88px] min-[900px]:gap-1.5 min-[900px]:text-[11px]"
 			>
-				<Housing cut={{ tl: 10, tr: 10, bl: 10, br: 10 }} />
+				<Housing cut={{ tl: 12, tr: 12, bl: 12, br: 12 }} />
 				<img src="/hud/crosshair.svg" alt="" width={20} height={20} />
 				{outside ? "Interior" : "Exterior"}
 			</button>
@@ -428,6 +406,29 @@ function MapPane({ label, canvasRef }: { label: string; canvasRef: RefObject<HTM
 				{label}
 			</span>
 		</div>
+	);
+}
+
+/** Energy first, then the other containers. The figure is the whole units aboard. */
+function HoldPane({ energy }: { energy: number }) {
+	const stock = holdStock(energy);
+	const figure = Math.round(stock.energy).toLocaleString("en-US");
+	return (
+		<section aria-label="Hold" className="flex shrink-0 flex-col justify-center gap-1.5" style={{ width: MAP_SIZE, height: MAP_SIZE }}>
+			<p className="text-[10px] font-semibold tracking-[1.6px] text-[#fcd34d] uppercase">Hold</p>
+			<div>
+				<p className="text-[10px] tracking-[1.6px] text-[#E8E4D9]/45 uppercase">Energy</p>
+				<p className="text-[22px] leading-none font-semibold tracking-[0.5px] text-[#fcd34d]">{figure}</p>
+			</div>
+			<ul className="mt-1 flex flex-col gap-1">
+				{stock.containers.map((line) => (
+					<li key={line.label} className="flex items-baseline justify-between gap-2 text-[10px] tracking-[1.2px] uppercase">
+						<span className="text-[#E8E4D9]/45">{line.label}</span>
+						<span className="text-[#e8e4d9]">{Math.round(line.amount).toLocaleString("en-US")}</span>
+					</li>
+				))}
+			</ul>
+		</section>
 	);
 }
 

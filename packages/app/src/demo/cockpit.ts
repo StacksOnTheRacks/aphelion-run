@@ -3,6 +3,7 @@ import { TargetCamera } from "@babylonjs/core/Cameras/targetCamera";
 import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import type { GlowLayer } from "@babylonjs/core/Layers/glowLayer";
+import { Material } from "@babylonjs/core/Materials/material";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
@@ -11,6 +12,7 @@ import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Viewport } from "@babylonjs/core/Maths/math.viewport";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 
@@ -244,6 +246,87 @@ function feed(scene: Scene, each: Rig, meshName: string): void {
 	mesh.material = glass;
 }
 
+const LABEL_AMBER = "#FCD34D";
+const LABEL_FACE = "ui-sans-serif, system-ui, sans-serif";
+
+/**
+ * A name on an aft picture. The canvas top is the top of the glass. Canvas right is the inner top of
+ * the port picture, and canvas left is the inner top of the starboard picture.
+ */
+export function paintFeedLabel(
+	context: CanvasRenderingContext2D,
+	width: number,
+	height: number,
+	label: string,
+	align: "left" | "right"
+): void {
+	context.clearRect(0, 0, width, height);
+	const size = Math.max(14, Math.round(height * 0.055));
+	const padX = Math.round(width * 0.04);
+	const padY = Math.round(height * 0.08);
+	context.font = `600 ${size}px ${LABEL_FACE}`;
+	context.letterSpacing = `${Math.max(1, Math.round(size * 0.04))}px`;
+	context.textBaseline = "top";
+	context.textAlign = align;
+	const x = align === "right" ? width - padX : padX;
+	const textWidth = context.measureText(label).width;
+	const chip = Math.round(size * 0.28);
+	context.fillStyle = "rgba(5,8,14,0.72)";
+	context.fillRect(align === "right" ? x - textWidth - chip : x - chip, padY - chip, textWidth + chip * 2, size + chip * 2);
+	context.lineJoin = "round";
+	context.lineWidth = Math.max(3, Math.round(size * 0.16));
+	context.strokeStyle = "rgba(0,0,0,0.85)";
+	context.strokeText(label, x, padY);
+	context.fillStyle = LABEL_AMBER;
+	context.fillText(label, x, padY);
+}
+
+/**
+ * Lays the camera's name on the video. The left screen carries it at the upper right, the right
+ * screen at the upper left, so both names sit toward the center glass. The plate is the screen
+ * again, clear except for the words, and biased in front of the picture.
+ */
+function labelFeed(scene: Scene, glow: GlowLayer, meshName: string, label: string, align: "left" | "right"): void {
+	const mesh = scene.getMeshByName(meshName);
+	const aspect = mesh ? screenAspect(mesh) : null;
+	if (!mesh || aspect === null || !(mesh instanceof Mesh)) {
+		return;
+	}
+	const width = FEED_WIDTH;
+	const height = Math.max(1, Math.round(width / aspect));
+	const texture = new DynamicTexture(`${meshName} label`, { width, height }, scene, false);
+	texture.hasAlpha = true;
+	texture.getAlphaFromRGB = false;
+	texture.wrapU = Texture.CLAMP_ADDRESSMODE;
+	texture.wrapV = Texture.CLAMP_ADDRESSMODE;
+	paintFeedLabel(texture.getContext() as CanvasRenderingContext2D, width, height, label, align);
+	texture.update(false);
+
+	// The same glass again, so the words share the video's corners. A copy in the picture's group
+	// ties the depth test and the video paints over it. The next group clears depth and draws after,
+	// and the clear parts of the texture leave the picture in the framebuffer.
+	const plate = mesh.clone(`${meshName} label`, mesh.parent);
+	if (!plate) {
+		return;
+	}
+	plate.isPickable = false;
+	plate.layerMask = mesh.layerMask;
+	plate.renderingGroupId = 1;
+	const ink = new StandardMaterial(`${meshName} label glass`, scene);
+	ink.disableLighting = true;
+	ink.diffuseColor = Color3.Black();
+	ink.specularColor = Color3.Black();
+	ink.ambientColor = Color3.Black();
+	ink.emissiveColor = Color3.Black();
+	ink.emissiveTexture = texture;
+	ink.useEmissiveAsIllumination = true;
+	ink.opacityTexture = texture;
+	ink.transparencyMode = Material.MATERIAL_ALPHABLEND;
+	ink.backFaceCulling = false;
+	plate.material = ink;
+	glow.addExcludedMesh(plate);
+}
+
 /** Draws one frame of the center screen. The canvas origin is the top left of the glass. */
 export type CenterPaint = (context: CanvasRenderingContext2D, width: number, height: number) => void;
 
@@ -358,6 +441,8 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 	// plume lands on the sky already drawn. The dash camera is later in the frame and samples this.
 	feed(scene, aftPort, "Cockpit MFD Port");
 	feed(scene, aftStarboard, "Cockpit MFD Starboard");
+	labelFeed(scene, glow, "Cockpit MFD Port", "AFT · PORT", "right");
+	labelFeed(scene, glow, "Cockpit MFD Starboard", "AFT · STBD", "left");
 	const paintCenter = centerGlass(scene);
 	const rigs = [windscreen, aftPort, aftStarboard];
 	const mirrored = new Set<Camera>(rigs.filter((each) => each.mirrored).flatMap((each) => each.cameras));

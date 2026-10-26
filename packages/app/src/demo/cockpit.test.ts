@@ -1,6 +1,6 @@
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 
-import { EXTERIOR_HOME, EXTERIOR_RADIUS, exteriorOffset, orbitFromDrag } from "./cockpit";
+import { EXTERIOR_HOME, EXTERIOR_RADIUS, exteriorOffset, orbitFromDrag, paintFeedLabel } from "./cockpit";
 
 const failures: string[] = [];
 
@@ -50,9 +50,43 @@ function lengthOf(point: Vector3): number {
 	expect(wrapped.yaw <= Math.PI && wrapped.yaw >= -Math.PI, "yaw stays on one turn");
 }
 
+function recordingContext(): { context: CanvasRenderingContext2D; marks: { text: string; x: number; y: number }[] } {
+	const marks: { text: string; x: number; y: number }[] = [];
+	const context = new Proxy({} as CanvasRenderingContext2D, {
+		get(_target, prop) {
+			if (prop === "fillText" || prop === "strokeText") {
+				return (text: string, x: number, y: number) => {
+					if (prop === "fillText") {
+						marks.push({ text: String(text), x, y });
+					}
+				};
+			}
+			if (prop === "measureText") {
+				return (text: string) => ({ width: String(text).length * 8 });
+			}
+			return () => {};
+		},
+		set() {
+			return true;
+		},
+	});
+	return { context, marks };
+}
+
+{
+	const port = recordingContext();
+	paintFeedLabel(port.context, 400, 240, "AFT · PORT", "right");
+	const starboard = recordingContext();
+	paintFeedLabel(starboard.context, 400, 240, "AFT · STBD", "left");
+	const portMark = port.marks.find((mark) => mark.text === "AFT · PORT");
+	const starboardMark = starboard.marks.find((mark) => mark.text === "AFT · STBD");
+	expect(!!portMark && portMark.x > 300 && portMark.y < 40, "the port name is drawn on the canvas corner that lands upper right");
+	expect(!!starboardMark && starboardMark.x < 40 && starboardMark.y < 40, "the starboard name is drawn on the canvas corner that lands upper left");
+}
+
 if (failures.length > 0) {
 	console.error(failures.join("\n"));
 	process.exit(1);
 }
 
-console.log("exterior orbit sits astern of the hull and swings with a drag");
+console.log("exterior orbit sits astern of the hull and swings with a drag, and the aft names sit on the inner corners");

@@ -145,25 +145,12 @@ function renderSystem(context: CanvasRenderingContext2D, size: number, fix: NavF
 }
 
 /** Draws the local map in `MAP_SIZE` units, scaled so it fills a circle of `size` pixels. The context origin is the center. */
-function renderLocal(context: CanvasRenderingContext2D, size: number, fix: NavFix, local: NavBody | null): void {
+function renderLocal(context: CanvasRenderingContext2D, size: number, fix: NavFix, local: NavBody): void {
 	const scale = size / MAP_SIZE;
 	context.save();
 	context.scale(scale, scale);
 	const radius = MAP_SIZE / 2 - 4;
 	drawRim(context, radius);
-
-	if (!local) {
-		// Out between the bodies there is nothing near to draw: the ship, centered, pointing its way.
-		context.strokeStyle = "rgba(232,228,217,0.14)";
-		for (const ring of [0.33, 0.66]) {
-			context.beginPath();
-			context.arc(0, 0, radius * ring, 0, Math.PI * 2);
-			context.stroke();
-		}
-		drawShip(context, 0, 0, fix);
-		context.restore();
-		return;
-	}
 
 	const inner = radius - 4;
 	const place = (point: { x: number; z: number }) => localPoint(point, local, inner);
@@ -221,12 +208,35 @@ export function drawSystem(canvas: HTMLCanvasElement, fix: NavFix, local: NavBod
 	renderSystem(context, MAP_SIZE, fix, local, seconds);
 }
 
-export function drawLocal(canvas: HTMLCanvasElement, fix: NavFix, local: NavBody | null): void {
+export function drawLocal(canvas: HTMLCanvasElement, fix: NavFix, local: NavBody): void {
 	const context = prepare(canvas);
 	if (!context) {
 		return;
 	}
 	renderLocal(context, MAP_SIZE, fix, local);
+}
+
+/** Minerals the hold can carry, in the order the center screen lists them. */
+export const CARGO_LABELS = ["Hydrogen", "Ore", "Nitrogen", "Carbon"] as const;
+
+export type CargoLabel = (typeof CARGO_LABELS)[number];
+
+/** Energy aboard, and the other containers. An uncounted mineral is empty. */
+export type HoldStock = {
+	energy: number;
+	containers: readonly { label: string; amount: number }[];
+};
+
+/** The hold as the center screen draws it. Minerals default to empty until they are counted aboard. */
+export function holdStock(energy: number, minerals: Partial<Record<CargoLabel, number>> = {}): HoldStock {
+	return {
+		energy,
+		containers: CARGO_LABELS.map((label) => ({ label, amount: minerals[label] ?? 0 })),
+	};
+}
+
+function amountLabel(value: number): string {
+	return Math.round(value).toLocaleString("en-US");
 }
 
 function fit(context: CanvasRenderingContext2D, text: string, width: number): string {
@@ -245,10 +255,65 @@ function track(context: CanvasRenderingContext2D, font: number): void {
 }
 
 /**
- * The center display: Sol on the left, the ship’s place on the right, and the four readings between them.
+ * The hold, in the square the local chart used to occupy. Energy is the large figure. The other
+ * containers are listed under it.
+ */
+function paintHold(context: CanvasRenderingContext2D, x: number, top: number, width: number, height: number, stock: HoldStock): void {
+	const head = Math.max(12, Math.round(height * 0.05));
+	const term = Math.max(12, Math.round(height * 0.042));
+	const energySize = Math.max(20, Math.round(height * 0.1));
+	const gap = Math.round(height * 0.04);
+	const rowGap = Math.round(height * 0.028);
+	const line = (size: number) => size + 3;
+	const rows = stock.containers.length;
+	const block =
+		line(head) + gap + line(term) + line(energySize) + gap + rows * line(term) + Math.max(0, rows - 1) * rowGap;
+	let y = top + Math.max(gap, (height - block) / 2);
+	const pad = Math.round(width * 0.1);
+	const left = x + pad;
+	const rightEdge = x + width - pad;
+	const room = width - pad * 2;
+
+	const write = (text: string, size: number, color: string, align: CanvasTextAlign, atX: number, atY: number, weight: 400 | 600 | 700) => {
+		context.font = `${weight} ${size}px ${FACE}`;
+		context.fillStyle = color;
+		context.textAlign = align;
+		context.textBaseline = "top";
+		track(context, size);
+		context.fillText(text, atX, atY);
+	};
+
+	write("HOLD", head, AMBER, "left", left, y, 600);
+	y += line(head) + gap;
+	write("ENERGY", term, "rgba(232,228,217,0.45)", "left", left, y, 400);
+	y += line(term);
+	context.font = `700 ${energySize}px ${FACE}`;
+	write(fit(context, amountLabel(stock.energy), room), energySize, AMBER, "left", left, y, 700);
+	y += line(energySize) + gap;
+
+	for (const container of stock.containers) {
+		context.font = `600 ${term}px ${FACE}`;
+		const amount = amountLabel(container.amount);
+		const labelRoom = room - context.measureText(amount).width - 8;
+		context.font = `400 ${term}px ${FACE}`;
+		write(fit(context, container.label.toUpperCase(), labelRoom), term, "rgba(232,228,217,0.45)", "left", left, y, 400);
+		write(amount, term, BONE, "right", rightEdge, y, 600);
+		y += line(term) + rowGap;
+	}
+}
+
+/**
+ * The center display. One dial on the left: the system while the ship is between bodies, and that
+ * body's orbit while the ship is there. The readings sit in the middle. The hold is on the right.
  * Drawn in the glass texture’s pixels, with the top of the canvas at the top of the screen.
  */
-export function paintCenterPanel(context: CanvasRenderingContext2D, width: number, height: number, fix: NavFix): void {
+export function paintCenterPanel(
+	context: CanvasRenderingContext2D,
+	width: number,
+	height: number,
+	fix: NavFix,
+	stock: HoldStock
+): void {
 	const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 	const seconds = reduce ? null : performance.now() / 1000;
 	const local = localBody(fix);
@@ -293,8 +358,11 @@ export function paintCenterPanel(context: CanvasRenderingContext2D, width: numbe
 		context.stroke();
 	};
 
-	disc(origin, (drawn) => renderSystem(drawn, map, fix, local, seconds));
-	disc(right, (drawn) => renderLocal(drawn, map, fix, local));
+	if (local) {
+		disc(origin, (drawn) => renderLocal(drawn, map, fix, local));
+	} else {
+		disc(origin, (drawn) => renderSystem(drawn, map, fix, null, seconds));
+	}
 
 	const caption = Math.max(11, Math.round(map * 0.07));
 	context.save();
@@ -303,9 +371,10 @@ export function paintCenterPanel(context: CanvasRenderingContext2D, width: numbe
 	context.textAlign = "center";
 	context.textBaseline = "middle";
 	track(context, caption);
-	context.fillText("SOL", origin + map / 2, top + map * 0.86);
-	context.fillText((local ? bodyLabel(local.id) : "Open space").toUpperCase(), right + map / 2, top + map * 0.86);
+	context.fillText((local ? bodyLabel(local.id) : "Sol").toUpperCase(), origin + map / 2, top + map * 0.86);
 	context.restore();
+
+	paintHold(context, right, top, map, map, stock);
 
 	const termSize = Math.max(12, Math.round(height * 0.046));
 	const valueSize = Math.max(14, Math.round(height * 0.062));

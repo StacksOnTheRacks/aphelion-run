@@ -1,0 +1,6 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="planet">
+<ellipse cx="10" cy="10" rx="7.1" ry="2.05" transform="rotate(-28 10 10)" stroke="#FFD73D" stroke-width="1.5"/>
+<circle cx="10" cy="10" r="3.7" stroke="#FFD73D" stroke-width="1.6"/>
+</g>
+</svg>

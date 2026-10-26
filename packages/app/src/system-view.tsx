@@ -17,7 +17,7 @@ import {
 } from "./demo/scan";
 import { viewPlaque } from "./demo/view-plaque";
 import { PilotCornerDock } from "./dashboard";
-import { paintCenterPanel } from "./nav-glass";
+import { holdStock, paintCenterPanel } from "./nav-glass";
 import { Hud, useHudAnchors } from "./hud";
 import { PILOT_VIEWPORT } from "./pilot-viewport";
 import { ScanModal } from "./scan-card";
@@ -42,7 +42,7 @@ const STEP_TITLE: Record<string, string> = {
  *
  * The HUD reads the chart on screen, the warehouse, and the ranger. The plaque names that chart:
  * Sol System, a wide planetary chart such as Earth System, or the body or craft once the camera is closer.
- * Pilot enters the cockpit on a desktop or a large tablet. The ship list then leaves. The dash is geometry in the scene, and it turns with the head. Exit and the exterior view sit at the lower right, and stay there, the same size, outside the ship. The ship list stays hidden out there too. A phone stays on the
+ * Pilot enters the cockpit on a desktop or a large tablet. The ship list then leaves. The dash is geometry in the scene, and it turns with the head. Exit and the view switch sit at the lower right, in the chart step's corner, and the view switch is that step's size. Exit stays the smaller plate. The ship list stays hidden out there too. A phone stays on the
  * chart, and shrinking the window below that leaves the cockpit. Locate opens the planetary chart where the ship is docked.
  * Recall cancels a countdown or stops a burn and returns the ship to the dock it left.
  * The lower right, on a chart, is one step back: System from a planet or the Sun, Planet from a moon
@@ -103,7 +103,9 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	useEffect(
 		() =>
 			system.onNav((fix) => {
-				system.paintCenter((context, width, height) => paintCenterPanel(context, width, height, fix));
+				system.paintCenter((context, width, height) =>
+					paintCenterPanel(context, width, height, fix, holdStock(system.hold().energy))
+				);
 			}),
 		[system]
 	);

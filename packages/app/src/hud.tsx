@@ -5,6 +5,14 @@ import { Inter } from "next/font/google";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "600", "700"] });
 
+/** The corner step carries the mark of the place it opens. */
+const STEP_ICON: Record<string, string> = {
+	System: "/hud/system.svg",
+	Galaxy: "/hud/galaxy.svg",
+	Planet: "/hud/planet.svg",
+	Sun: "/hud/sun.svg",
+};
+
 /** Which corners of a plate are cut, in CSS pixels. A corner left out stays square so the plate can sit flush on a screen edge. */
 export type HousingCut = { tl?: number; tr?: number; bl?: number; br?: number };
 
@@ -387,7 +395,7 @@ export function Hud({
 							className="pointer-events-auto isolate relative flex size-20 flex-col items-center justify-center gap-1.5 text-[13px] font-bold tracking-[1px] text-[#ffd73d] uppercase hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none min-[900px]:size-[88px] min-[900px]:gap-1.5 min-[900px]:text-[11px]"
 						>
 							<Housing cut={{ tl: 12, tr: 12, bl: 12, br: 12 }} />
-							<img src="/hud/settings.svg" alt="" width={20} height={20} />
+							<img src={STEP_ICON[step.label] ?? "/hud/settings.svg"} alt="" width={20} height={20} />
 							{step.label}
 						</button>
 					))}
