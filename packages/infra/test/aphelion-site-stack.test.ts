@@ -57,6 +57,14 @@ test('Route53 alias A records for apex and www use the hosted zone', () => {
   }
 });
 
+test('the site revalidates so a refresh cannot keep the previous cabin', () => {
+  const { template } = synthSite();
+  const deployments = template.findResources('Custom::CDKBucketDeployment');
+  const encoded = JSON.stringify(deployments);
+  assert.match(encoded, /max-age=0/);
+  assert.match(encoded, /must-revalidate/);
+});
+
 test('security headers do not open a third-party connect origin', () => {
   const { template } = synthSite();
   const policies = template.findResources('AWS::CloudFront::ResponseHeadersPolicy');

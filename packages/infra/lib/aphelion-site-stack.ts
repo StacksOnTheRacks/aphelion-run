@@ -15,7 +15,7 @@ import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { ARecord, HostedZone, RecordTarget } from 'aws-cdk-lib/aws-route53';
 import { CloudFrontTarget } from 'aws-cdk-lib/aws-route53-targets';
 import { BlockPublicAccess, Bucket } from 'aws-cdk-lib/aws-s3';
-import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
+import { BucketDeployment, CacheControl, Source } from 'aws-cdk-lib/aws-s3-deployment';
 import { Certificate, CertificateValidation } from 'aws-cdk-lib/aws-certificatemanager';
 import type { Construct } from 'constructs';
 import { canonicalRedirectFunctionCode } from './cloudfront-canonical-redirect.js';
@@ -127,6 +127,12 @@ export class AphelionSiteStack extends Stack {
       destinationBucket: siteBucket,
       distribution,
       distributionPaths: ['/*'],
+      // The page and the ship models keep the same names. A day-long cache serves the previous cabin after a refresh.
+      cacheControl: [
+        CacheControl.setPublic(),
+        CacheControl.maxAge(Duration.seconds(0)),
+        CacheControl.mustRevalidate(),
+      ],
     });
 
     new CfnOutput(this, 'BucketName', { value: siteBucket.bucketName });
