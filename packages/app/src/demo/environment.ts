@@ -1161,7 +1161,7 @@ export async function createEnvironment(
 	const spinningBases = buildHabitats(scene, bodies, crafts);
 	const ranger = await loadRanger(scene, camera);
 	const canopyGlass = scene.getMeshByName("cockpit-canopy-glass");
-	if (canopyGlass) {
+	if (canopyGlass instanceof Mesh) {
 		glow.addExcludedMesh(canopyGlass);
 	}
 	let shipAngle = 1.2;
