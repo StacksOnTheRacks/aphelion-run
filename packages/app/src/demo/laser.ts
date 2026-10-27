@@ -16,8 +16,11 @@ import type { Scene } from "@babylonjs/core/scene";
  * beam is the thing ahead of the glass. It is drawn in view space, so a mirrored camera still sees it.
  */
 
-/** Radii in world units. The cone is narrow at the muzzle and wider where it lands. */
-export type BeamShape = { core: number; coneNear: number; coneFar: number; flare: number };
+/**
+ * Radii in world units. The cone is narrow at the muzzle and wider where it lands.
+ * `wash` scales the cone, the sparks, and the end flares against the beam. It defaults to 1.
+ */
+export type BeamShape = { core: number; coneNear: number; coneFar: number; flare: number; wash?: number };
 
 /** How often a mine's own laser repeats, and how long each burst lasts. */
 export const MINE_FIRE_PERIOD = 5;
@@ -233,6 +236,7 @@ const FLARE_FRAGMENT = `
 `;
 
 export function createSiphonBeam(scene: Scene, shape: BeamShape, name = "siphon"): SiphonBeam {
+	const wash = shape.wash ?? 1;
 	const root = new TransformNode(`${name}-beam`, scene);
 	root.rotationQuaternion = new Quaternion();
 
@@ -364,7 +368,7 @@ export function createSiphonBeam(scene: Scene, shape: BeamShape, name = "siphon"
 			beamMesh.scaling.set(width, width, 1);
 			for (const material of materials) {
 				material.setFloat("time", time);
-				material.setFloat("intensity", intensity);
+				material.setFloat("intensity", material === beamMaterial ? intensity : intensity * wash);
 			}
 			muzzleFlare.material.setFloat("size", shape.flare * (0.85 + 0.35 * intensity));
 			impactFlare.material.setFloat("size", shape.flare * 1.35 * (0.85 + 0.35 * intensity));

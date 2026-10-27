@@ -3459,10 +3459,14 @@ type MineLaser = {
 	phase: number;
 };
 
-/** Thick enough to read against the body, and never thinner than the mine's own face. */
+/**
+ * A thin beam into the body. Thickness stays a fraction of the mine's face, so a long reach
+ * does not swell into a flood. The sheath and the end flares hug that beam and draw fainter.
+ */
 function mineLaserShape(reach: number): BeamShape {
-	const core = Math.max(MINE_SIZE.width * 0.3, reach * 0.006);
-	return { core, coneNear: core * 1.7, coneFar: core * 3.4, flare: core * 4 };
+	const face = MINE_SIZE.width;
+	const core = Math.min(face * 0.16, Math.max(face * 0.08, reach * 0.0015));
+	return { core, coneNear: core * 1.35, coneFar: core * 2.1, flare: core * 2.2, wash: 0.32 };
 }
 
 function addGeneratorSlots(
