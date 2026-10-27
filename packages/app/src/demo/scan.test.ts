@@ -1,12 +1,13 @@
+import { STARTING_DOCK_ID } from "./energy";
 import {
 	DEPARTURE_SECONDS,
 	bodyScan,
 	destinationName,
 	scanCard,
+	recallMove,
 	scanLabel,
 	showsCard,
 	secondsLeft,
-	siphonAction,
 	travelAction,
 	viewAction,
 	type ScanTarget,
@@ -69,26 +70,37 @@ expect(
 	"a trip the ship cannot cover stays on the card"
 );
 
-const otherCollector: ScanTarget = { id: "satellites-corporate-2", host: "sun", kind: "collector", owner: "corporate" };
-expect(siphonAction(mars, { atSun: true, siphonId: null }, 2000) === null, "a planet has no siphon");
+const homeBase: ScanTarget = { id: STARTING_DOCK_ID, host: "earth", kind: "home", owner: "corporate" };
+expect(scanCard(homeBase).label === "Home base" && scanCard(homeBase).kind === "Home base", "the starting station is the home base");
+expect(scanCard(homeBase).owner === undefined, "the home base is not labeled as just another faction craft");
+expect(scanCard(homeBase).text.includes("Recall"), "the home base says Recall returns there");
+expect(destinationName(homeBase) === "home base", "a trip to the home base reads as home");
+expect(scanLabel(homeBase) === "Home base", "the home base is named on the scene");
+
+const homeRecall = { homeId: homeBase.id, homeHost: "earth", energy: 1000, cost: 40 };
 expect(
-	siphonAction(collector, { atSun: false, siphonId: null }, 2000)?.label === "Dock to siphon" &&
-		siphonAction(collector, { atSun: false, siphonId: null }, 2000)?.enabled === false,
-	"a collector cannot be siphoned until the ship is at the Sun"
+	!recallMove({ ...homeRecall, dockId: homeBase.id, dockHost: "earth", departingTo: null, inFlight: false }).enabled,
+	"Recall stays off while the ship is at home"
 );
 expect(
-	siphonAction(collector, { atSun: true, siphonId: null }, 2000)?.label === "Siphon" &&
-		siphonAction(otherCollector, { atSun: true, siphonId: collector.id }, 2000)?.enabled === true,
-	"every collector can be siphoned once the ship is at the Sun"
+	recallMove({ ...homeRecall, dockId: "mars-warehouse-corporate-0", dockHost: "mars", departingTo: null, inFlight: false }).move === "depart",
+	"Recall from another body sets a course home"
 );
 expect(
-	siphonAction(collector, { atSun: true, siphonId: collector.id }, 500)?.label === "Stop siphon",
-	"a running siphon can be stopped"
+	recallMove({ ...homeRecall, dockId: "earth-station-marauder-1", dockHost: "earth", departingTo: null, inFlight: false }).move === "hop",
+	"Recall from Earth's other station moves the ship onto the home dock"
 );
 expect(
-	siphonAction(collector, { atSun: true, siphonId: null }, 0)?.label === "Empty" &&
-		siphonAction(collector, { atSun: true, siphonId: collector.id }, 0)?.enabled === false,
-	"an empty collector offers no siphon"
+	recallMove({ ...homeRecall, dockId: "mars-warehouse-corporate-0", dockHost: "mars", departingTo: homeBase.id, inFlight: false }).move === "cancel",
+	"a countdown that is already headed home can be cancelled"
+);
+expect(
+	recallMove({ ...homeRecall, dockId: "mars-warehouse-corporate-0", dockHost: "mars", departingTo: null, inFlight: true }).move === "abort-depart",
+	"Recall during a trip away from home aborts it and heads home"
+);
+expect(
+	!recallMove({ ...homeRecall, energy: 10, dockId: "mars-warehouse-corporate-0", dockHost: "mars", departingTo: null, inFlight: false }).enabled,
+	"Recall stays off when the ship cannot pay for the cruise home"
 );
 
 expect(scanLabel(mars) === "Mars", "a scanned body is named on the scene");

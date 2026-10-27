@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { Scene } from "@babylonjs/core/scene";
 
-import { freshSession, STARTING_ENERGY, type SolSession } from "./demo/energy";
+import { emptyCargo, freshSession, STARTING_ENERGY, type Cargo, type SolSession } from "./demo/energy";
 import { createEnvironment, type EnvironmentDemo } from "./demo/environment";
 import { createGalaxy, type GalaxyDemo } from "./demo/galaxy";
 import { GalaxyPlace } from "./galaxy-view";
@@ -46,6 +46,7 @@ export function GameView() {
 	const sessionRef = useRef<SolSession>(freshSession());
 	const solRef = useRef<EnvironmentDemo | null>(null);
 	const [shipEnergy, setShipEnergy] = useState(STARTING_ENERGY);
+	const [stockpile, setStockpile] = useState<Cargo>(() => emptyCargo());
 	const [loaded, setLoaded] = useState<Loaded | null>(null);
 	const [loading, setLoading] = useState<{ place: Place; progress: number; visible: boolean }>({
 		place: "system",
@@ -77,6 +78,7 @@ export function GameView() {
 			const saved = solRef.current.session();
 			sessionRef.current = saved;
 			setShipEnergy(saved.energy);
+			setStockpile(saved.base);
 			solRef.current = null;
 		}
 		setLoaded(null);
@@ -174,7 +176,18 @@ export function GameView() {
 		<div className="absolute inset-0 touch-none overflow-hidden overscroll-none bg-black text-white">
 			<canvas ref={canvasRef} className="h-full w-full touch-none outline-none select-none" />
 			{loaded?.place === "galaxy" ? (
-				<GalaxyPlace galaxy={loaded.galaxy} energy={shipEnergy} onEnterSol={enterSol} onHome={enterShip} />
+				<GalaxyPlace
+					galaxy={loaded.galaxy}
+					energy={shipEnergy}
+					holdings={[
+						{ id: "hydrogen", label: "Hydrogen", amount: stockpile.hydrogen },
+						{ id: "ore", label: "Ore", amount: stockpile.ore },
+						{ id: "nitrogen", label: "Nitrogen", amount: stockpile.nitrogen },
+						{ id: "carbon", label: "Carbon", amount: stockpile.carbon },
+					]}
+					onEnterSol={enterSol}
+					onHome={enterShip}
+				/>
 			) : null}
 			{loaded?.place === "system" ? <SystemPlace system={loaded.system} onLeave={leaveSol} /> : null}
 			{!loaded ? <GameChrome /> : null}

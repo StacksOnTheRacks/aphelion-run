@@ -1,4 +1,5 @@
 import type { Faction } from "./bases";
+import { STARTING_DOCK_ID } from "./energy";
 import { JOURNEY_STOPS, PLANETS, bodyTarget, type DemoView } from "./environment";
 import type { Mineral } from "./generators";
 
@@ -70,7 +71,7 @@ function bodyText(target: ScanTarget): string {
 		return "Its station is the black market. Earth yields nothing a ship can mine.";
 	}
 	if (target.id === "moon") {
-		return "Earth's Moon is not a combat zone. The ship's home base is here. Like Earth, it yields nothing a ship can mine.";
+		return "Earth's Moon is not a combat zone. Like Earth, it yields nothing a ship can mine.";
 	}
 	if (target.kind === "moon") {
 		const planet = moonPlanet(target.id);
@@ -101,6 +102,9 @@ export function bodyScan(id: string): ScanTarget {
 
 /** Where a trip is headed, as it reads after "to" or "at". */
 export function destinationName(target: ScanTarget): string {
+	if (target.id === STARTING_DOCK_ID) {
+		return "home base";
+	}
 	switch (target.kind) {
 		case "station":
 			return `${stopLabel(target.host)}'s station`;
@@ -134,6 +138,14 @@ function craftLabel(target: ScanTarget): string {
 }
 
 export function scanCard(target: ScanTarget): ScanCard {
+	if (target.id === STARTING_DOCK_ID) {
+		return {
+			id: target.id,
+			kind: "Home base",
+			label: "Home base",
+			text: "The ship's home base, in Earth's inner orbit. Recall returns here.",
+		};
+	}
 	const body = target.kind === "star" || target.kind === "planet" || target.kind === "moon";
 	return {
 		id: target.id,
@@ -149,6 +161,9 @@ export function scanCard(target: ScanTarget): ScanCard {
  * reads by who holds it.
  */
 export function scanLabel(target: ScanTarget): string {
+	if (target.id === STARTING_DOCK_ID) {
+		return "Home base";
+	}
 	const card = scanCard(target);
 	if (target.id !== target.host && card.owner) {
 		return `${card.owner} ${card.kind.toLowerCase()}`;
@@ -207,28 +222,59 @@ export function travelAction(
 	return { label: "Travel To", enabled: true };
 }
 
-/**
- * Siphon is only on a collector. Once the ship is docked at the Sun, every collector can be siphoned.
- * Anywhere else the control says so and stays off. An empty collector stays off.
- */
-export function siphonAction(
-	target: ScanTarget,
-	ship: { atSun: boolean; siphonId: string | null },
-	charge: number
-): { label: string; enabled: boolean } | null {
-	if (target.kind !== "collector") {
-		return null;
+/** What Recall does from the ship's current berth. A countdown home can still be cancelled. */
+export type RecallMove = "hold" | "cancel" | "depart" | "hop" | "abort" | "abort-depart" | "abort-hop";
+
+export function recallMove(input: {
+	homeId: string;
+	dockId: string | null;
+	homeHost: string;
+	dockHost: string | null;
+	departingTo: string | null;
+	inFlight: boolean;
+	energy: number;
+	cost: number;
+}): { move: RecallMove; enabled: boolean; title: string } {
+	const atHomeDock = input.dockId === input.homeId;
+	const sameBody = input.dockHost != null && input.dockHost === input.homeHost;
+	const canCruise = input.energy >= input.cost;
+	const departTitle = sameBody || input.cost <= 0 ? "Return to home base" : `Return · ${input.cost}`;
+
+	if (input.inFlight) {
+		if (atHomeDock) {
+			return { move: "abort", enabled: true, title: "Return to home base" };
+		}
+		if (sameBody) {
+			return { move: "abort-hop", enabled: true, title: "Return to home base" };
+		}
+		if (canCruise) {
+			return { move: "abort-depart", enabled: true, title: departTitle };
+		}
+		return { move: "abort", enabled: true, title: "Stop and hold" };
 	}
-	if (!ship.atSun) {
-		return { label: "Dock to siphon", enabled: false };
+
+	if (input.departingTo === input.homeId) {
+		return { move: "cancel", enabled: true, title: "Cancel recall" };
 	}
-	if (charge <= 0) {
-		return { label: "Empty", enabled: false };
+	if (input.departingTo) {
+		if (sameBody) {
+			return { move: "hop", enabled: true, title: "Return to home base" };
+		}
+		if (canCruise) {
+			return { move: "depart", enabled: true, title: departTitle };
+		}
+		return { move: "cancel", enabled: true, title: "Cancel departure" };
 	}
-	if (ship.siphonId === target.id) {
-		return { label: "Stop siphon", enabled: true };
+	if (atHomeDock) {
+		return { move: "hold", enabled: false, title: "The ship is at home" };
 	}
-	return { label: "Siphon", enabled: true };
+	if (sameBody) {
+		return { move: "hop", enabled: true, title: "Return to home base" };
+	}
+	if (canCruise) {
+		return { move: "depart", enabled: true, title: departTitle };
+	}
+	return { move: "hold", enabled: false, title: `Need ${input.cost} to reach home` };
 }
 
 /** Whole seconds left on the departure countdown, counting 5, 4, 3, 2, 1, then 0 when it is time to go. */

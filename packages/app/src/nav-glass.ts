@@ -1,3 +1,4 @@
+import { CARGO_CAPACITY, ENERGY_CAPACITY } from "./demo/energy";
 import { LOCAL_REACH, bearing, bodyLabel, localBody, localPoint, systemPoint, type NavBody, type NavFix } from "./demo/nav";
 
 const AMBER = "#FCD34D";
@@ -221,17 +222,19 @@ export const CARGO_LABELS = ["Hydrogen", "Ore", "Nitrogen", "Carbon"] as const;
 
 export type CargoLabel = (typeof CARGO_LABELS)[number];
 
-/** Energy aboard, and the other containers. An uncounted mineral is empty. */
+/** Energy aboard, and the other containers. An uncounted mineral is empty. Amounts sit against capacity. */
 export type HoldStock = {
 	energy: number;
-	containers: readonly { label: string; amount: number }[];
+	energyCapacity: number;
+	containers: readonly { label: string; amount: number; capacity: number }[];
 };
 
 /** The hold as the center screen draws it. Minerals default to empty until they are counted aboard. */
 export function holdStock(energy: number, minerals: Partial<Record<CargoLabel, number>> = {}): HoldStock {
 	return {
 		energy,
-		containers: CARGO_LABELS.map((label) => ({ label, amount: minerals[label] ?? 0 })),
+		energyCapacity: ENERGY_CAPACITY,
+		containers: CARGO_LABELS.map((label) => ({ label, amount: minerals[label] ?? 0, capacity: CARGO_CAPACITY })),
 	};
 }
 
@@ -255,24 +258,30 @@ function track(context: CanvasRenderingContext2D, font: number): void {
 }
 
 /**
- * The hold, in the square the local chart used to occupy. Energy is the large figure. The other
- * containers are listed under it.
+ * The hold, in the square the local chart used to occupy. Each resource is a bar: the fill is how
+ * much of that container is used, and the count sits beside the name.
  */
 function paintHold(context: CanvasRenderingContext2D, x: number, top: number, width: number, height: number, stock: HoldStock): void {
-	const head = Math.max(12, Math.round(height * 0.05));
-	const term = Math.max(12, Math.round(height * 0.042));
-	const energySize = Math.max(20, Math.round(height * 0.1));
-	const gap = Math.round(height * 0.04);
-	const rowGap = Math.round(height * 0.028);
-	const line = (size: number) => size + 3;
-	const rows = stock.containers.length;
-	const block =
-		line(head) + gap + line(term) + line(energySize) + gap + rows * line(term) + Math.max(0, rows - 1) * rowGap;
-	let y = top + Math.max(gap, (height - block) / 2);
-	const pad = Math.round(width * 0.1);
+	const rows = [
+		{ label: "Energy", amount: stock.energy, capacity: stock.energyCapacity },
+		...stock.containers.map((container) => ({
+			label: container.label,
+			amount: container.amount,
+			capacity: container.capacity,
+		})),
+	];
+	const head = Math.max(11, Math.round(height * 0.055));
+	const term = Math.max(10, Math.round(height * 0.04));
+	const gap = Math.round(height * 0.03);
+	const rowGap = Math.round(height * 0.022);
+	const barH = Math.max(5, Math.round(height * 0.028));
+	const line = (size: number) => size + 2;
+	const block = line(head) + gap + rows.length * (line(term) + barH) + Math.max(0, rows.length - 1) * rowGap;
+	let y = top + Math.max(4, (height - block) / 2);
+	const pad = Math.round(width * 0.08);
 	const left = x + pad;
 	const rightEdge = x + width - pad;
-	const room = width - pad * 2;
+	const room = Math.max(1, rightEdge - left);
 
 	const write = (text: string, size: number, color: string, align: CanvasTextAlign, atX: number, atY: number, weight: 400 | 600 | 700) => {
 		context.font = `${weight} ${size}px ${FACE}`;
@@ -285,20 +294,23 @@ function paintHold(context: CanvasRenderingContext2D, x: number, top: number, wi
 
 	write("HOLD", head, AMBER, "left", left, y, 600);
 	y += line(head) + gap;
-	write("ENERGY", term, "rgba(232,228,217,0.45)", "left", left, y, 400);
-	y += line(term);
-	context.font = `700 ${energySize}px ${FACE}`;
-	write(fit(context, amountLabel(stock.energy), room), energySize, AMBER, "left", left, y, 700);
-	y += line(energySize) + gap;
 
-	for (const container of stock.containers) {
+	for (const row of rows) {
 		context.font = `600 ${term}px ${FACE}`;
-		const amount = amountLabel(container.amount);
+		const amount = amountLabel(row.amount);
 		const labelRoom = room - context.measureText(amount).width - 8;
 		context.font = `400 ${term}px ${FACE}`;
-		write(fit(context, container.label.toUpperCase(), labelRoom), term, "rgba(232,228,217,0.45)", "left", left, y, 400);
-		write(amount, term, BONE, "right", rightEdge, y, 600);
-		y += line(term) + rowGap;
+		write(fit(context, row.label.toUpperCase(), labelRoom), term, "rgba(232,228,217,0.45)", "left", left, y, 400);
+		write(amount, term, row.label === "Energy" ? AMBER : BONE, "right", rightEdge, y, 600);
+		y += line(term);
+		context.fillStyle = "rgba(232,228,217,0.12)";
+		context.fillRect(left, y, room, barH);
+		const share = row.capacity > 0 ? Math.max(0, Math.min(1, row.amount / row.capacity)) : 0;
+		if (share > 0) {
+			context.fillStyle = AMBER;
+			context.fillRect(left, y, Math.max(1, room * share), barH);
+		}
+		y += barH + rowGap;
 	}
 }
 

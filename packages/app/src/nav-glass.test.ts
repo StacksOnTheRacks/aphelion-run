@@ -58,7 +58,9 @@ Object.assign(globalThis, {
 const stock = holdStock(1000, { Ore: 12 });
 expect(
 	stock.energy === 1000 &&
-		stock.containers.map((line) => `${line.label}:${line.amount}`).join() === "Hydrogen:0,Ore:12,Nitrogen:0,Carbon:0",
+		stock.energyCapacity === 3000 &&
+		stock.containers.map((line) => `${line.label}:${line.amount}/${line.capacity}`).join() ===
+			"Hydrogen:0/2000,Ore:12/2000,Nitrogen:0/2000,Carbon:0/2000",
 	"the hold lists energy and the mineral containers, empty until counted"
 );
 

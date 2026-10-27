@@ -7,8 +7,12 @@ import {
 	SATURN_FLYBY_MARGIN,
 	SATURN_RING_INNER_SCALE,
 	SATURN_RING_OUTER_SCALE,
+	DRIFT_TO_ORBIT_SECONDS,
+	INNER_ORBIT_INSET,
 	SUN_OUTER_ORBIT,
 	WAREHOUSE_SIZE,
+	driftToInnerOrbit,
+	innerOrbitRadius,
 	moonBaseRadius,
 	moonBaseSize,
 	LOCAL_REACH,
@@ -20,6 +24,7 @@ import {
 	radialReach,
 	warehouseRadius,
 } from "./bases";
+import { moonGeneratorSlots, planetGeneratorSlots } from "./generators";
 
 const failures: string[] = [];
 
@@ -152,7 +157,7 @@ for (const planet of PLANETS) {
 		}
 		const home = playerHome(moon.diameter);
 		const size = moonBaseSize(moon.diameter);
-		expect(home.faction === "corporate", `${moon.name} home is the player's`);
+		expect(home.faction === "corporate", `${moon.name} keeps a corporate base`);
 		expect(size.width < moon.diameter && size.depth < moon.diameter, `${moon.name} home is smaller than the moon`);
 		expect(home.radius === moonBaseRadius(moon.diameter), `${moon.name} radius matches the helper`);
 		expect(home.size.width === size.width && home.size.depth === size.depth, `${moon.name} home uses the moon base size`);
@@ -250,6 +255,51 @@ expect(nearBody({ x: outer * LOCAL_REACH, y: 0, z: 0 }, body, outer), "a ship at
 expect(!nearBody({ x: outer * LOCAL_REACH + 0.01, y: 0, z: 0 }, body, outer), "a ship past the reach is in open space");
 expect(!nearBody({ x: 0, y: outer * LOCAL_REACH + 1, z: 0 }, body, outer), "height counts, so a ship far above the shell is not near it");
 expect(!nearBody(body, body, 0), "a body with no outer orbit has no honeycomb");
+
+expect(DRIFT_TO_ORBIT_SECONDS === 5, "a depleted mine drifts out for five seconds");
+expect(INNER_ORBIT_INSET > 0 && INNER_ORBIT_INSET < 0.1, "the inner orbit inset is a sliver inside the shell");
+{
+	const sunInner = innerOrbitRadius(SUN_OUTER_ORBIT);
+	expect(sunInner < SUN_OUTER_ORBIT, "the Sun's inner orbit sits inside the honeycomb");
+	expect(sunInner > SUN_OUTER_ORBIT * 0.9, "the Sun's inner orbit stays just inside the honeycomb");
+	for (const planet of PLANETS) {
+		const shell = outerOrbitRadius(planet);
+		const inner = innerOrbitRadius(shell);
+		expect(inner < shell, `${planet.name} inner orbit sits inside the honeycomb`);
+		for (const slot of planetGeneratorSlots(planet.name, { ...planet, homes: false })) {
+			expect(
+				inner > slot.radius + radialReach(slot.size),
+				`${planet.name} inner orbit sits outside its ${slot.resource} mine`
+			);
+		}
+		for (const moon of planet.moons) {
+			const moonShell = moonOuterOrbitRadius(moon.diameter);
+			const moonInner = innerOrbitRadius(moonShell);
+			expect(moonInner < moonShell, `${moon.name} inner orbit sits inside the honeycomb`);
+			for (const slot of moonGeneratorSlots(planet.name, moon.diameter)) {
+				expect(
+					moonInner > slot.radius + radialReach(slot.size),
+					`${moon.name} inner orbit sits outside its ${slot.resource} mine`
+				);
+			}
+		}
+	}
+	const mine = { x: 8, y: 0.04, z: 0 };
+	const start = driftToInnerOrbit(mine, 12, 0, 0);
+	expect(
+		Math.abs(start.x - 8) < 1e-9 && Math.abs(start.y - 0.04) < 1e-9 && Math.abs(start.z) < 1e-9,
+		"the drift starts at the mine"
+	);
+	const middle = driftToInnerOrbit(mine, 12, 0.5, 0);
+	expect(Math.abs(Math.hypot(middle.x, middle.z) - 10) < 1e-9, "halfway through, the radius is halfway out");
+	const end = driftToInnerOrbit(mine, 12, 1, Math.PI / 2);
+	expect(
+		Math.abs(end.x) < 1e-9 && Math.abs(end.z - 12) < 1e-9 && Math.abs(end.y) < 1e-9,
+		"the drift ends on the inner orbit, in the body's plane"
+	);
+	const held = driftToInnerOrbit(mine, 12, 2, 0);
+	expect(Math.abs(Math.hypot(held.x, held.z) - 12) < 1e-9, "a drift past its end stays on the inner orbit");
+}
 
 if (failures.length > 0) {
 	console.error(failures.join("\n"));

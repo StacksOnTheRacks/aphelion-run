@@ -466,6 +466,11 @@ export type Journey = {
 	stop: () => void;
 	/** Couples the ship to a dock with no flight. The next update keeps it there as the dock moves. */
 	berth: (bodyId: string, dock: Dock) => void;
+	/**
+	 * Leaves the dock and any flight. The ship is no longer placed here; `bodyId` stays as the body
+	 * it is circling until the next berth or trip.
+	 */
+	release: (bodyId: string) => void;
 	update: (deltaSeconds: number, centerOf: (id: string) => Vector3) => void;
 	/** Where the ship is docked, which way that satellite circles, and how fast. Null while a trip is underway. */
 	docked: () => { id: string; position: Vector3; turn: number; rate: number; dock?: Dock } | null;
@@ -529,6 +534,8 @@ export function createJourney(
 	let flight: Flight | null = null;
 	/** The dock the ship is coupled to between trips. A flight does not clear it, so a recall can return. */
 	let berthed: { bodyId: string; dock: Dock } | null = null;
+	/** The body the ship circles after it leaves a dock and before the next berth or trip. */
+	let orbiting: string | null = null;
 	const berthHeading = new Vector3(1, 0, 0);
 	const photonListeners = new Set<(seconds: number) => void>();
 	const cruiseListeners = new Set<() => void>();
@@ -701,6 +708,7 @@ export function createJourney(
 
 	return {
 		start(plan, onDone) {
+			orbiting = null;
 			clear();
 			const path = stitch(plan);
 			const ahead = buildAhead(scene, path, pixelRatio());
@@ -741,7 +749,13 @@ export function createJourney(
 		},
 		stop: clear,
 		berth(bodyId, dock) {
+			orbiting = null;
 			berthed = { bodyId, dock };
+		},
+		release(bodyId) {
+			clear();
+			berthed = null;
+			orbiting = bodyId;
 		},
 		docked() {
 			if (flight) {
@@ -769,12 +783,12 @@ export function createJourney(
 		},
 		host() {
 			if (flight && flight.phase !== "docked") {
-				return flight.departBody ?? berthed?.bodyId ?? null;
+				return flight.departBody ?? berthed?.bodyId ?? orbiting;
 			}
 			if (flight?.phase === "docked") {
 				return flight.plan.arrive.id;
 			}
-			return berthed?.bodyId ?? null;
+			return berthed?.bodyId ?? orbiting;
 		},
 		ship() {
 			if (flight) {

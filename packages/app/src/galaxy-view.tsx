@@ -3,7 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { NEIGHBORS, SOL_ID, systemCard, systemCardAction, type GalaxyDemo, type StarClass, type SystemCard } from "./demo/galaxy";
-import { Hud, useHudAnchors } from "./hud";
+import { Hud, useHudAnchors, type WarehouseHolding } from "./hud";
 import { SpaceLabels, type LabelItem } from "./space-labels";
 
 const STAR_COLOR: Record<StarClass, string> = {
@@ -18,11 +18,14 @@ const STAR_COLOR: Record<StarClass, string> = {
 export function GalaxyPlace({
 	galaxy,
 	energy,
+	holdings,
 	onEnterSol,
 	onHome,
 }: {
 	galaxy: GalaxyDemo;
 	energy: number;
+	/** Mined resources deposited at the home base. */
+	holdings: readonly WarehouseHolding[];
 	onEnterSol: () => void;
 	onHome: () => void;
 }) {
@@ -51,6 +54,7 @@ export function GalaxyPlace({
 				anchors={anchors}
 				location={{ title: "Galaxy", detail: null }}
 				energy={energy}
+				holdings={holdings}
 				pilot={{ onClick: () => {}, disabled: true, title: "Pilot from inside Sol" }}
 				locate={{ onClick: onHome, title: "Where your ship is docked" }}
 				recall={{ onClick: () => {}, disabled: true, title: "The ship is holding" }}

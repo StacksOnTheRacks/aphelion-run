@@ -34,7 +34,10 @@ import {
 	EARTH_WAREHOUSE_RADIUS,
 	SATURN_RING_INNER_SCALE,
 	SATURN_RING_OUTER_SCALE,
+	DRIFT_TO_ORBIT_SECONDS,
 	SUN_OUTER_ORBIT,
+	driftToInnerOrbit,
+	innerOrbitRadius,
 	playerHome,
 	moonOuterOrbitRadius,
 	nearBody,
@@ -48,11 +51,15 @@ import { daysSinceJ2000, greenwichAngle, moonLongitude, planetLongitude, type Ep
 import { moonGeneratorSlots, planetGeneratorSlots, type GeneratorSlot, type Mineral } from "./generators";
 import {
 	COLLECTOR_CHARGE,
+	MINERALS,
 	STARTING_DOCK_ID,
 	STARTING_ENERGY,
 	burnEnergy,
+	cargoFrom,
 	cruiseCost,
-	siphonEnergy,
+	depositAtHome,
+	drawFromDock,
+	type Cargo,
 	type SolSession,
 } from "./energy";
 import { CLIMB_PACE, createJourney, hoverDeparture, journeySeconds, type Dock, type Harbor, type JourneyPlan } from "./journey";
@@ -543,6 +550,11 @@ export function bodyOuterRadius(id: string): number {
 	throw new Error(`No outer orbit for ${id}.`);
 }
 
+/** Inner-orbit radius. A ship idles here after it leaves a mine, just inside the battle honeycomb. */
+export function bodyInnerRadius(id: string): number {
+	return innerOrbitRadius(bodyOuterRadius(id));
+}
+
 /**
  * A gravity assist passes this far outside the outer-orbit shell, as a multiple of that radius.
  * On the shell the curve and the honeycomb are the same line, and the grid fills the cockpit.
@@ -1003,17 +1015,16 @@ export type EnvironmentDemo = LabelSource & {
 	quote: (target: ScanTarget) => number;
 	/** The craft the ship is berthed at. During a burn this is still the dock it left. */
 	berth: () => ScanTarget | null;
-	/** Energy aboard, whether a siphon is running, and the charge of a collector the ship is on. */
+	/** Earth's corporate station, the ship's home. Recall returns here. */
+	homeBase: () => ScanTarget;
+	/** Moves the ship onto another dock of the body it is already at. */
+	couple: (id: string) => void;
+	/** Energy aboard, the mined cargo, and the home stockpile. `charge` is what the docked mine still holds. */
 	hold: () => ShipHold;
 	onHold: (listener: (hold: ShipHold) => void) => () => void;
-	/** Energy still in a collector. A collector that has not been siphoned is full. */
+	/** Load still in a mine or collector. One that has not been drawn down is full. */
 	charge: (id: string) => number;
-	/**
-	 * Starts siphoning `collectorId`, or stops when `on` is false. Any collector works once the ship
-	 * is docked at the Sun. Starting does nothing while the ship is elsewhere or the collector is empty.
-	 */
-	setSiphoning: (on: boolean, collectorId?: string) => void;
-	/** Dock, energy, and collector charges, so leaving Sol can come back to the same berth. */
+	/** Dock, energy, cargo, and mine loads, so leaving Sol can come back to the same berth. */
 	session: () => SolSession;
 	/** Ends the flight early and puts the ship back on the dock it left. Energy already burned stays spent. */
 	land: () => void;
@@ -1034,14 +1045,16 @@ export type EnvironmentDemo = LabelSource & {
 	paintCenter: (paint: CenterPaint) => void;
 };
 
-/** Energy the ship is carrying, and the collector it is siphoning while docked at the Sun. */
+/** Energy and mined cargo aboard, and the mine the ship is drawing from while docked. */
 export type ShipHold = {
 	energy: number;
+	cargo: Cargo;
+	base: Cargo;
 	siphoning: boolean;
 	dockId: string | null;
-	/** The collector being siphoned. Null when the siphon is off. */
+	/** The mine or collector being drawn. Null when the ship is not drawing. */
 	siphonId: string | null;
-	/** Energy still in the collector the ship is docked at. Null at any other dock. */
+	/** Load still in the docked mine or collector. Null at any other dock. */
 	charge: number | null;
 };
 
@@ -1147,9 +1160,26 @@ export async function createEnvironment(
 	const crafts: Craft[] = [];
 	const spinningBases = buildHabitats(scene, bodies, crafts);
 	const ranger = await loadRanger(scene, camera);
+	const canopyGlass = scene.getMeshByName("cockpit-canopy-glass");
+	if (canopyGlass) {
+		glow.addExcludedMesh(canopyGlass);
+	}
 	let shipAngle = 1.2;
 	const idlePoint = new Vector3();
 	const idleHeading = new Vector3();
+	/**
+	 * Departure from a depleted mine. The ship eases out to the inner orbit instead of appearing there.
+	 * Positions are relative to the body.
+	 */
+	let mineDrift: {
+		host: string;
+		from: Vector3;
+		last: Vector3;
+		angle: number;
+		/** Angular speed at the mine. It eases toward the idle orbit's rate. */
+		rate: number;
+		elapsed: number;
+	} | null = null;
 	const player: Craft = {
 		id: "player-ship",
 		host: "earth",
@@ -1192,9 +1222,12 @@ export async function createEnvironment(
 	const journey = createJourney(scene, camera, glow, harborOf, ranger);
 	const session = options?.session;
 	let energy = session?.energy ?? STARTING_ENERGY;
-	let dockId = session?.dockId ?? STARTING_DOCK_ID;
-	let siphonId: string | null = session?.siphonId ?? (session?.siphoning ? session.dockId : null);
-	let siphoning = (session?.siphoning ?? false) && siphonId !== null;
+	let cargo = cargoFrom(session?.cargo);
+	let base = cargoFrom(session?.base);
+	let dockId: string | null = session?.dockId ?? STARTING_DOCK_ID;
+	let lastBerthed = dockId ?? STARTING_DOCK_ID;
+	let siphonId: string | null = null;
+	let siphoning = false;
 	const collectorCharges = new Map<string, number>(Object.entries(session?.collectors ?? {}));
 	let departEnergy = energy;
 	let quoted = 0;
@@ -1203,14 +1236,17 @@ export async function createEnvironment(
 	let publishedHold = "";
 	const chargeOf = (id: string) => collectorCharges.get(id) ?? COLLECTOR_CHARGE;
 	const currentHold = (): ShipHold => {
-		const craft = crafts.find((item) => item.id === dockId);
-		const charge = craft?.kind === "collector" ? chargeOf(dockId) : null;
-		return { energy, siphoning, dockId, siphonId, charge };
+		const craft = dockId ? crafts.find((item) => item.id === dockId) : undefined;
+		const mining = craft?.kind === "collector" || craft?.kind === "generator";
+		const charge = mining && dockId ? chargeOf(dockId) : null;
+		return { energy, cargo: { ...cargo }, base: { ...base }, siphoning, dockId, siphonId, charge };
 	};
 	const publishHold = () => {
 		const hold = currentHold();
+		const cargoKey = MINERALS.map((mineral) => Math.round(cargo[mineral])).join(",");
+		const baseKey = MINERALS.map((mineral) => Math.round(base[mineral])).join(",");
 		const draining = siphonId ? Math.round(chargeOf(siphonId)) : "";
-		const key = `${Math.round(hold.energy)}|${hold.siphoning}|${hold.dockId}|${hold.siphonId}|${hold.charge === null ? "" : Math.round(hold.charge)}|${draining}`;
+		const key = `${Math.round(hold.energy)}|${cargoKey}|${baseKey}|${hold.siphoning}|${hold.dockId}|${hold.siphonId}|${hold.charge === null ? "" : Math.round(hold.charge)}|${draining}`;
 		if (key === publishedHold) {
 			return;
 		}
@@ -1511,16 +1547,47 @@ export async function createEnvironment(
 			}
 		}
 
-		if (!journey.ship()) {
-			shipAngle += deltaSeconds * 0.35 * ORBIT_PACE;
-			idlePoint.set(
-				earth.mesh.position.x + Math.cos(shipAngle) * EARTH_STATION_RADIUS,
-				0,
-				earth.mesh.position.z + Math.sin(shipAngle) * EARTH_STATION_RADIUS
-			);
-			idleHeading.set(-Math.sin(shipAngle), 0, Math.cos(shipAngle));
-			ranger.drive("impulse", 0);
-			ranger.place(idlePoint, idleHeading, deltaSeconds);
+		if (journey.ship()) {
+			mineDrift = null;
+		} else {
+			const host = journey.host() ?? player.host;
+			const center = focusPosition(host);
+			const inner = bodyInnerRadius(host);
+			const drift = mineDrift?.host === host ? mineDrift : null;
+			if (mineDrift && !drift) {
+				mineDrift = null;
+			}
+			if (drift) {
+				drift.elapsed += deltaSeconds;
+				const t = Math.min(1, drift.elapsed / DRIFT_TO_ORBIT_SECONDS);
+				const eased = t * t * (3 - 2 * t);
+				const rate = drift.rate + (player.rate - drift.rate) * eased;
+				drift.angle += deltaSeconds * rate;
+				const pose = driftToInnerOrbit(drift.from, inner, t, drift.angle);
+				shipAngle = drift.angle;
+				idlePoint.set(center.x + pose.x, center.y + pose.y, center.z + pose.z);
+				const stepX = pose.x - drift.last.x;
+				const stepY = pose.y - drift.last.y;
+				const stepZ = pose.z - drift.last.z;
+				const stepLength = Math.hypot(stepX, stepY, stepZ);
+				if (stepLength > 1e-6) {
+					idleHeading.set(stepX / stepLength, stepY / stepLength, stepZ / stepLength);
+				} else {
+					idleHeading.set(-Math.sin(shipAngle), 0, Math.cos(shipAngle));
+				}
+				drift.last.set(pose.x, pose.y, pose.z);
+				ranger.drive("impulse", 0);
+				ranger.place(idlePoint, idleHeading, deltaSeconds);
+				if (t >= 1) {
+					mineDrift = null;
+				}
+			} else {
+				shipAngle += deltaSeconds * player.rate;
+				idlePoint.set(center.x + Math.cos(shipAngle) * inner, center.y, center.z + Math.sin(shipAngle) * inner);
+				idleHeading.set(-Math.sin(shipAngle), 0, Math.cos(shipAngle));
+				ranger.drive("impulse", 0);
+				ranger.place(idlePoint, idleHeading, deltaSeconds);
+			}
 		}
 
 		for (const base of spinningBases) {
@@ -1632,28 +1699,114 @@ export async function createEnvironment(
 	/** Set by a click, then taken by the next camera move when that move opens the craft's view. */
 	let chosen: Craft | null = null;
 
+	const rememberDock = (id: string | null) => {
+		dockId = id;
+		if (id) {
+			lastBerthed = id;
+		}
+	};
+
+	/** Leaving a mine or collector fills it again, even when the ship did not empty it. */
+	const resetMine = (id: string | null) => {
+		if (!id) {
+			return;
+		}
+		const craft = crafts.find((item) => item.id === id);
+		if (craft?.kind === "collector" || craft?.kind === "generator") {
+			collectorCharges.delete(id);
+		}
+	};
+
+	/**
+	 * Dispatches the ship from a mine toward that body's inner orbit. The drift takes
+	 * `DRIFT_TO_ORBIT_SECONDS`. The mine is already full again.
+	 */
+	const releaseToOrbit = (host: string) => {
+		const docked = journey.docked();
+		siphoning = false;
+		siphonId = null;
+		dockId = null;
+		player.host = host;
+		player.view = orbitView(host, "inner");
+		const from = ranger.position.subtract(focusPosition(host));
+		const angle = Math.atan2(from.z, from.x);
+		shipAngle = angle;
+		journey.release(host);
+		mineDrift = {
+			host,
+			from,
+			last: from.clone(),
+			angle,
+			rate: docked?.rate || player.rate,
+			elapsed: 0,
+		};
+		publishHold();
+	};
+
+	/** Draws while docked at a mine or collector, and empties the hold into the home base. */
+	const settleDock = (deltaSeconds: number) => {
+		if (journey.docked() === null || !dockId) {
+			if (siphoning) {
+				siphoning = false;
+				siphonId = null;
+				publishHold();
+			}
+			return;
+		}
+		const craft = crafts.find((item) => item.id === dockId);
+		if (!craft) {
+			return;
+		}
+		if (craft.id === STARTING_DOCK_ID) {
+			let changed = false;
+			if (MINERALS.some((mineral) => cargo[mineral] > 0)) {
+				const next = depositAtHome(cargo, base);
+				cargo = next.cargo;
+				base = next.base;
+				changed = true;
+			}
+			if (siphoning) {
+				siphoning = false;
+				siphonId = null;
+				changed = true;
+			}
+			if (changed) {
+				publishHold();
+			}
+			return;
+		}
+		if (craft.kind !== "collector" && craft.kind !== "generator") {
+			if (siphoning) {
+				siphoning = false;
+				siphonId = null;
+				publishHold();
+			}
+			return;
+		}
+		const drawn = drawFromDock(
+			{ energy, cargo },
+			{ kind: craft.kind, resource: craft.resource, remaining: chargeOf(dockId) },
+			deltaSeconds
+		);
+		energy = drawn.energy;
+		cargo = drawn.cargo;
+		if (drawn.release) {
+			collectorCharges.delete(dockId);
+			releaseToOrbit(craft.host);
+			return;
+		}
+		collectorCharges.set(dockId, drawn.remaining);
+		siphoning = true;
+		siphonId = dockId;
+		publishHold();
+	};
+
 	scene.onBeforeRenderObservable.add(() => {
 		const deltaSeconds = engine.getDeltaTime() / 1000;
 		const before = sunAngle(focusPosition(SHOTS[active].focus));
 		placeBodies(deltaSeconds);
 		journey.update(deltaSeconds, focusPosition);
-		if (siphoning && siphonId) {
-			const atSun = journey.docked() !== null && journey.host() === "sun";
-			const craft = crafts.find((item) => item.id === siphonId);
-			if (!atSun || craft?.kind !== "collector") {
-				siphoning = false;
-				siphonId = null;
-			} else {
-				const next = siphonEnergy(energy, chargeOf(siphonId), deltaSeconds);
-				energy = next.ship;
-				collectorCharges.set(siphonId, next.collector);
-				if (next.collector <= 0) {
-					siphoning = false;
-					siphonId = null;
-				}
-			}
-			publishHold();
-		}
+		settleDock(deltaSeconds);
 		cockpit.update();
 		// An arrival can open another view from inside the update, so the shot is read after it.
 		const shot = SHOTS[active];
@@ -2162,11 +2315,13 @@ export async function createEnvironment(
 		},
 		travel(target, onDone, cost) {
 			courseName = courseLabel(target);
+			const docked = journey.docked();
+			const fromId = docked?.id ?? journey.host() ?? "earth";
+			const plan = departurePlan(target);
+			resetMine(dockId);
 			siphoning = false;
 			siphonId = null;
-			const docked = journey.docked();
-			const fromId = docked?.id ?? "earth";
-			const plan = departurePlan(target);
+			dockId = null;
 			const dock = target.id === target.host ? undefined : dockById.get(target.id);
 			quoted = cost ?? cruiseCost(journeySeconds(plan.cruise.total));
 			departEnergy = energy;
@@ -2181,12 +2336,8 @@ export async function createEnvironment(
 				},
 				() => {
 					const arrived = journey.docked();
-					dockId = idForDock(arrived?.dock) ?? (target.id !== target.host ? target.id : dockId);
-					const arrivedCraft = crafts.find((item) => item.id === dockId);
-					if (arrivedCraft?.kind === "collector" && chargeOf(dockId) > 0) {
-						siphoning = true;
-						siphonId = dockId;
-					}
+					const nextId = idForDock(arrived?.dock) ?? (target.id !== target.host ? target.id : null);
+					rememberDock(nextId);
 					const host = journey.host();
 					if (host) {
 						player.host = host;
@@ -2198,8 +2349,35 @@ export async function createEnvironment(
 			);
 		},
 		berth() {
+			if (!dockId) {
+				return null;
+			}
 			const craft = craftById.get(dockId);
 			return craft && craft.kind !== "ship" ? craftFound(craft) : null;
+		},
+		homeBase() {
+			const craft = craftById.get(STARTING_DOCK_ID);
+			if (!craft || craft.kind === "ship") {
+				throw new Error("The home base is missing.");
+			}
+			return craftFound(craft);
+		},
+		couple(id) {
+			const craft = craftById.get(id);
+			const dock = dockById.get(id);
+			if (!craft || craft.kind === "ship" || !dock || journey.host() !== craft.host) {
+				return;
+			}
+			if (id !== dockId) {
+				resetMine(dockId);
+			}
+			journey.berth(craft.host, dock);
+			rememberDock(id);
+			siphoning = false;
+			siphonId = null;
+			player.host = craft.host;
+			player.view = orbitView(craft.host, "inner");
+			publishHold();
 		},
 		hold: currentHold,
 		onHold(listener) {
@@ -2210,23 +2388,6 @@ export async function createEnvironment(
 			};
 		},
 		charge: chargeOf,
-		setSiphoning(on, collectorId) {
-			if (!on) {
-				siphoning = false;
-				siphonId = null;
-				publishHold();
-				return;
-			}
-			const source = collectorId ?? dockId;
-			const craft = crafts.find((item) => item.id === source);
-			const atSun = journey.docked() !== null && journey.host() === "sun";
-			if (!atSun || craft?.kind !== "collector" || chargeOf(source) <= 0) {
-				return;
-			}
-			siphoning = true;
-			siphonId = source;
-			publishHold();
-		},
 		session() {
 			const collectors: Record<string, number> = {};
 			for (const [id, charge] of collectorCharges) {
@@ -2236,10 +2397,12 @@ export async function createEnvironment(
 			}
 			return {
 				energy,
-				dockId,
+				dockId: lastBerthed,
 				collectors,
 				siphonId: siphoning ? siphonId : null,
-				siphoning: siphoning && journey.docked() !== null && journey.host() === "sun",
+				siphoning: siphoning && journey.docked() !== null,
+				cargo: { ...cargo },
+				base: { ...base },
 			};
 		},
 		land() {
@@ -2247,6 +2410,8 @@ export async function createEnvironment(
 			siphoning = false;
 			siphonId = null;
 			journey.stop();
+			const back = journey.docked();
+			rememberDock(idForDock(back?.dock));
 			publishHold();
 		},
 		setPiloting(on) {
@@ -2290,6 +2455,9 @@ const MINERAL_NAME: Record<string, string> = {
 
 /** The destination as the center screen reads it: a place, or the kind of craft. */
 function courseLabel(target: ScanTarget): string {
+	if (target.id === STARTING_DOCK_ID) {
+		return "Home base";
+	}
 	const named = (id: string) => JOURNEY_STOPS.find((stop) => stop.id === id)?.label ?? id;
 	switch (target.kind) {
 		case "station":
@@ -3164,6 +3332,7 @@ type Craft = {
 
 function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[]): SpinningBase[] {
 	const materials = factionMaterials(scene);
+	const homeMaterial = playerHomeMaterial(scene);
 	const generatorMaterial = grayBoxMaterial(scene);
 	const spinning: SpinningBase[] = [];
 	for (const body of bodies) {
@@ -3176,8 +3345,8 @@ function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[]): Spi
 		};
 		const placed = planetBases(input);
 		const inner = planetOrbitView(body.spec.name, "inner");
-		addBaseSlots(scene, body.anchor, placed.warehouses, materials, `${body.spec.name}-warehouse`, spinning, crafts, body.spec.name, inner, "home");
-		addBaseSlots(scene, body.anchor, placed.stations, materials, `${body.spec.name}-station`, spinning, crafts, body.spec.name, inner, "station");
+		addBaseSlots(scene, body.anchor, placed.warehouses, materials, homeMaterial, `${body.spec.name}-warehouse`, spinning, crafts, body.spec.name, inner, "home");
+		addBaseSlots(scene, body.anchor, placed.stations, materials, homeMaterial, `${body.spec.name}-station`, spinning, crafts, body.spec.name, inner, "station");
 		addGeneratorSlots(
 			scene,
 			body.anchor,
@@ -3196,6 +3365,7 @@ function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[]): Spi
 				moon.baseAnchor,
 				home,
 				materials,
+				homeMaterial,
 				`${moon.mesh.name}-base`,
 				spinning,
 				crafts,
@@ -3227,6 +3397,15 @@ function grayBoxMaterial(scene: Scene): StandardMaterial {
 	return material;
 }
 
+/** Teal, so the ship's home reads apart from the gold corporate craft and the red marauder craft. */
+function playerHomeMaterial(scene: Scene): StandardMaterial {
+	const material = new StandardMaterial("bases-home", scene);
+	material.diffuseColor = new Color3(0.15, 0.82, 0.78);
+	material.emissiveColor = new Color3(0.04, 0.62, 0.58);
+	material.specularColor = new Color3(0.25, 0.35, 0.35);
+	return material;
+}
+
 function factionMaterials(scene: Scene): Record<Faction, StandardMaterial> {
 	const materials = {} as Record<Faction, StandardMaterial>;
 	for (const faction of ["corporate", "marauder"] as const) {
@@ -3245,6 +3424,7 @@ function addBaseSlots(
 	parent: TransformNode,
 	slots: BaseSlot[],
 	materials: Record<Faction, StandardMaterial>,
+	homeMaterial: StandardMaterial,
 	name: string,
 	spinning: SpinningBase[],
 	crafts: Craft[],
@@ -3254,7 +3434,8 @@ function addBaseSlots(
 ): void {
 	slots.forEach((slot, index) => {
 		const mesh = MeshBuilder.CreateBox(`${name}-${slot.faction}-${index}`, slot.size, scene);
-		mesh.material = materials[slot.faction];
+		const playersHome = mesh.name === STARTING_DOCK_ID;
+		mesh.material = playersHome ? homeMaterial : materials[slot.faction];
 		mesh.parent = parent;
 		mesh.isPickable = false;
 		mesh.position.set(Math.cos(slot.angle) * slot.radius, 0, Math.sin(slot.angle) * slot.radius);
@@ -3265,7 +3446,7 @@ function addBaseSlots(
 			id: mesh.name,
 			host,
 			view,
-			kind,
+			kind: playersHome ? "home" : kind,
 			owner: slot.faction,
 			reach: Math.max(slot.size.width, slot.size.depth) / 2,
 			rate: BASE_SPIN * ORBIT_PACE,

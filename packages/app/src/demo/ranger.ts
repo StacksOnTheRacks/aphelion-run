@@ -2,7 +2,10 @@ import type { Camera } from "@babylonjs/core/Cameras/camera";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { LoadAssetContainerAsync } from "@babylonjs/core/Loading/sceneLoader";
+import { Constants } from "@babylonjs/core/Engines/constants";
 import { Material } from "@babylonjs/core/Materials/material";
+import { MultiMaterial } from "@babylonjs/core/Materials/multiMaterial";
+import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import { RenderTargetTexture } from "@babylonjs/core/Materials/Textures/renderTargetTexture";
@@ -31,12 +34,13 @@ export const HULL_LENGTH = 0.04;
 /**
  * The hull, its plumes, and its beacon are drawn on this layer and nothing else is. The aft views
  * draw the ship with their own near plane, over the world. The windscreen draws none of it: the
- * model has no real cabin, and its nose and canopy would sit in the view.
+ * nose would fill the seat, and the canopy on this layer is the opaque shell.
  */
 export const SHIP_LAYER = 0x10000000;
 /**
- * The dash blocked in ahead of the pilot. The windscreen draws this and not the hull: the canopy
- * and the nose fill the seat, and the world near plane is too far out for a panel in front of the eye.
+ * The dash, the deck, and the seat's copy of the canopy. The windscreen draws this and not the
+ * hull. The world near plane is too far out for a panel in front of the eye, and the nose would
+ * fill the seat. The canopy here is a rim over the picture of space, not the shell outside.
  */
 export const COCKPIT_LAYER = 0x80000000;
 
@@ -62,6 +66,25 @@ const HULL_ROUGHNESS = 0.8;
 const HULL_METALLIC = 0.2;
 const CANOPY_COLOR = new Color3(0.22, 0.23, 0.25);
 const CANOPY_ROUGHNESS = 0.1;
+/**
+ * How the seat's glass shows itself. `faceAlpha` is looking straight through the pane, `rimAlpha`
+ * is a grazing edge, and `rimPower` is how fast that edge comes on. The shader uses these same
+ * numbers. The picture of space is not bent, and the color is only the rim.
+ */
+export const CANOPY_GLASS = { faceAlpha: 0.035, rimAlpha: 0.32, rimPower: 3 };
+/** A dim cool gray. Multiplied by the Fresnel, so the middle of the pane adds no color. */
+const CANOPY_RIM = new Color3(0.45, 0.5, 0.56);
+/** No sun reaches the seat. This lift keeps the plastic from going pure black. */
+const COCKPIT_LIFT = 0.04;
+/**
+ * Opacity of the seat's canopy. `facing` is 1 looking straight through the pane and 0 along a
+ * grazing edge. The glass shader is this same mix.
+ */
+export function canopyGlassAlpha(facing: number): number {
+	const clamped = Math.min(1, Math.max(0, facing));
+	const fresnel = (1 - clamped) ** CANOPY_GLASS.rimPower;
+	return CANOPY_GLASS.faceAlpha + (CANOPY_GLASS.rimAlpha - CANOPY_GLASS.faceAlpha) * fresnel;
+}
 /** One face of the sky cube. Taken once, so this cost is paid a single time. */
 const SKY_REFLECTION_SIZE = 256;
 /**
@@ -140,8 +163,176 @@ export type Ranger = ShipModel & {
 
 /**
  * The dash is exported in the Ranger empty's own space, with that empty's scale already on each node
- * and no extra rotation. It is parented beside the hull so the scale is not applied twice.
+ * and no extra rotation. It is parented beside the hull so the scale is not applied twice. The floor
+ * and the coaming travel with it.
  */
+
+/** Painted cabin plastic. The sun does not reach it, so a faint emissive keeps the shape. */
+function cockpitPlastic(scene: Scene, name: string, color: Color3, metallic: number): PBRMaterial {
+	const material = new PBRMaterial(name, scene);
+	material.albedoColor.copyFrom(color);
+	material.metallic = metallic;
+	material.roughness = HULL_ROUGHNESS;
+	material.emissiveColor.copyFrom(color);
+	material.emissiveIntensity = COCKPIT_LIFT;
+	material.usePhysicalLightFalloff = false;
+	material.backFaceCulling = false;
+	return material;
+}
+
+function meshByName(meshes: AbstractMesh[], name: string): AbstractMesh {
+	const found = meshes.find((mesh) => mesh.name === name);
+	if (!found) {
+		throw new Error(`The ranger is missing ${name}.`);
+	}
+	return found;
+}
+
+/** A copy on the cockpit layer. The original stays on the ship, so the exterior hull is unchanged. */
+function duplicateForSeat(mesh: AbstractMesh, name: string): AbstractMesh {
+	const copy = mesh.clone(name, mesh.parent);
+	if (!copy) {
+		throw new Error(`The ranger could not copy ${mesh.name}.`);
+	}
+	copy.isPickable = false;
+	copy.alwaysSelectAsActiveMesh = true;
+	copy.layerMask = COCKPIT_LAYER;
+	return copy;
+}
+
+/**
+ * The seat looks through a copy of the canopy. The frame is the opening. The glass is an unlit
+ * Fresnel rim: clear through the middle, visible where the pane turns away. It does not refract,
+ * and it does not catch the sun.
+ */
+function seatCanopy(scene: Scene, meshes: AbstractMesh[]): void {
+	const frameMesh = meshByName(meshes, "Ranger Canopy Frame Export");
+	const glassMesh = meshByName(meshes, "Ranger Canopy Glass");
+	const frame = duplicateForSeat(frameMesh, "cockpit-canopy-frame");
+	const trim = frameMesh.material instanceof PBRMaterial ? frameMesh.material.albedoColor : CANOPY_COLOR;
+	frame.material = cockpitPlastic(scene, "cockpit-canopy-frame", trim, HULL_METALLIC);
+	const glass = duplicateForSeat(glassMesh, "cockpit-canopy-glass");
+	glass.material = canopyGlassMaterial(scene);
+}
+
+/**
+ * The sun never reaches the seat. A copy of the cabin plastic glows a little with its own color,
+ * and the original material on the hull is left alone.
+ */
+function liftForSeat(material: Material): Material {
+	if (!(material instanceof PBRMaterial)) {
+		return material;
+	}
+	const next = material.clone(`${material.name} seat`);
+	if (!next) {
+		return material;
+	}
+	next.emissiveColor.copyFrom(next.albedoColor);
+	next.emissiveTexture = next.albedoTexture;
+	next.emissiveIntensity = COCKPIT_LIFT;
+	next.backFaceCulling = false;
+	return next;
+}
+
+function liftTree(material: Material | null): Material | null {
+	if (!material) {
+		return null;
+	}
+	if (material instanceof MultiMaterial) {
+		const lifted = new MultiMaterial(`${material.name} seat`, material.getScene());
+		lifted.subMaterials = material.subMaterials.map((sub) => (sub ? liftForSeat(sub) : null));
+		return lifted;
+	}
+	return liftForSeat(material);
+}
+
+/**
+ * The cabin is part of the hull, and the windscreen does not draw the hull. Without a copy here the
+ * starfield stays in every gap the deck plate does not cover. A node with several materials arrives
+ * as one mesh per material, named from the node. The shell and the hull's inner skin are drawn with
+ * the dash. The outside of the hull stays on the ship.
+ */
+function seatCabin(meshes: AbstractMesh[]): void {
+	const shell = meshes.filter((mesh) => mesh.name === "Ranger Cockpit" || mesh.name.startsWith("Ranger Cockpit_primitive"));
+	if (shell.length === 0) {
+		throw new Error("The ranger is missing the cockpit.");
+	}
+	for (const mesh of shell) {
+		const copy = duplicateForSeat(mesh, `cockpit-cabin-${mesh.name}`);
+		copy.material = liftTree(mesh.material);
+	}
+	const lining = meshes.filter(
+		(mesh) =>
+			(mesh.name === "Ranger Hull" || mesh.name.startsWith("Ranger Hull_primitive")) &&
+			mesh.material instanceof PBRMaterial &&
+			mesh.material.name === "Ranger Interior"
+	);
+	if (lining.length === 0) {
+		throw new Error("The ranger hull has no interior.");
+	}
+	for (const mesh of lining) {
+		const copy = duplicateForSeat(mesh, `cockpit-lining-${mesh.name}`);
+		copy.material = liftForSeat(mesh.material as PBRMaterial);
+	}
+}
+
+/** Unlit, so a bright body crossing the bow cannot lay a highlight on the pane. */
+function canopyGlassMaterial(scene: Scene): ShaderMaterial {
+	const material = new ShaderMaterial(
+		"cockpit-canopy-glass",
+		scene,
+		{
+			vertexSource: `
+				precision highp float;
+				attribute vec3 position;
+				attribute vec3 normal;
+				uniform mat4 worldView;
+				uniform mat4 worldViewProjection;
+				varying vec3 vNormalView;
+				varying vec3 vPositionView;
+				void main() {
+					vec4 viewPosition = worldView * vec4(position, 1.0);
+					vPositionView = viewPosition.xyz;
+					vNormalView = mat3(worldView) * normal;
+					gl_Position = worldViewProjection * vec4(position, 1.0);
+				}
+			`,
+			fragmentSource: `
+				precision highp float;
+				uniform float faceAlpha;
+				uniform float rimAlpha;
+				uniform float rimPower;
+				uniform vec3 rimColor;
+				varying vec3 vNormalView;
+				varying vec3 vPositionView;
+				void main() {
+					vec3 normal = normalize(vNormalView);
+					vec3 viewDir = normalize(-vPositionView);
+					float facing = abs(dot(normal, viewDir));
+					float fresnel = pow(1.0 - facing, rimPower);
+					float alpha = mix(faceAlpha, rimAlpha, fresnel);
+					// Alpha already carries the Fresnel. The blend applies it once, so the rim stays
+					// a dim gray and the middle of the pane does not pick up a second darkening.
+					gl_FragColor = vec4(rimColor, alpha);
+				}
+			`,
+		},
+		{
+			attributes: ["position", "normal"],
+			uniforms: ["worldView", "worldViewProjection", "faceAlpha", "rimAlpha", "rimPower", "rimColor"],
+			needAlphaBlending: true,
+		}
+	);
+	material.setFloat("faceAlpha", CANOPY_GLASS.faceAlpha);
+	material.setFloat("rimAlpha", CANOPY_GLASS.rimAlpha);
+	material.setFloat("rimPower", CANOPY_GLASS.rimPower);
+	material.setColor3("rimColor", CANOPY_RIM);
+	material.backFaceCulling = false;
+	material.disableDepthWrite = true;
+	material.alphaMode = Constants.ALPHA_COMBINE;
+	return material;
+}
+
 async function attachCockpit(scene: Scene, facing: TransformNode): Promise<void> {
 	const container = await LoadAssetContainerAsync("/models/cockpit.glb", scene);
 	container.addAllToScene();
@@ -158,7 +349,7 @@ async function attachCockpit(scene: Scene, facing: TransformNode): Promise<void>
 		if (material instanceof PBRMaterial && material.name !== "Cockpit Screen") {
 			material.emissiveColor.copyFrom(material.albedoColor);
 			material.emissiveTexture = material.albedoTexture;
-			material.emissiveIntensity = 0.04;
+			material.emissiveIntensity = COCKPIT_LIFT;
 		}
 		if (material instanceof PBRMaterial && material.name === "Cockpit Screen") {
 			// A flat quad against the curved coaming shares pixels. Pull the glass toward the eye
@@ -254,6 +445,8 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 	}
 	ship.scaling.setAll(HULL_LENGTH / length);
 	await attachCockpit(scene, facing);
+	seatCanopy(scene, container.meshes);
+	seatCabin(container.meshes);
 
 	const fan = mountEngineFan(scene, container.meshes);
 	const plumes = new Map<Hardpoint, Plume>();

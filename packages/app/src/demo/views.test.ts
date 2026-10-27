@@ -177,7 +177,7 @@ expect(viewPlaque("earth-outer", false, null).title === "Earth System", "Earth's
 expect(viewPlaque("neptune-outer", true, null).title === "Neptune", "a planet zoomed in names the planet");
 expect(viewPlaque("neptune-triton-outer", false, null).title === "Triton", "a moon chart names the moon");
 expect(viewPlaque("earth-inner", false, null).title === "Earth", "an inner orbit names the body");
-expect(viewPlaque("earth-outer", false, corporateStation).title === "Corporate station", "riding a craft names that craft");
+expect(viewPlaque("earth-outer", false, corporateStation).title === "Home base", "the ship's station reads as its home base");
 expect(systemSteps[1]?.target === "galaxy", "Galaxy leaves Sol");
 expect(
 	chartButtons("earth-outer")[0]?.label === "System" && chartButtons("earth-outer")[0]?.target === "system",

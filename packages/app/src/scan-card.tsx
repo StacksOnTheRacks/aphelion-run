@@ -9,29 +9,25 @@ type Action = { label: string; enabled: boolean };
 /**
  * What a scan found, over the chart. The same frame as a star system's card in the galaxy, without the
  * portrait. View takes the camera there. Travel To sets the course, and the ship leaves once the
- * countdown runs out. On a collector, Siphon moves that collector's energy aboard while the ship is docked.
+ * countdown runs out. Drawing from a mine or a collector starts on its own once the ship is docked.
  */
 export function ScanModal({
 	card,
 	note,
 	view,
 	travel,
-	siphon,
 	onClose,
 	onView,
 	onTravel,
-	onSiphon,
 }: {
 	card: ScanCard;
-	/** A line under the description, such as the energy still in a collector. */
+	/** A line under the description, such as the load still in a mine. */
 	note?: string | null;
 	view: Action;
 	travel: Action;
-	siphon?: Action | null;
 	onClose: () => void;
 	onView: () => void;
 	onTravel: () => void;
-	onSiphon?: () => void;
 }) {
 	const titleId = useId();
 	const closeRef = useRef<HTMLButtonElement>(null);
@@ -86,16 +82,6 @@ export function ScanModal({
 				<p className="mt-3 text-sm leading-relaxed text-white/70">{card.text}</p>
 				{note ? <p className="mt-3 text-sm tracking-wide text-amber-200">{note}</p> : null}
 				<div className="mt-5 flex flex-col gap-2">
-					{siphon ? (
-						<button
-							type="button"
-							onClick={onSiphon}
-							disabled={!siphon.enabled}
-							className="touch-manipulation rounded-xl border border-amber-300/50 px-4 py-2.5 text-[11px] tracking-[0.22em] text-amber-200 uppercase transition-colors hover:bg-amber-300/10 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-white/45 disabled:hover:bg-transparent focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
-						>
-							{siphon.label}
-						</button>
-					) : null}
 					<div className="flex gap-2">
 					<button
 						ref={viewRef}

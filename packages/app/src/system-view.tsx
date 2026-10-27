@@ -7,17 +7,17 @@ import { chartButtons, viewTrail, wideChartStep, type ChartButton, type DemoView
 import {
 	DEPARTURE_SECONDS,
 	scanCard,
+	recallMove,
 	scanLabel,
 	showsCard,
 	secondsLeft,
-	siphonAction,
 	travelAction,
 	viewAction,
 	type ScanTarget,
 } from "./demo/scan";
 import { viewPlaque } from "./demo/view-plaque";
 import { PilotCornerDock } from "./dashboard";
-import { holdStock, paintCenterPanel } from "./nav-glass";
+import { holdStock, paintCenterPanel, type CargoLabel } from "./nav-glass";
 import { Hud, useHudAnchors } from "./hud";
 import { PILOT_VIEWPORT } from "./pilot-viewport";
 import { ScanModal } from "./scan-card";
@@ -44,7 +44,7 @@ const STEP_TITLE: Record<string, string> = {
  * Sol System, a wide planetary chart such as Earth System, or the body or craft once the camera is closer.
  * Pilot enters the cockpit on a desktop or a large tablet. The ship list then leaves. The dash is geometry in the scene, and it turns with the head. Exit and the view switch sit at the lower right, in the chart step's corner, and the view switch is that step's size. Exit stays the smaller plate. The ship list stays hidden out there too. A phone stays on the
  * chart, and shrinking the window below that leaves the cockpit. Locate opens the planetary chart where the ship is docked.
- * Recall cancels a countdown or stops a burn and returns the ship to the dock it left.
+ * Recall returns the ship to its home base. A countdown that is already headed there can be cancelled.
  * The lower right, on a chart, is one step back: System from a planet or the Sun, Planet from a moon
  * or from an inner orbit, and Galaxy from the system. While piloting that corner is Exit and the view switch. Escape takes the
  * first chart step, Home on the system chart and otherwise that lower-right step, and leaves the
@@ -97,14 +97,37 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	useEffect(() => system.onScan(pick), [system, pick]);
 	useEffect(() => system.onScanFound(setFound), [system]);
 	useEffect(() => system.onFraming(setClose), [system]);
-	useEffect(() => system.onHold(setHold), [system]);
+	const flightRef = useRef(flight);
+	flightRef.current = flight;
+	useEffect(
+		() =>
+			system.onHold((next) => {
+				setHold(next);
+				if (!flightRef.current) {
+					setDocked(system.berth());
+				}
+			}),
+		[system]
+	);
 	useEffect(() => system.setScanning(!piloting), [system, piloting]);
 	useEffect(() => system.setPiloting(piloting), [system, piloting]);
 	useEffect(
 		() =>
 			system.onNav((fix) => {
+				const live = system.hold();
 				system.paintCenter((context, width, height) =>
-					paintCenterPanel(context, width, height, fix, holdStock(system.hold().energy))
+					paintCenterPanel(
+						context,
+						width,
+						height,
+						fix,
+						holdStock(live.energy, {
+							Hydrogen: live.cargo.hydrogen,
+							Ore: live.cargo.ore,
+							Nitrogen: live.cargo.nitrogen,
+							Carbon: live.cargo.carbon,
+						})
+					)
 				);
 			}),
 		[system]
@@ -226,33 +249,68 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		setMode(piloting ? "chart" : "pilot");
 	};
 
-	const stop = () => {
-		system.land();
-		setFlight(null);
-		setDocked(system.berth());
+	const recallPlan = () => {
+		const home = system.homeBase();
+		const berthed = system.berth();
+		return {
+			home,
+			plan: recallMove({
+				homeId: home.id,
+				dockId: berthed?.id ?? null,
+				homeHost: home.host,
+				dockHost: berthed?.host ?? null,
+				departingTo: departure?.target.id ?? null,
+				inFlight: flight !== null,
+				energy: hold.energy,
+				cost: system.quote(home),
+			}),
+		};
 	};
 
 	const recall = () => {
-		if (departure) {
+		const { home, plan } = recallPlan();
+		if (!plan.enabled || plan.move === "hold") {
+			return;
+		}
+		if (plan.move === "cancel") {
 			setDeparture(null);
 			return;
 		}
-		if (flight) {
-			stop();
+		if (plan.move === "abort" || plan.move === "abort-depart" || plan.move === "abort-hop") {
+			system.land();
+			setFlight(null);
+			setDocked(system.berth());
 		}
+		if (plan.move === "hop" || plan.move === "abort-hop") {
+			system.couple(home.id);
+			setDeparture(null);
+			setDocked(system.berth());
+			return;
+		}
+		if (plan.move === "abort") {
+			return;
+		}
+		const cost = system.quote(home);
+		if (system.hold().energy < cost) {
+			setDocked(system.berth());
+			return;
+		}
+		setDeparture({ target: home, endsAt: Date.now() + DEPARTURE_SECONDS * 1000, cost });
+		setNow(Date.now());
 	};
+	const recallState = recallPlan();
 
 	const location = viewPlaque(view, close, riding);
-	const atSun = !flight && docked?.host === "sun" && docked.kind === "collector";
-	const siphon = scanned
-		? siphonAction(
-				scanned,
-				{ atSun, siphonId: hold.siphoning ? hold.siphonId : null },
-				scanned.kind === "collector" ? system.charge(scanned.id) : 0
-			)
-		: null;
-	const collectorCharge =
-		scanned?.kind === "collector" ? `${Math.round(system.charge(scanned.id)).toLocaleString("en-US")} in the collector` : null;
+	const reserve =
+		scanned && (scanned.kind === "collector" || scanned.kind === "generator")
+			? `${Math.round(system.charge(scanned.id)).toLocaleString("en-US")} remaining`
+			: null;
+	const holdings: { id: CargoLabel; label: CargoLabel; amount: number }[] = [
+		{ id: "Hydrogen", label: "Hydrogen", amount: hold.base.hydrogen },
+		{ id: "Ore", label: "Ore", amount: hold.base.ore },
+		{ id: "Nitrogen", label: "Nitrogen", amount: hold.base.nitrogen },
+		{ id: "Carbon", label: "Carbon", amount: hold.base.carbon },
+	];
 	return (
 		<>
 			<SpaceLabels source={system} items={labels} title="Scanned" keepOut={keepOut} />
@@ -267,6 +325,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 				anchors={anchors}
 				location={location}
 				energy={hold.energy}
+				holdings={holdings}
 				pilot={{
 					onClick: togglePilot,
 					disabled: !pilotFits && !piloting,
@@ -276,8 +335,8 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 				locate={{ onClick: () => take({ label: "Home", target: "ship" }), title: "Where your ship is docked" }}
 				recall={{
 					onClick: recall,
-					disabled: departure === null && flight === null,
-					title: departure ? "Cancel departure" : flight ? "Stop and hold" : "The ship is holding",
+					disabled: !recallState.plan.enabled,
+					title: recallState.plan.title,
 				}}
 				steps={
 					piloting
@@ -293,10 +352,9 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 			{scanned ? (
 				<ScanModal
 					card={scanCard(scanned)}
-					note={collectorCharge}
+					note={reserve}
 					view={viewAction(scanned, view, close)}
 					travel={travelAction(scanned, ship, quote)}
-					siphon={siphon}
 					onClose={() => setScanned(null)}
 					onView={() => {
 						system.visit(scanned);
@@ -307,10 +365,6 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 						setDeparture({ target: scanned, endsAt: Date.now() + DEPARTURE_SECONDS * 1000, cost });
 						setNow(Date.now());
 						setScanned(null);
-					}}
-					onSiphon={() => {
-						const running = hold.siphoning && hold.siphonId === scanned.id;
-						system.setSiphoning(!running, scanned.id);
 					}}
 				/>
 			) : null}

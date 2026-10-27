@@ -1,6 +1,7 @@
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 
 import { EXTERIOR_HOME, EXTERIOR_RADIUS, exteriorOffset, orbitFromDrag, paintFeedLabel } from "./cockpit";
+import { CANOPY_GLASS, canopyGlassAlpha } from "./ranger";
 
 const failures: string[] = [];
 
@@ -84,9 +85,18 @@ function recordingContext(): { context: CanvasRenderingContext2D; marks: { text:
 	expect(!!starboardMark && starboardMark.x < 40 && starboardMark.y < 40, "the starboard name is drawn on the canvas corner that lands upper left");
 }
 
+{
+	const through = canopyGlassAlpha(1);
+	const edge = canopyGlassAlpha(0);
+	const halfway = canopyGlassAlpha(0.5);
+	expect(Math.abs(through - CANOPY_GLASS.faceAlpha) < 1e-9, "looking through the pane stays at the clear alpha");
+	expect(Math.abs(edge - CANOPY_GLASS.rimAlpha) < 1e-9, "a grazing angle shows the rim");
+	expect(halfway > through && halfway < edge, "the rim strengthens as the pane turns away");
+}
+
 if (failures.length > 0) {
 	console.error(failures.join("\n"));
 	process.exit(1);
 }
 
-console.log("exterior orbit sits astern of the hull and swings with a drag, and the aft names sit on the inner corners");
+console.log("exterior orbit sits astern of the hull and swings with a drag, the aft names sit on the inner corners, and the canopy rim strengthens toward a grazing edge");

@@ -166,17 +166,8 @@ function openBottomPath(width: number, height: number, cut: Required<HousingCut>
 	].join("");
 }
 
-/**
- * Figures from the HUD design. The warehouse has no ledger yet, so the strip shows these holdings
- * until energy and minerals are counted. The published site serves these icons from its own public
- * folder. The copies beside this package are for the game dev server.
- */
-const HOLDINGS = [
-	{ id: "helium-3", label: "Helium-3", amount: 4200, icon: "/hud/helium-3.svg" },
-	{ id: "oxygen", label: "Oxygen", amount: 1850, icon: "/hud/oxygen.svg" },
-	{ id: "rare-ore", label: "Rare ore", amount: 320, icon: "/hud/rare-ore.svg" },
-	{ id: "plasma", label: "Plasma cells", amount: 45, icon: "/hud/plasma.svg" },
-] as const;
+/** One mined resource in the home stockpile, as the upper-right strip counts it. */
+export type WarehouseHolding = { id: string; label: string; amount: number };
 
 /** The fleet. The bar shows the active ship; the list is every ship the pilot can take. */
 const SHIPS = [{ id: "ranger", name: "Ranger", role: "Explorer", portrait: "/hud/ranger.png" }] as const;
@@ -226,6 +217,7 @@ export function Hud({
 	anchors,
 	location,
 	energy,
+	holdings,
 	pilot,
 	locate,
 	recall,
@@ -238,6 +230,8 @@ export function Hud({
 	location: { title: string; detail: string | null };
 	/** Energy aboard the active ship. */
 	energy: number;
+	/** Mined resources deposited at the home base. */
+	holdings: readonly WarehouseHolding[];
 	pilot: HudAction;
 	locate: HudAction;
 	recall: HudAction;
@@ -308,11 +302,11 @@ export function Hud({
 						</button>
 						<span aria-hidden className="mx-1.5 h-3.5 w-px shrink-0 bg-[rgba(255,215,61,0.2)] min-[900px]:hidden" />
 						<ul aria-label="Warehouse" className="flex items-center gap-2">
-							{HOLDINGS.map((item) => {
-								const amount = item.amount.toLocaleString("en-US");
+							{holdings.map((item) => {
+								const amount = Math.round(item.amount).toLocaleString("en-US");
 								return (
 									<li key={item.id} className="flex items-center gap-1" aria-label={`${item.label}, ${amount}`}>
-										<img src={item.icon} alt="" width={14} height={14} className="size-[13px] shrink-0 min-[900px]:size-3.5" />
+										<span className="text-[9px] font-semibold tracking-[0.4px] text-[#a89060] uppercase">{item.label}</span>
 										<span aria-hidden className="text-[10px] font-bold tracking-[0.4px] text-[#ffd73d]">
 											{amount}
 										</span>

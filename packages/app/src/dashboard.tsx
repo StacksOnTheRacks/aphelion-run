@@ -7,7 +7,7 @@ import type { PilotViewpoint, ScreenRect } from "./demo/cockpit";
 import type { EnvironmentDemo } from "./demo/environment";
 import { bearing, bodyLabel, localBody } from "./demo/nav";
 import { Housing } from "./hud";
-import { MAP_SIZE, drawLocal, drawSystem, holdStock } from "./nav-glass";
+import { MAP_SIZE, drawLocal, drawSystem, holdStock, type HoldStock } from "./nav-glass";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "600", "700"] });
 
@@ -69,7 +69,7 @@ export function Dashboard({
 	const stbdRef = useRef<HTMLDivElement>(null);
 	const [scale, setScale] = useState(1);
 	const [readout, setReadout] = useState<Readout>({ place: null, bearing: "—", progress: null });
-	const [energy, setEnergy] = useState(() => Math.round(system.hold().energy));
+	const [stock, setStock] = useState<HoldStock>(() => stockOf(system.hold()));
 	const live = viewpoint === "interior";
 	const maskId = `aft-glass-${useId().replace(/:/g, "")}`;
 
@@ -129,8 +129,8 @@ export function Dashboard({
 					drawSystem(chart, fix, null, still.matches ? null : performance.now() / 1000);
 				}
 			}
-			const aboard = Math.round(system.hold().energy);
-			setEnergy((last) => (last === aboard ? last : aboard));
+			const aboard = stockOf(system.hold());
+			setStock((last) => (sameStock(last, aboard) ? last : aboard));
 			const next: Readout = {
 				place: local ? bodyLabel(local.id) : null,
 				bearing: `${String(bearing(fix)).padStart(3, "0")}°`,
@@ -210,7 +210,7 @@ export function Dashboard({
 										</dd>
 									</div>
 								</dl>
-								<HoldPane energy={energy} />
+								<HoldPane stock={stock} />
 							</div>
 							<div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-white/[0.08] via-transparent via-45% to-transparent" />
 						</section>
@@ -409,27 +409,57 @@ function MapPane({ label, canvasRef }: { label: string; canvasRef: RefObject<HTM
 	);
 }
 
-/** Energy first, then the other containers. The figure is the whole units aboard. */
-function HoldPane({ energy }: { energy: number }) {
-	const stock = holdStock(energy);
-	const figure = Math.round(stock.energy).toLocaleString("en-US");
+/** Energy and each mineral, as a bar of how full that container is. */
+function HoldPane({ stock }: { stock: HoldStock }) {
+	const rows = [
+		{ label: "Energy", amount: stock.energy, capacity: stock.energyCapacity },
+		...stock.containers,
+	];
 	return (
 		<section aria-label="Hold" className="flex shrink-0 flex-col justify-center gap-1.5" style={{ width: MAP_SIZE, height: MAP_SIZE }}>
 			<p className="text-[10px] font-semibold tracking-[1.6px] text-[#fcd34d] uppercase">Hold</p>
-			<div>
-				<p className="text-[10px] tracking-[1.6px] text-[#E8E4D9]/45 uppercase">Energy</p>
-				<p className="text-[22px] leading-none font-semibold tracking-[0.5px] text-[#fcd34d]">{figure}</p>
-			</div>
-			<ul className="mt-1 flex flex-col gap-1">
-				{stock.containers.map((line) => (
-					<li key={line.label} className="flex items-baseline justify-between gap-2 text-[10px] tracking-[1.2px] uppercase">
-						<span className="text-[#E8E4D9]/45">{line.label}</span>
-						<span className="text-[#e8e4d9]">{Math.round(line.amount).toLocaleString("en-US")}</span>
-					</li>
-				))}
+			<ul className="flex flex-col gap-1.5">
+				{rows.map((line) => {
+					const amount = Math.round(line.amount);
+					const capacity = Math.max(1, Math.round(line.capacity));
+					const share = Math.max(0, Math.min(100, (amount / capacity) * 100));
+					return (
+						<li key={line.label}>
+							<p className="flex items-baseline justify-between gap-2 text-[10px] tracking-[1.2px] uppercase">
+								<span className="text-[#E8E4D9]/45">{line.label}</span>
+								<span className={line.label === "Energy" ? "text-[#fcd34d]" : "text-[#e8e4d9]"}>
+									{amount.toLocaleString("en-US")}
+								</span>
+							</p>
+							<div
+								className="mt-0.5 h-1.5 w-full overflow-hidden bg-[#E8E4D9]/10"
+								role="img"
+								aria-label={`${line.label}, ${amount.toLocaleString("en-US")} of ${capacity.toLocaleString("en-US")}`}
+							>
+								<div className="h-full bg-[#ffd73d]" style={{ width: `${share}%` }} />
+							</div>
+						</li>
+					);
+				})}
 			</ul>
 		</section>
 	);
+}
+
+function stockOf(hold: { energy: number; cargo: { hydrogen: number; ore: number; nitrogen: number; carbon: number } }): HoldStock {
+	return holdStock(hold.energy, {
+		Hydrogen: hold.cargo.hydrogen,
+		Ore: hold.cargo.ore,
+		Nitrogen: hold.cargo.nitrogen,
+		Carbon: hold.cargo.carbon,
+	});
+}
+
+function sameStock(left: HoldStock, right: HoldStock): boolean {
+	if (Math.round(left.energy) !== Math.round(right.energy)) {
+		return false;
+	}
+	return left.containers.every((line, index) => Math.round(line.amount) === Math.round(right.containers[index]?.amount ?? -1));
 }
 
 function Reading({ term, value }: { term: string; value: string }) {

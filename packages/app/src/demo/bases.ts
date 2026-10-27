@@ -5,12 +5,13 @@
  * A planet's warehouse halo is the ring mines sit outside: between the surface and the innermost
  * moon. Mercury and Venus have no moons, so the halo is a fixed multiple of the radius. Saturn's
  * moons sit outside the rings, so its halo uses the gap inside the ring instead. The demo places
- * no home on a planet. Earth holds the two faction stations. The one home is the player's, on
- * Earth's Moon.
+ * no home on a planet. Earth holds the two faction stations. The ship's home is the corporate
+ * station there. Earth's Moon keeps one corporate base, and it is not that home.
  *
- * The outer orbit is the battle surface and the circle ships burn between. It sits outside the
- * bases and Saturn's rings, and inside the innermost moon's own outer orbit, so two zones never
- * meet. A moon's outer orbit is its own.
+ * The outer orbit is the battle surface and the circle ships burn between. The honeycomb sits on
+ * it. It stays outside the bases and Saturn's rings, and inside the innermost moon's own outer
+ * orbit, so two zones never meet. A moon's outer orbit is its own. The inner orbit, where a ship
+ * idles after it leaves a mine, sits just inside that shell.
  */
 
 export type Faction = "corporate" | "marauder";
@@ -61,6 +62,13 @@ export const LOCAL_REACH = 1.6;
 export const NO_MOON_OUTER_SCALE = 2.5;
 /** A pass stays this far outside Saturn's rings. */
 export const SATURN_FLYBY_MARGIN = 3;
+/**
+ * The inner orbit is this far inside the battle honeycomb, as a fraction of the outer radius.
+ * On the shell the ship and the grid are the same surface.
+ */
+export const INNER_ORBIT_INSET = 0.04;
+/** Leaving a depleted mine for the inner orbit takes this long. */
+export const DRIFT_TO_ORBIT_SECONDS = 5;
 
 /** Small against the planet, on the order of a solar collector. Width is the radial extent. */
 export const WAREHOUSE_SIZE: BoxSize = { width: 0.18, height: 0.05, depth: 0.3 };
@@ -73,6 +81,30 @@ const MOON_BASE_WIDTH = 0.07;
 /** Outer orbit of a moon: three moon radii, clear of the bases on its surface. */
 export function moonOuterOrbitRadius(diameter: number): number {
 	return (diameter / 2) * MOON_OUTER_ORBIT_SCALE;
+}
+
+/** Inner orbit: just inside the battle honeycomb on `outer`. */
+export function innerOrbitRadius(outer: number): number {
+	return outer * (1 - INNER_ORBIT_INSET);
+}
+
+export type DriftPoint = { x: number; y: number; z: number };
+
+/**
+ * Where a ship is, relative to the body, on the way out from a mine. `t` is 0 at the mine and 1 on
+ * the inner orbit. `angle` is the azimuth to hold, so the caller can keep the ship turning while the
+ * radius eases outward.
+ */
+export function driftToInnerOrbit(from: DriftPoint, inner: number, t: number, angle: number): DriftPoint {
+	const clamped = Math.min(1, Math.max(0, t));
+	const eased = clamped * clamped * (3 - 2 * clamped);
+	const fromRadius = Math.hypot(from.x, from.z);
+	const radius = fromRadius + (inner - fromRadius) * eased;
+	return {
+		x: Math.cos(angle) * radius,
+		y: from.y * (1 - eased),
+		z: Math.sin(angle) * radius,
+	};
 }
 
 /**
@@ -155,7 +187,7 @@ export function moonBases(diameter: number): BaseSlot[] {
 	return ring(MOON_BASES_PER_FACTION, moonBaseRadius(diameter), moonBaseSize(diameter));
 }
 
-/** The ship's home: one corporate base on Earth's Moon, the same size as any moon base. */
+/** One corporate base on Earth's Moon, the same size as any moon base. The ship's home is Earth's station. */
 export function playerHome(diameter: number): BaseSlot {
 	return {
 		faction: "corporate",

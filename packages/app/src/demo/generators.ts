@@ -1,5 +1,5 @@
 /**
- * Mine docks from the generators table. One gray box per mineral, on the inner orbit.
+ * Mine docks from the generators table. One gray box per mineral, inside the inner orbit.
  * A moon uses its planet's yield. The Sun's collectors and Earth's station are already
  * in the scene, and the Moon yields nothing.
  *
