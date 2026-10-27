@@ -3,7 +3,8 @@ import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import {
 	EARTH_STATION_RADIUS,
 	SATURN_RING_INNER_SCALE,
-	WAREHOUSE_SIZE,
+	DOCK_SIZE,
+	MINE_SIZE,
 	moonBases,
 	moonOuterOrbitRadius,
 	planetBases,
@@ -31,15 +32,18 @@ import {
 	JOURNEY_MAX_SECONDS,
 	JOURNEY_MIN_SECONDS,
 	approachPoint,
+	berthPoint,
 	climbDistance,
 	climbDuration,
 	cruiseDistance,
 	cruiseSpeed,
 	flightSchedule,
+	hoverDeparture,
 	journeySeconds,
 	legPose,
 	planApproach,
 	poseRise,
+	trailDistance,
 	type Approach,
 	type Dock,
 } from "./journey";
@@ -603,7 +607,9 @@ for (const docks of [8, 2, 1]) {
 {
 	const smallestMoon = Math.min(...PLANETS.flatMap((spec) => spec.moons.map((moon) => moon.diameter)));
 	expect(HULL_LENGTH < smallestMoon / 10, "the hull stays under a tenth of the smallest moon");
-	expect(HULL_LENGTH < WAREHOUSE_SIZE.depth, "a warehouse stays longer than the ship that docks there");
+	expect(HULL_LENGTH < DOCK_SIZE.width && DOCK_SIZE.width === DOCK_SIZE.depth, "a dock is a square the ship can sit on");
+	expect(DOCK_SIZE.width < HULL_LENGTH * 1.5, "a dock is not much longer than the ship");
+	expect(DOCK_SIZE.height < DOCK_SIZE.width / 4, "a dock stays a thin plate");
 }
 
 for (const spec of PLANETS) {
@@ -916,6 +922,42 @@ function maxYaw(plan: Parameters<typeof legPose>[0], seconds: number): number {
 	const dockedRise = poseRise(Math.hypot(dock.x, dock.z), mars.outer, "coupled");
 	const hoverRise = poseRise(Math.hypot(dock.x, dock.z), mars.outer, "hover");
 	expect(hoverRise - dockedRise < 0.05, "soft dock only closes the hull clearance");
+}
+
+// A mine or collector is met from behind on its own orbit. The nose points along the path at the craft.
+{
+	const radius = 11;
+	const rate = 0.06;
+	const at = new Vector3(radius, 0.2, 0);
+	const mine: Dock = { rate, mount: "trail", position: () => at.clone() };
+	const coupled = berthPoint(mine, 20, "coupled");
+	const hover = berthPoint(mine, 20, "hover");
+	const arc = (point: Vector3) => Math.abs(angleBetween(point, at)) * radius;
+	expect(Math.abs(Math.hypot(coupled.x, coupled.z) - radius) < 1e-6, "a coupled ship stays on the mine's orbit");
+	expect(Math.abs(coupled.y - at.y) < 1e-9, "a coupled ship stays at the mine's height");
+	expect(Math.abs(Math.hypot(hover.x, hover.z) - radius) < 1e-6, "a hover stays on the mine's orbit");
+	expect(Math.abs(hover.y - at.y) < 1e-9, "a hover stays at the mine's height");
+	expect(Math.abs(arc(coupled) - trailDistance("coupled")) < 1e-4, "coupled sits just behind the craft");
+	expect(Math.abs(arc(hover) - trailDistance("hover")) < 1e-4, "hover sits further back along the orbit");
+	expect(trailDistance("hover") - trailDistance("coupled") > 0.03, "undock slides aft along the orbit");
+	const noseGap = arc(coupled) - MINE_SIZE.depth / 2 - HULL_LENGTH / 2;
+	expect(noseGap >= 0.03 && noseGap < HULL_LENGTH, "the nose stays back far enough that a head turn does not slice the craft");
+	const ahead = new Vector3(0, 0, Math.sign(rate));
+	const toCraft = at.subtract(coupled);
+	expect(Vector3.Dot(ahead, toCraft) > 0.9 * toCraft.length(), "the nose points at the craft ahead");
+	const slide = hover.subtract(coupled);
+	const radial = new Vector3(coupled.x, 0, coupled.z).normalize();
+	expect(Math.abs(slide.y) < 1e-9, "docking slides along the orbit, not up");
+	expect(Math.abs(Vector3.Dot(slide, radial)) < slide.length() * 0.05, "the slide stays on the circle");
+	const retrograde: Dock = { rate: -rate, mount: "trail", position: () => at.clone() };
+	const behind = berthPoint(retrograde, 20, "coupled");
+	expect(behind.z > 0.02, "a retrograde craft is still met from behind");
+	const left = hoverDeparture(mine, 20);
+	expect(Math.abs(left.y - at.y) < 1e-6, "leaving a mine stays at its height");
+	expect(Math.abs(Math.hypot(left.x, left.z) - radius) < 1e-4, "leaving a mine stays on its orbit");
+	const pad: Dock = { rate, position: () => at.clone() };
+	const raised = berthPoint(pad, 20, "coupled");
+	expect(Math.abs(raised.x - at.x) < 1e-9 && Math.abs(raised.z - at.z) < 1e-9 && raised.y > at.y, "a pad still lifts the ship above it");
 }
 
 // Retrograde departures and ordinary climbs yaw no faster than the cap.

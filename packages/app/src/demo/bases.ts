@@ -10,8 +10,8 @@
  *
  * The outer orbit is the battle surface and the circle ships burn between. The honeycomb sits on
  * it. It stays outside the bases and Saturn's rings, and inside the innermost moon's own outer
- * orbit, so two zones never meet. A moon's outer orbit is its own. The inner orbit, where a ship
- * idles after it leaves a mine, sits just inside that shell.
+ * orbit, so two zones never meet. A moon's outer orbit is its own. The inner orbit sits just
+ * inside that shell. A ship that has finished at a mine stays on the dock until it is moved.
  */
 
 export type Faction = "corporate" | "marauder";
@@ -67,16 +67,23 @@ export const SATURN_FLYBY_MARGIN = 3;
  * On the shell the ship and the grid are the same surface.
  */
 export const INNER_ORBIT_INSET = 0.04;
-/** Leaving a depleted mine for the inner orbit takes this long. */
-export const DRIFT_TO_ORBIT_SECONDS = 5;
 
-/** Small against the planet, on the order of a solar collector. Width is the radial extent. */
-export const WAREHOUSE_SIZE: BoxSize = { width: 0.18, height: 0.05, depth: 0.3 };
-/** Larger than a warehouse, still small against Earth. */
-export const STATION_SIZE: BoxSize = { width: 0.32, height: 0.09, depth: 0.52 };
+/**
+ * Homes and stations. Width is the radial extent. The pad is a thin square a little longer than
+ * the ship: the hull is 0.04 long and about 0.009 across.
+ */
+export const DOCK_SIZE: BoxSize = { width: 0.05, height: 0.008, depth: 0.05 };
 
-/** Long side stays near a tenth of the moon, so a base reads as a craft beside it. */
-const MOON_BASE_WIDTH = 0.07;
+/**
+ * Mines and collectors. Width is across the orbit, depth is along it, toward the ship.
+ * Half as wide as a landing pad and a little deeper, with a square face so the forward laser
+ * meets the block instead of a flat edge.
+ */
+export const MINE_SIZE: BoxSize = {
+	width: DOCK_SIZE.width * 0.5,
+	height: DOCK_SIZE.width * 0.5,
+	depth: DOCK_SIZE.depth * 1.3,
+};
 
 /** Outer orbit of a moon: three moon radii, clear of the bases on its surface. */
 export function moonOuterOrbitRadius(diameter: number): number {
@@ -86,25 +93,6 @@ export function moonOuterOrbitRadius(diameter: number): number {
 /** Inner orbit: just inside the battle honeycomb on `outer`. */
 export function innerOrbitRadius(outer: number): number {
 	return outer * (1 - INNER_ORBIT_INSET);
-}
-
-export type DriftPoint = { x: number; y: number; z: number };
-
-/**
- * Where a ship is, relative to the body, on the way out from a mine. `t` is 0 at the mine and 1 on
- * the inner orbit. `angle` is the azimuth to hold, so the caller can keep the ship turning while the
- * radius eases outward.
- */
-export function driftToInnerOrbit(from: DriftPoint, inner: number, t: number, angle: number): DriftPoint {
-	const clamped = Math.min(1, Math.max(0, t));
-	const eased = clamped * clamped * (3 - 2 * clamped);
-	const fromRadius = Math.hypot(from.x, from.z);
-	const radius = fromRadius + (inner - fromRadius) * eased;
-	return {
-		x: Math.cos(angle) * radius,
-		y: from.y * (1 - eased),
-		z: Math.sin(angle) * radius,
-	};
 }
 
 /**
@@ -144,14 +132,12 @@ export function warehouseRadius(input: PlanetBaseInput): number {
 	return (surface + innermost) / 2;
 }
 
-export function moonBaseSize(diameter: number): BoxSize {
-	const width = diameter * MOON_BASE_WIDTH;
-	return { width, height: width * 0.3, depth: width * 1.6 };
-}
+/** The pad's inner face sits this far off the moon, so the box clears the sphere. */
+const MOON_PAD_GAP = 0.02;
 
-/** Center of the base sits one box-width off the surface, so the inner face clears the moon. */
+/** Center of a moon pad: half a pad out from the surface, plus the clearance gap. */
 export function moonBaseRadius(diameter: number): number {
-	return diameter / 2 + moonBaseSize(diameter).width;
+	return diameter / 2 + DOCK_SIZE.width / 2 + MOON_PAD_GAP;
 }
 
 export function radialReach(size: BoxSize): number {
@@ -177,23 +163,22 @@ export function nearBody(
 export function planetBases(input: PlanetBaseInput): { warehouses: BaseSlot[]; stations: BaseSlot[] } {
 	return {
 		warehouses:
-			input.homes === false ? [] : ring(PLANET_BASES_PER_FACTION, warehouseRadius(input), WAREHOUSE_SIZE),
-		stations:
-			input.stationRadius == null ? [] : ring(1, input.stationRadius, STATION_SIZE),
+			input.homes === false ? [] : ring(PLANET_BASES_PER_FACTION, warehouseRadius(input), DOCK_SIZE),
+		stations: input.stationRadius == null ? [] : ring(1, input.stationRadius, DOCK_SIZE),
 	};
 }
 
 export function moonBases(diameter: number): BaseSlot[] {
-	return ring(MOON_BASES_PER_FACTION, moonBaseRadius(diameter), moonBaseSize(diameter));
+	return ring(MOON_BASES_PER_FACTION, moonBaseRadius(diameter), DOCK_SIZE);
 }
 
-/** One corporate base on Earth's Moon, the same size as any moon base. The ship's home is Earth's station. */
+/** One corporate base on Earth's Moon. The ship's home is Earth's station. Both use the dock pad. */
 export function playerHome(diameter: number): BaseSlot {
 	return {
 		faction: "corporate",
 		angle: 0,
 		radius: moonBaseRadius(diameter),
-		size: moonBaseSize(diameter),
+		size: DOCK_SIZE,
 	};
 }
 

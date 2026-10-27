@@ -21,7 +21,7 @@ export const MINE_FULL = COLLECTOR_CHARGE;
 export const CARGO_CAPACITY = MINE_FULL;
 /**
  * How much energy the tank can hold. The starting tank plus one full collector, so the first
- * visit to a collector fills it and the ship leaves.
+ * visit to a collector fills it. The ship stays at the collector.
  */
 export const ENERGY_CAPACITY = STARTING_ENERGY + MINE_FULL;
 /** The corporate station on Earth's inner ring. A new game berths here. */
@@ -122,8 +122,8 @@ export type DrawSource = {
 };
 
 /**
- * One stretch of drawing while docked. `release` means the source is empty or the ship is full,
- * and `remaining` is full again so the next visit starts over.
+ * One stretch of drawing while docked. `release` means drawing stops: the source is empty or the
+ * ship is full. `remaining` is what the source still holds. The source refills when the ship leaves.
  */
 export function drawFromDock(
 	hold: { energy: number; cargo: Cargo },
@@ -136,7 +136,7 @@ export function drawFromDock(
 		return {
 			energy: next.ship,
 			cargo: hold.cargo,
-			remaining: release ? MINE_FULL : next.collector,
+			remaining: next.collector,
 			release,
 		};
 	}
@@ -150,7 +150,7 @@ export function drawFromDock(
 	return {
 		energy: hold.energy,
 		cargo,
-		remaining: release ? MINE_FULL : next.collector,
+		remaining: next.collector,
 		release,
 	};
 }

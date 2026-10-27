@@ -1,10 +1,10 @@
 import {
+	DOCK_SIZE,
+	MINE_SIZE,
 	EARTH_STATION_RADIUS,
 	EARTH_WAREHOUSE_RADIUS,
 	SATURN_RING_INNER_SCALE,
-	WAREHOUSE_SIZE,
 	moonBaseRadius,
-	moonBaseSize,
 	moonOuterOrbitRadius,
 	outerOrbitRadius,
 	radialReach,
@@ -109,19 +109,18 @@ for (const planet of PLANETS) {
 		slots.map((slot) => slot.resource).join() === yields.join(),
 		`${planet.name} has one generator per mineral`
 	);
-	const homeOuter = warehouseRadius(planet) + radialReach(WAREHOUSE_SIZE);
+	const homeOuter = warehouseRadius(planet) + radialReach(DOCK_SIZE);
 	const surface = planet.diameter / 2;
 	const limit = planet.ringInnerScale != null ? surface * planet.ringInnerScale : outerOrbitRadius(planet);
 	for (const slot of slots) {
 		const reach = radialReach(slot.size);
 		expect(slot.radius - reach > homeOuter, `${planet.name} ${slot.resource} generator clears the homes`);
 		expect(slot.radius + reach < limit, `${planet.name} ${slot.resource} generator stays inside the inner orbit`);
-		expect(slot.size.width > 0 && slot.size.height > 0 && slot.size.depth > 0, `${planet.name} generator is a box`);
 		expect(
-			slot.size.width <= WAREHOUSE_SIZE.width &&
-				slot.size.height <= WAREHOUSE_SIZE.height &&
-				slot.size.depth <= WAREHOUSE_SIZE.depth,
-			`${planet.name} ${slot.resource} mine is no bigger than a base`
+			slot.size.width === MINE_SIZE.width &&
+				slot.size.height === MINE_SIZE.height &&
+				slot.size.depth === MINE_SIZE.depth,
+			`${planet.name} ${slot.resource} mine uses the mine block`
 		);
 	}
 	const angles = new Set(slots.map((slot) => slot.angle.toFixed(6)));
@@ -133,21 +132,27 @@ for (const planet of PLANETS) {
 			moonSlots.map((slot) => slot.resource).join() === yields.join(),
 			`${moon.name} uses ${planet.name}'s yield`
 		);
-		const bases = moonBaseRadius(moon.diameter) + radialReach(moonBaseSize(moon.diameter));
+		const bases = moonBaseRadius(moon.diameter) + radialReach(DOCK_SIZE);
 		const outer = moonOuterOrbitRadius(moon.diameter);
 		for (const slot of moonSlots) {
 			const reach = radialReach(slot.size);
 			expect(slot.radius - reach > bases, `${moon.name} ${slot.resource} generator clears the homes`);
 			expect(slot.radius + reach < outer, `${moon.name} ${slot.resource} generator stays inside the outer orbit`);
-			expect(slot.size.width < moon.diameter, `${moon.name} generator is smaller than the moon`);
-			const base = moonBaseSize(moon.diameter);
+			expect(slot.size.width < moon.diameter && slot.size.depth < moon.diameter, `${moon.name} generator is smaller than the moon`);
 			expect(
-				slot.size.width <= base.width && slot.size.height <= base.height && slot.size.depth <= base.depth,
-				`${moon.name} ${slot.resource} mine is no bigger than a base`
+				slot.size.width === MINE_SIZE.width &&
+					slot.size.height === MINE_SIZE.height &&
+					slot.size.depth === MINE_SIZE.depth,
+				`${moon.name} ${slot.resource} mine uses the mine block`
 			);
 		}
 	}
 }
+
+expect(MINE_SIZE.width === DOCK_SIZE.width * 0.5, "a mine is half as wide across the orbit");
+expect(Math.abs(MINE_SIZE.depth / DOCK_SIZE.depth - 1.3) < 1e-9, "a mine is thirty percent deeper along the orbit");
+expect(MINE_SIZE.height === MINE_SIZE.width, "the face the laser meets is square");
+expect(MINE_SIZE.height > DOCK_SIZE.height * 2, "a mine stands taller than a landing pad");
 
 expect(planetGeneratorSlots("earth", PLANETS[2]).length === 0, "Earth has no mine generators");
 expect(moonGeneratorSlots("earth", 3.8).length === 0, "the Moon has no mine generators");

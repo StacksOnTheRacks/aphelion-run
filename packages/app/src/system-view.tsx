@@ -3,7 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import type { PilotViewpoint } from "./demo/cockpit";
-import { chartButtons, viewTrail, wideChartStep, type ChartButton, type DemoView, type EnvironmentDemo } from "./demo/environment";
+import {
+	chartButtons,
+	viewTrail,
+	wideChartStep,
+	type ChartButton,
+	type DemoView,
+	type EnvironmentDemo,
+	type ShipHold,
+} from "./demo/environment";
+import { MINERALS } from "./demo/energy";
 import {
 	DEPARTURE_SECONDS,
 	scanCard,
@@ -32,6 +41,31 @@ const STEP_TITLE: Record<string, string> = {
 	Planet: "Back to the planet",
 	Sun: "Back to the Sun",
 };
+
+/** The hold the HUD shows. Fractions between those whole units do not change the screen. */
+function sameHold(left: ShipHold, right: ShipHold): boolean {
+	const charge =
+		left.charge === null
+			? right.charge === null
+			: right.charge !== null && Math.round(left.charge) === Math.round(right.charge);
+	return (
+		charge &&
+		Math.round(left.energy) === Math.round(right.energy) &&
+		left.siphoning === right.siphoning &&
+		left.dockId === right.dockId &&
+		left.siphonId === right.siphonId &&
+		MINERALS.every(
+			(mineral) =>
+				Math.round(left.cargo[mineral]) === Math.round(right.cargo[mineral]) &&
+				Math.round(left.base[mineral]) === Math.round(right.base[mineral])
+		)
+	);
+}
+
+/** A berth is the craft the ship is on. A fresh object with the same id is the same berth. */
+function sameBerth(left: ScanTarget | null, right: ScanTarget | null): boolean {
+	return left?.id === right?.id;
+}
 
 /**
  * Sol, and the chrome over it. Names follow the framing: a wide planet chart names the planet and its
@@ -102,9 +136,12 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	useEffect(
 		() =>
 			system.onHold((next) => {
-				setHold(next);
+				setHold((last) => (sameHold(last, next) ? last : next));
 				if (!flightRef.current) {
-					setDocked(system.berth());
+					setDocked((last) => {
+						const berthed = system.berth();
+						return sameBerth(last, berthed) ? last : berthed;
+					});
 				}
 			}),
 		[system]
@@ -175,11 +212,12 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	};
 	useEffect(() => {
 		if (!scanned) {
-			setQuote(null);
+			setQuote((last) => (last === null ? last : null));
 			return;
 		}
-		setQuote(system.quote(scanned));
-	}, [scanned, docked, flight, system]);
+		const cost = system.quote(scanned);
+		setQuote((last) => (last === cost ? last : cost));
+	}, [scanned, docked?.id, flight, system]);
 
 	const labels = useMemo<LabelItem[]>(() => {
 		if (piloting) {

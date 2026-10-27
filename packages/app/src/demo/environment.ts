@@ -30,13 +30,12 @@ import {
 	type SphereBody,
 } from "./camera-path";
 import {
+	MINE_SIZE,
 	EARTH_STATION_RADIUS,
 	EARTH_WAREHOUSE_RADIUS,
 	SATURN_RING_INNER_SCALE,
 	SATURN_RING_OUTER_SCALE,
-	DRIFT_TO_ORBIT_SECONDS,
 	SUN_OUTER_ORBIT,
-	driftToInnerOrbit,
 	innerOrbitRadius,
 	playerHome,
 	moonOuterOrbitRadius,
@@ -65,6 +64,7 @@ import {
 import { CLIMB_PACE, createJourney, hoverDeparture, journeySeconds, type Dock, type Harbor, type JourneyPlan } from "./journey";
 import { CHART_LAYER, createCockpit, type CenterPaint, type PilotViewpoint, type ScreenRect } from "./cockpit";
 import { HULL_LENGTH, loadRanger } from "./ranger";
+import { MINE_FIRE_PERIOD, createSiphonBeam, mineBeamSpan, mineFiring, type BeamShape, type SiphonBeam } from "./laser";
 import { awayFrom, type LabelFrame, type LabelSource } from "./labels";
 import type { NavBody, NavFix, NavPoint } from "./nav";
 import type { ScanKind, ScanTarget } from "./scan";
@@ -467,7 +467,6 @@ const INNER_RING_COLOR = new Color3(0.85, 0.55, 0.25);
 const SATELLITE_COUNT = 150;
 const SATELLITE_BAND_INNER = 19;
 const SATELLITE_BAND_OUTER = 30;
-const SATELLITE_SIZE = { width: 0.24, height: 0.04, depth: 0.12 };
 /** Angular speed at radius r is SATELLITE_ORBIT_RATE / r^1.5, so inner satellites lap outer ones. */
 const SATELLITE_ORBIT_RATE = 2.35;
 
@@ -550,7 +549,7 @@ export function bodyOuterRadius(id: string): number {
 	throw new Error(`No outer orbit for ${id}.`);
 }
 
-/** Inner-orbit radius. A ship idles here after it leaves a mine, just inside the battle honeycomb. */
+/** Inner-orbit radius. An undocked ship circles here, just inside the battle honeycomb. */
 export function bodyInnerRadius(id: string): number {
 	return innerOrbitRadius(bodyOuterRadius(id));
 }
@@ -1158,7 +1157,8 @@ export async function createEnvironment(
 	addOrbit("earth-inner-ring", EARTH_STATION_RADIUS, INNER_RING_COLOR, earth.anchor);
 
 	const crafts: Craft[] = [];
-	const spinningBases = buildHabitats(scene, bodies, crafts);
+	const mineLasers: MineLaser[] = [];
+	const spinningBases = buildHabitats(scene, bodies, crafts, mineLasers);
 	const ranger = await loadRanger(scene, camera);
 	const canopyGlass = scene.getMeshByName("cockpit-canopy-glass");
 	if (canopyGlass instanceof Mesh) {
@@ -1167,19 +1167,6 @@ export async function createEnvironment(
 	let shipAngle = 1.2;
 	const idlePoint = new Vector3();
 	const idleHeading = new Vector3();
-	/**
-	 * Departure from a depleted mine. The ship eases out to the inner orbit instead of appearing there.
-	 * Positions are relative to the body.
-	 */
-	let mineDrift: {
-		host: string;
-		from: Vector3;
-		last: Vector3;
-		angle: number;
-		/** Angular speed at the mine. It eases toward the idle orbit's rate. */
-		rate: number;
-		elapsed: number;
-	} | null = null;
 	const player: Craft = {
 		id: "player-ship",
 		host: "earth",
@@ -1203,9 +1190,7 @@ export async function createEnvironment(
 		}
 		const planet = bodies.find((body) => body.spec.name === id);
 		const anchor = planet?.anchor ?? moonByName.get(id)?.baseAnchor;
-		const docks = spinningBases
-			.filter((base) => base.mesh.parent === anchor)
-			.map((base): Dock => ({ position: () => base.mesh.position.clone(), rate: BASE_SPIN * ORBIT_PACE }));
+		const docks = spinningBases.filter((base) => base.mesh.parent === anchor).map(dockOf);
 		if (planet === saturn) {
 			const { normal, inner, outer: ringOuter, halfHeight } = saturnRing(Vector3.Zero());
 			return { docks, outer, ring: { normal, inner, outer: ringOuter, halfHeight } };
@@ -1216,7 +1201,7 @@ export async function createEnvironment(
 	/** One craft to dock with, by craft id: a base, a station, a generator, or a collector. */
 	const dockById = new Map(swarm.dockById);
 	for (const base of spinningBases) {
-		dockById.set(base.mesh.name, { position: () => base.mesh.position.clone(), rate: BASE_SPIN * ORBIT_PACE });
+		dockById.set(base.mesh.name, dockOf(base));
 	}
 
 	const journey = createJourney(scene, camera, glow, harborOf, ranger);
@@ -1547,47 +1532,15 @@ export async function createEnvironment(
 			}
 		}
 
-		if (journey.ship()) {
-			mineDrift = null;
-		} else {
+		if (!journey.ship()) {
 			const host = journey.host() ?? player.host;
 			const center = focusPosition(host);
 			const inner = bodyInnerRadius(host);
-			const drift = mineDrift?.host === host ? mineDrift : null;
-			if (mineDrift && !drift) {
-				mineDrift = null;
-			}
-			if (drift) {
-				drift.elapsed += deltaSeconds;
-				const t = Math.min(1, drift.elapsed / DRIFT_TO_ORBIT_SECONDS);
-				const eased = t * t * (3 - 2 * t);
-				const rate = drift.rate + (player.rate - drift.rate) * eased;
-				drift.angle += deltaSeconds * rate;
-				const pose = driftToInnerOrbit(drift.from, inner, t, drift.angle);
-				shipAngle = drift.angle;
-				idlePoint.set(center.x + pose.x, center.y + pose.y, center.z + pose.z);
-				const stepX = pose.x - drift.last.x;
-				const stepY = pose.y - drift.last.y;
-				const stepZ = pose.z - drift.last.z;
-				const stepLength = Math.hypot(stepX, stepY, stepZ);
-				if (stepLength > 1e-6) {
-					idleHeading.set(stepX / stepLength, stepY / stepLength, stepZ / stepLength);
-				} else {
-					idleHeading.set(-Math.sin(shipAngle), 0, Math.cos(shipAngle));
-				}
-				drift.last.set(pose.x, pose.y, pose.z);
-				ranger.drive("impulse", 0);
-				ranger.place(idlePoint, idleHeading, deltaSeconds);
-				if (t >= 1) {
-					mineDrift = null;
-				}
-			} else {
-				shipAngle += deltaSeconds * player.rate;
-				idlePoint.set(center.x + Math.cos(shipAngle) * inner, center.y, center.z + Math.sin(shipAngle) * inner);
-				idleHeading.set(-Math.sin(shipAngle), 0, Math.cos(shipAngle));
-				ranger.drive("impulse", 0);
-				ranger.place(idlePoint, idleHeading, deltaSeconds);
-			}
+			shipAngle += deltaSeconds * player.rate;
+			idlePoint.set(center.x + Math.cos(shipAngle) * inner, center.y, center.z + Math.sin(shipAngle) * inner);
+			idleHeading.set(-Math.sin(shipAngle), 0, Math.cos(shipAngle));
+			ranger.drive("impulse", 0);
+			ranger.place(idlePoint, idleHeading, deltaSeconds);
 		}
 
 		for (const base of spinningBases) {
@@ -1718,28 +1671,17 @@ export async function createEnvironment(
 	};
 
 	/**
-	 * Dispatches the ship from a mine toward that body's inner orbit. The drift takes
-	 * `DRIFT_TO_ORBIT_SECONDS`. The mine is already full again.
+	 * Drawing has stopped because the source is empty or the ship is full. The ship stays on the
+	 * dock. The source keeps what it has left and refills when the ship leaves.
 	 */
-	const releaseToOrbit = (host: string) => {
-		const docked = journey.docked();
+	const parkAtDock = (id: string, remaining: number) => {
+		if (remaining >= COLLECTOR_CHARGE) {
+			collectorCharges.delete(id);
+		} else {
+			collectorCharges.set(id, Math.max(0, remaining));
+		}
 		siphoning = false;
 		siphonId = null;
-		dockId = null;
-		player.host = host;
-		player.view = orbitView(host, "inner");
-		const from = ranger.position.subtract(focusPosition(host));
-		const angle = Math.atan2(from.z, from.x);
-		shipAngle = angle;
-		journey.release(host);
-		mineDrift = {
-			host,
-			from,
-			last: from.clone(),
-			angle,
-			rate: docked?.rate || player.rate,
-			elapsed: 0,
-		};
 		publishHold();
 	};
 
@@ -1791,8 +1733,7 @@ export async function createEnvironment(
 		energy = drawn.energy;
 		cargo = drawn.cargo;
 		if (drawn.release) {
-			collectorCharges.delete(dockId);
-			releaseToOrbit(craft.host);
+			parkAtDock(dockId, drawn.remaining);
 			return;
 		}
 		collectorCharges.set(dockId, drawn.remaining);
@@ -1801,12 +1742,52 @@ export async function createEnvironment(
 		publishHold();
 	};
 
+	const beamCenter = new Vector3();
+	const mineAt = new Vector3();
+	const bodyAt = new Vector3();
+	let mineClock = 0;
+	/** The laser is on only while a docked ship is drawing. It meets the near face of that block. */
+	const aimBeam = (deltaSeconds: number) => {
+		const pose = journey.ship();
+		const craft = siphoning && dockId ? crafts.find((item) => item.id === dockId) : undefined;
+		if (!craft || !pose) {
+			ranger.beam(false, null, null, 0, deltaSeconds);
+			return;
+		}
+		craft.position(beamCenter);
+		ranger.beam(true, beamCenter, pose.heading, MINE_SIZE.depth / 2, deltaSeconds);
+	};
+
+	/** Mines drill the body they circle. Drawing from one holds its beam until the ship lets go. */
+	const aimMines = (deltaSeconds: number) => {
+		mineClock += deltaSeconds;
+		const quiet = siphoning ? dockId : null;
+		for (const laser of mineLasers) {
+			laser.mesh.computeWorldMatrix(true);
+			laser.mesh.getWorldMatrix().getTranslationToRef(mineAt);
+			const parent = laser.mesh.parent;
+			if (!(parent instanceof TransformNode)) {
+				laser.beam.set(false, mineAt, mineAt, deltaSeconds);
+				continue;
+			}
+			parent.getWorldMatrix().getTranslationToRef(bodyAt);
+			const span = mineBeamSpan(mineAt, bodyAt, laser.bodyRadius, MINE_SIZE.width / 2);
+			if (!span) {
+				laser.beam.set(false, mineAt, mineAt, deltaSeconds);
+				continue;
+			}
+			laser.beam.set(quiet !== laser.id && mineFiring(mineClock, laser.phase), span.from, span.to, deltaSeconds);
+		}
+	};
+
 	scene.onBeforeRenderObservable.add(() => {
 		const deltaSeconds = engine.getDeltaTime() / 1000;
 		const before = sunAngle(focusPosition(SHOTS[active].focus));
 		placeBodies(deltaSeconds);
 		journey.update(deltaSeconds, focusPosition);
 		settleDock(deltaSeconds);
+		aimBeam(deltaSeconds);
+		aimMines(deltaSeconds);
 		cockpit.update();
 		// An arrival can open another view from inside the update, so the shot is read after it.
 		const shot = SHOTS[active];
@@ -3308,7 +3289,17 @@ type SpinningBase = {
 	mesh: Mesh;
 	angle: number;
 	radius: number;
+	/** A mine. The ship trails it on the orbit instead of sitting above a pad. */
+	trail?: boolean;
 };
+
+function dockOf(base: SpinningBase): Dock {
+	return {
+		position: () => base.mesh.position.clone(),
+		rate: BASE_SPIN * ORBIT_PACE,
+		...(base.trail ? { mount: "trail" as const } : {}),
+	};
+}
 
 /** A craft circling a body. A click opens that body's inner orbit and the camera rides with this craft. */
 type Craft = {
@@ -3330,7 +3321,7 @@ type Craft = {
 	position: (out: Vector3) => Vector3;
 };
 
-function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[]): SpinningBase[] {
+function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[], mineLasers: MineLaser[]): SpinningBase[] {
 	const materials = factionMaterials(scene);
 	const homeMaterial = playerHomeMaterial(scene);
 	const generatorMaterial = grayBoxMaterial(scene);
@@ -3355,7 +3346,9 @@ function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[]): Spi
 			spinning,
 			crafts,
 			body.spec.name,
-			inner
+			inner,
+			body.spec.diameter / 2,
+			mineLasers
 		);
 		for (const moon of body.moons) {
 			const moonInner = moonView(body.spec.name, moon.mesh.name, "inner");
@@ -3381,7 +3374,9 @@ function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[]): Spi
 				spinning,
 				crafts,
 				moon.mesh.name,
-				moonInner
+				moonInner,
+				moon.radius,
+				mineLasers
 			);
 		}
 	}
@@ -3456,6 +3451,20 @@ function addBaseSlots(
 	});
 }
 
+type MineLaser = {
+	id: string;
+	beam: SiphonBeam;
+	mesh: Mesh;
+	bodyRadius: number;
+	phase: number;
+};
+
+/** Thick enough to read against the body, and never thinner than the mine's own face. */
+function mineLaserShape(reach: number): BeamShape {
+	const core = Math.max(MINE_SIZE.width * 0.3, reach * 0.006);
+	return { core, coneNear: core * 1.7, coneFar: core * 3.4, flare: core * 4 };
+}
+
 function addGeneratorSlots(
 	scene: Scene,
 	parent: TransformNode,
@@ -3464,7 +3473,9 @@ function addGeneratorSlots(
 	spinning: SpinningBase[],
 	crafts: Craft[],
 	host: string,
-	view: DemoView
+	view: DemoView,
+	bodyRadius: number,
+	mineLasers: MineLaser[]
 ): void {
 	for (const slot of slots) {
 		const mesh = MeshBuilder.CreateBox(`${host}-generator-${slot.resource}`, slot.size, scene);
@@ -3473,7 +3484,15 @@ function addGeneratorSlots(
 		mesh.isPickable = false;
 		mesh.position.set(Math.cos(slot.angle) * slot.radius, 0, Math.sin(slot.angle) * slot.radius);
 		mesh.rotation.y = -slot.angle;
-		const craft: SpinningBase = { mesh, angle: slot.angle, radius: slot.radius };
+		const reach = slot.radius - bodyRadius - MINE_SIZE.width / 2;
+		mineLasers.push({
+			id: mesh.name,
+			beam: createSiphonBeam(scene, mineLaserShape(Math.max(reach, MINE_SIZE.width)), mesh.name),
+			mesh,
+			bodyRadius,
+			phase: (slot.angle / (Math.PI * 2)) * MINE_FIRE_PERIOD,
+		});
+		const craft: SpinningBase = { mesh, angle: slot.angle, radius: slot.radius, trail: true };
 		spinning.push(craft);
 		crafts.push({
 			id: mesh.name,
@@ -3515,7 +3534,7 @@ function buildSatelliteSwarm(
 		material.emissiveColor = look.glow;
 		material.specularColor = new Color3(0.2, 0.2, 0.2);
 
-		const mesh = MeshBuilder.CreateBox(`satellites-${owner}`, SATELLITE_SIZE, scene);
+		const mesh = MeshBuilder.CreateBox(`satellites-${owner}`, MINE_SIZE, scene);
 		mesh.material = material;
 		mesh.isPickable = false;
 		mesh.alwaysSelectAsActiveMesh = true;
@@ -3541,7 +3560,7 @@ function buildSatelliteSwarm(
 				view: "sun-inner",
 				kind: "collector",
 				owner,
-				reach: Math.max(SATELLITE_SIZE.width, SATELLITE_SIZE.depth) / 2,
+				reach: Math.max(MINE_SIZE.width, MINE_SIZE.depth) / 2,
 				rate: orbit.speed * ORBIT_PACE,
 				angle: () => orbit.angle,
 				position: (out) =>
@@ -3587,6 +3606,7 @@ function buildSatelliteSwarm(
 			dockById.set(`${group.mesh.name}-${index}`, {
 				position: () => place(orbit, new Vector3()),
 				rate: orbit.speed * ORBIT_PACE,
+				mount: "trail",
 			});
 		});
 	}

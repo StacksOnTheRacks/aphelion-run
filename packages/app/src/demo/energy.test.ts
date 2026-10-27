@@ -66,7 +66,7 @@ while (steps < 200) {
 		break;
 	}
 }
-expect(steps === 80 && mining.cargo.ore === CARGO_CAPACITY && remaining === MINE_FULL, "a full ore mine fills the hold in 80 seconds and then resets");
+expect(steps === 80 && mining.cargo.ore === CARGO_CAPACITY && remaining === 0, "a full ore mine fills the hold in 80 seconds and then sits empty");
 expect(mining.energy === STARTING_ENERGY, "mining ore does not change the energy tank");
 
 const mined = drawFromDock(fresh, { kind: "generator", resource: "hydrogen", remaining: MINE_FULL }, 10);
@@ -94,12 +94,12 @@ while (sunSteps < 200) {
 	}
 }
 expect(
-	sunRelease && sunSteps === 80 && tank === ENERGY_CAPACITY && collector === MINE_FULL,
-	"a full collector tops the energy tank off from the starting load and then resets"
+	sunRelease && sunSteps === 80 && tank === ENERGY_CAPACITY && collector === 0,
+	"a full collector tops the energy tank off from the starting load and then sits empty"
 );
 
 const alreadyFull = drawFromDock({ energy: ENERGY_CAPACITY, cargo: emptyCargo() }, { kind: "collector", remaining: MINE_FULL }, 5);
-expect(alreadyFull.release && alreadyFull.energy === ENERGY_CAPACITY && alreadyFull.remaining === MINE_FULL, "a full tank leaves the collector at once and the collector refills");
+expect(alreadyFull.release && alreadyFull.energy === ENERGY_CAPACITY && alreadyFull.remaining === MINE_FULL, "a full tank draws nothing and the collector stays as it was");
 
 const parked = depositAtHome(mining.cargo, emptyCargo());
 expect(parked.cargo.ore === 0 && parked.base.ore === CARGO_CAPACITY, "docking at home moves ore into the stockpile and clears the hold");

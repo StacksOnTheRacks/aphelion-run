@@ -21,12 +21,13 @@ import type { Scene } from "@babylonjs/core/scene";
 
 import "@babylonjs/loaders/glTF";
 
+import { beamEnd, createSiphonBeam } from "./laser";
 import { createPlume, type Plume } from "./plume";
 import { plumesFor, type Drive, type Plumes } from "./thrust";
 
 /**
- * Length of the ranger, in world units. About a twelfth of the smallest moon, and shorter than a
- * planet warehouse, so the hull reads as a craft docked at a station. The cockpit cameras are sized
+ * Length of the ranger, in world units. About a twelfth of the smallest moon, and a little
+ * shorter than a dock, so the hull reads as a craft sitting on the pad. The cockpit cameras are sized
  * in hull lengths, so the pilot's view keeps the same framing.
  */
 export const HULL_LENGTH = 0.04;
@@ -159,6 +160,11 @@ export type Ranger = ShipModel & {
 	readonly mounts: ShipMounts;
 	/** From the cockpit the hull always shows in the aft views, under a fill light. */
 	setPiloted: (on: boolean) => void;
+	/**
+	 * The mining laser. `center` is the block and `forward` points from the ship toward it.
+	 * The beam runs from the muzzle to the face `inset` in front of that center.
+	 */
+	beam: (firing: boolean, center: Vector3 | null, forward: Vector3 | null, inset: number, deltaSeconds: number) => void;
 };
 
 /**
@@ -475,6 +481,14 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 	beacon.layerMask = SHIP_LAYER;
 
 	const mounts = buildMounts(scene, ship, container.meshes, pilotBody);
+	const muzzleLocal = muzzleTip(ship, container.meshes);
+	const siphon = createSiphonBeam(scene, {
+		core: HULL_LENGTH * 0.035,
+		coneNear: HULL_LENGTH * 0.055,
+		coneFar: HULL_LENGTH * 0.18,
+		flare: HULL_LENGTH * 0.22,
+	});
+	const muzzleWorld = new Vector3();
 
 	// Only reaches the ship. It stays in the scene at zero, so turning it up does not rebuild shaders.
 	const fillLight = new HemisphericLight("ranger-fill", Vector3.Up(), scene);
@@ -579,6 +593,19 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 			piloted = on;
 			fillLight.intensity = on ? AFT_FILL : 0;
 			present();
+		},
+		beam(firing, center, forward, inset, deltaSeconds) {
+			if (!center || !forward) {
+				siphon.set(false, muzzleWorld, muzzleWorld, deltaSeconds);
+				return;
+			}
+			Vector3.TransformCoordinatesToRef(muzzleLocal, ship.getWorldMatrix(), muzzleWorld);
+			const face = beamEnd(muzzleWorld, center, forward, inset);
+			if (!face) {
+				siphon.set(false, muzzleWorld, muzzleWorld, deltaSeconds);
+				return;
+			}
+			siphon.set(firing && hullOn, muzzleWorld, face, deltaSeconds);
 		},
 	};
 }
@@ -766,6 +793,43 @@ function buildMounts(
 	};
 
 	return { eye, port: aft("Port", -1), starboard: aft("Starboard", 1), hullCenter };
+}
+
+/**
+ * The forward face of the muzzle, in the ship's space. The nose is +Z, so the tip is the muzzle's
+ * greatest Z. Measured after the hull is scaled, the same way the cockpit mounts are.
+ */
+function muzzleTip(ship: TransformNode, meshes: AbstractMesh[]): Vector3 {
+	ship.computeWorldMatrix(true);
+	const toShip = ship.getWorldMatrix().clone().invert();
+	const min = new Vector3(Infinity, Infinity, Infinity);
+	const max = new Vector3(-Infinity, -Infinity, -Infinity);
+	let found = false;
+	for (const mesh of meshes) {
+		if (mesh.material?.name !== "Ranger Muzzle") {
+			continue;
+		}
+		const chain: Node[] = [];
+		for (let at: Node | null = mesh; at; at = at.parent) {
+			chain.unshift(at);
+		}
+		for (const link of chain) {
+			if (link instanceof TransformNode) {
+				link.computeWorldMatrix(true);
+			}
+		}
+		const box = mesh.getBoundingInfo().boundingBox;
+		for (const corner of box.vectorsWorld) {
+			const local = Vector3.TransformCoordinates(corner, toShip);
+			min.minimizeInPlace(local);
+			max.maximizeInPlace(local);
+		}
+		found = true;
+	}
+	if (!found) {
+		throw new Error("The ranger is missing the laser muzzle.");
+	}
+	return new Vector3((min.x + max.x) / 2, (min.y + max.y) / 2, max.z);
 }
 
 /** Signed angle from `previous` to `next` about Y. Positive swings the nose to starboard. */

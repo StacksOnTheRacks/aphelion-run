@@ -16,15 +16,17 @@ import type { GreasedLineBaseMesh } from "@babylonjs/core/Meshes/GreasedLine/gre
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
 
+import { MINE_SIZE } from "./bases";
 import type { RingBody } from "./camera-path";
 import { CHART_LAYER, PILOT_LAYER } from "./cockpit";
-import type { ShipModel } from "./ranger";
+import { HULL_LENGTH, type ShipModel } from "./ranger";
 import { MAX_YAW, headingAt, pointAt, type Route, type RouteKind } from "./route";
 
 /**
  * A ship flying a planned trip. Leaving a dock, it eases out to a hover, then climbs to the origin's
- * outer orbit. It burns fast along the bright line to the destination's outer orbit, drops to a hover
- * beside a craft there, and eases in to dock. The climb and the drop each take the same time on every
+ * outer orbit. It burns fast along the bright line to the destination's outer orbit, drops to a hover,
+ * and eases in to dock. A pad is met from above. A mine or collector is met from behind, on the same
+ * orbit, so the forward laser points at it. The climb and the drop each take the same time on every
  * body; speed eases so the handoff into the burn does not jump. The bright line is the way ahead and
  * shortens as the ship goes. It is drawn at a fixed width on screen, so the route reads from the
  * whole-system view and from beside a planet alike. From the cockpit the burn is a run of chevrons
@@ -48,14 +50,23 @@ export const ORBIT_LEG_SECONDS = 7;
 /** Soft undock and soft dock: the ease between the coupled pose and a hover. */
 export const SOFT_DOCK_SECONDS = 3;
 /**
- * How far a coupled ship sits above its dock, in world units. One hull. The hover is twice this,
- * and both shrink when the gap out to the outer orbit is smaller than the hull.
+ * How far a coupled ship sits above a pad, in world units. One hull. The hover is twice this,
+ * and both shrink when the gap out to the outer orbit is smaller than the hull. A mine or collector
+ * uses this same length as the slide along its orbit between the coupled pose and the hover.
  */
 export const HULL_CLEARANCE = 0.04;
+/**
+ * Space between a mine's trailing face and the ship's nose when the ship is coupled.
+ * The pilot's eye sits just behind the nose, and the windscreen clips the world 0.02 out. A gap
+ * this short of the hull keeps the whole block past that clip through a full head turn. Any closer
+ * and looking aside cuts the face into a wall across the glass.
+ */
+const TRAIL_GAP = 0.03;
 
 /**
  * World rise along the ecliptic normal. `coupled` is the docked pose and `hover` is the pose the
  * climb leaves from. Neither grows with the camera, so a far chart cannot park the ship above a moon.
+ * Mines and collectors do not rise: they use `trailDistance`.
  */
 export function poseRise(dockRadius: number, outerRadius: number, kind: "coupled" | "hover"): number {
 	const wanted = kind === "hover" ? HULL_CLEARANCE * 2 : HULL_CLEARANCE;
@@ -63,6 +74,58 @@ export function poseRise(dockRadius: number, outerRadius: number, kind: "coupled
 		return wanted;
 	}
 	return Math.min(wanted, (outerRadius - dockRadius) * 0.15);
+}
+
+/**
+ * How far behind a mine or collector the ship sits, along the orbit. Coupled leaves the nose clear
+ * of the trailing face by enough that the block stays whole out the windscreen. Hover is one hull
+ * further aft, and docking slides between the two.
+ */
+export function trailDistance(kind: "coupled" | "hover"): number {
+	const coupled = MINE_SIZE.depth / 2 + HULL_LENGTH / 2 + TRAIL_GAP;
+	return kind === "hover" ? coupled + HULL_CLEARANCE : coupled;
+}
+
+/** Ship pose relative to the body. Pads rise in Y. A trail mount lags behind on the same circle. */
+function poseOn(at: Vector3, dock: Dock, outer: number, kind: "coupled" | "hover"): Vector3 {
+	if (dock.mount === "trail") {
+		return lagOnOrbit(at, dock.rate, trailDistance(kind));
+	}
+	const posed = at.clone();
+	posed.y += poseRise(Math.hypot(posed.x, posed.z), outer, kind);
+	return posed;
+}
+
+/** Where the ship sits relative to the body, for `dock` where it is now. */
+export function berthPoint(dock: Dock, outer: number, kind: "coupled" | "hover"): Vector3 {
+	return poseOn(dock.position(), dock, outer, kind);
+}
+
+/** Coupled at `share` 0, hover at `share` 1. Soft dock eases the other way. */
+function easedPose(dock: Dock, outer: number, share: number): Vector3 {
+	const t = smoothstep(0, 1, Math.min(1, Math.max(0, share)));
+	const at = dock.position();
+	if (dock.mount === "trail") {
+		const coupled = trailDistance("coupled");
+		const hover = trailDistance("hover");
+		return lagOnOrbit(at, dock.rate, coupled + (hover - coupled) * t);
+	}
+	const radius = Math.hypot(at.x, at.z);
+	const coupled = poseRise(radius, outer, "coupled");
+	const hover = poseRise(radius, outer, "hover");
+	const posed = at.clone();
+	posed.y += coupled + (hover - coupled) * t;
+	return posed;
+}
+
+/** Same radius and height as `at`, `distance` back along the orbit. */
+function lagOnOrbit(at: Vector3, rate: number, distance: number): Vector3 {
+	const radius = Math.hypot(at.x, at.z);
+	if (radius < 1e-6) {
+		return at.clone();
+	}
+	const turn = Math.sign(rate) || 1;
+	return yawAround(at, -(turn * distance) / radius);
 }
 /** The ship swings at least this far around the body on the way in, so it closes on its dock from behind. */
 export const APPROACH_MIN_SWEEP = 0.8;
@@ -333,6 +396,11 @@ export type Dock = {
 	position: () => Vector3;
 	/** How fast it circles that body, radians per second, counterclockwise seen from above. */
 	rate: number;
+	/**
+	 * `trail` is a mine or collector: the ship sits just behind it on the same orbit.
+	 * Absent docks are pads, and the ship sits above them.
+	 */
+	mount?: "trail";
 };
 
 /** A ring around the body, centered on it. */
@@ -580,21 +648,6 @@ export function createJourney(
 		ship.place(position, heading, deltaSeconds);
 	};
 
-	/** The dock, lifted by a world clearance. Relative to the body, as `approachPoint` expects. */
-	const raisedDock = (dock: Dock, outer: number, kind: "coupled" | "hover") => {
-		const relative = dock.position();
-		relative.y += poseRise(Math.hypot(relative.x, relative.z), outer, kind);
-		return relative;
-	};
-
-	/** Coupled at `share` 0, hover at `share` 1. Soft dock eases the other way. */
-	const easedRise = (dock: Dock, outer: number, share: number) => {
-		const radius = Math.hypot(dock.position().x, dock.position().z);
-		const coupled = poseRise(radius, outer, "coupled");
-		const hover = poseRise(radius, outer, "hover");
-		return coupled + (hover - coupled) * smoothstep(0, 1, Math.min(1, Math.max(0, share)));
-	};
-
 	const orbitHeading = (relative: Vector3, rate: number) => {
 		const angle = Math.atan2(relative.z, relative.x);
 		const turn = Math.sign(rate) || 1;
@@ -629,9 +682,7 @@ export function createJourney(
 		}
 		const center = centerOf(berthed.bodyId);
 		const outer = harborOf(berthed.bodyId).outer ?? 0;
-		const relative = berthed.dock.position();
-		const rise = poseRise(Math.hypot(relative.x, relative.z), outer, "coupled");
-		relative.y += rise;
+		const relative = berthPoint(berthed.dock, outer, "coupled");
 		const heading = orbitHeading(relative, berthed.dock.rate);
 		berthHeading.copyFrom(heading);
 		ship.drive("impulse", 0);
@@ -648,9 +699,8 @@ export function createJourney(
 		berthHeading.copyFrom(current.heading);
 	};
 
-	const placeCoupled = (current: Flight, center: Vector3, dock: Dock, rise: number, deltaSeconds: number) => {
-		const relative = dock.position();
-		relative.y += rise;
+	const placeCoupled = (current: Flight, center: Vector3, dock: Dock, outer: number, share: number, deltaSeconds: number) => {
+		const relative = easedPose(dock, outer, share);
 		const heading = orbitHeading(relative, dock.rate);
 		current.heading = heading;
 		current.last = relative;
@@ -692,11 +742,10 @@ export function createJourney(
 		}
 		const outer = harborOf(current.plan.arrive.id).outer ?? 0;
 		if (current.phase === "soft-dock" || current.phase === "docked") {
-			const rise = easedRise(approach.dock, outer, 1 - current.since / SOFT_DOCK_SECONDS);
-			placeCoupled(current, center, approach.dock, rise, deltaSeconds);
+			placeCoupled(current, center, approach.dock, outer, 1 - current.since / SOFT_DOCK_SECONDS, deltaSeconds);
 			return;
 		}
-		const dock = raisedDock(approach.dock, outer, "hover");
+		const dock = berthPoint(approach.dock, outer, "hover");
 		const relative = approachPoint(approach, current.since, dock);
 		const step = relative.subtract(current.last);
 		if (step.lengthSquared() > 1e-12) {
@@ -817,8 +866,7 @@ export function createJourney(
 				current.since += deltaSeconds;
 				const center = centerOf(departBody);
 				const outer = harborOf(departBody).outer ?? 0;
-				const rise = easedRise(departDock, outer, current.since / SOFT_DOCK_SECONDS);
-				placeCoupled(current, center, departDock, rise, deltaSeconds);
+				placeCoupled(current, center, departDock, outer, current.since / SOFT_DOCK_SECONDS, deltaSeconds);
 				if (current.since < SOFT_DOCK_SECONDS) {
 					return;
 				}
@@ -1180,8 +1228,7 @@ function yawAround(point: Vector3, angle: number): Vector3 {
 /** Hover pose, relative to the body, `SOFT_DOCK_SECONDS` after `dock` where it is now. The climb starts here. */
 export function hoverDeparture(dock: Dock, outer: number): Vector3 {
 	const later = yawAround(dock.position(), dock.rate * SOFT_DOCK_SECONDS);
-	later.y += poseRise(Math.hypot(later.x, later.z), outer, "hover");
-	return later;
+	return poseOn(later, dock, outer, "hover");
 }
 
 /**
