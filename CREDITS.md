@@ -1,6 +1,6 @@
 # Credits
 
-Surface maps in `public/textures`. Each was resized to 2048×1024.
+Surface maps in `public/textures`. Earth's day and night maps, the Moon, Mercury, and Mars are 4096×2048, resized from the higher-resolution source of the same map. Venus, the giant planets, Earth's clouds, and Saturn's ring are unchanged.
 
 | File | Source | License |
 | --- | --- | --- |

@@ -2915,10 +2915,14 @@ function mapCenterAngle(sphere: Mesh): number {
 	return Math.atan2(positions[closest * 3 + 2], positions[closest * 3]);
 }
 
+/** Samples past the hardware default, so a body's limb stays sharp when the map is viewed edge-on. */
+const SURFACE_ANISOTROPY = 16;
+
 /** A world map (twice as wide as tall) oriented so north is up on a Babylon sphere. */
 function surfaceMap(scene: Scene, url: string): Texture {
 	const texture = new Texture(url, scene);
 	orientMap(texture);
+	texture.anisotropicFilteringLevel = SURFACE_ANISOTROPY;
 	return texture;
 }
 
@@ -2935,7 +2939,9 @@ function dressEarth(scene: Scene, earth: Mesh, diameter: number): void {
 	}
 	material.ambientColor = Color3.White().scale(NIGHT_SIDE / EARTH_DAY_BOOST);
 	material.diffuseColor = Color3.White().scale(EARTH_SUNLIGHT);
-	new NightLightsPlugin(material, new Texture("/textures/earth-night.jpg", scene));
+	const nightLights = new Texture("/textures/earth-night.jpg", scene);
+	nightLights.anisotropicFilteringLevel = SURFACE_ANISOTROPY;
+	new NightLightsPlugin(material, nightLights);
 
 	const cloudMap = surfaceMap(scene, "/textures/earth-clouds.jpg");
 	cloudMap.getAlphaFromRGB = true;

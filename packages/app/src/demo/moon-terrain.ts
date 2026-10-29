@@ -50,8 +50,13 @@ type Terrain = {
 	paint: string;
 };
 
-const LOW_RES = 512;
-const HIGH_RES = 2048;
+/** Equirectangular width while a moon is far. Height is half of this. */
+const LOW_RES = 1024;
+/**
+ * Equirectangular width for the moon in view. Crater classes and noise octaves stay at the
+ * sizes the old map kept; the extra texels only draw those features more cleanly.
+ */
+const HIGH_RES = 4096;
 const SHARP_KEEP = 3;
 const MESH_SEGMENTS = 96;
 const HAZE_SCALE = 1.25;
@@ -75,7 +80,6 @@ export function createMoonTerrain(scene: Scene, sunlight: Sunlight) {
 				uniforms: [
 					"world",
 					"viewProjection",
-					"cameraPosition",
 					"axes",
 					"shapeRange",
 					"sunColor",
@@ -85,6 +89,7 @@ export function createMoonTerrain(scene: Scene, sunlight: Sunlight) {
 					"wrap",
 					"horizonSoftness",
 					"sunObject",
+					"sunCenter",
 					"mapTexel",
 					"shadows",
 				],
@@ -106,6 +111,7 @@ export function createMoonTerrain(scene: Scene, sunlight: Sunlight) {
 
 		const inverseWorld = new Matrix();
 		const sunObject = new Vector3();
+		const sunCenter = new Vector3();
 		scene.onBeforeRenderObservable.add(() => {
 			if (!mesh.isEnabled() || !mesh.isVisible) {
 				return;
@@ -113,6 +119,9 @@ export function createMoonTerrain(scene: Scene, sunlight: Sunlight) {
 			mesh.getWorldMatrix().invertToRef(inverseWorld);
 			Vector3.TransformNormalToRef(mesh.getAbsolutePosition().negate(), inverseWorld, sunObject);
 			material.setVector3("sunObject", sunObject.normalize());
+			// The scene is drawn around the camera, so the Sun is not at the rendered origin.
+			const offset = scene.floatingOriginOffset;
+			material.setVector3("sunCenter", sunCenter.set(-offset.x, -offset.y, -offset.z));
 		});
 
 		const low = bake(scene, name, source, LOW_RES);
@@ -185,7 +194,7 @@ function bake(scene: Scene, name: string, source: string, width: number): Maps {
 		texture.setFloat("texelAngle", texelAngle);
 		texture.wrapU = Texture.WRAP_ADDRESSMODE;
 		texture.wrapV = Texture.CLAMP_ADDRESSMODE;
-		texture.anisotropicFilteringLevel = 8;
+		texture.anisotropicFilteringLevel = 16;
 		// Blending left on by an earlier draw would mix the shape height in alpha into the colors.
 		texture.onBeforeGenerationObservable.add(() => scene.getEngine().setAlphaMode(Constants.ALPHA_DISABLE));
 		return texture;
@@ -275,7 +284,6 @@ const MOON_FRAGMENT = `
 	uniform mat4 world;
 	uniform sampler2D surfaceMap;
 	uniform sampler2D normalMap;
-	uniform vec3 cameraPosition;
 	uniform vec3 sunColor;
 	uniform float sunlight;
 	uniform float nightSide;
@@ -283,6 +291,7 @@ const MOON_FRAGMENT = `
 	uniform float wrap;
 	uniform float horizonSoftness;
 	uniform vec3 sunObject;
+	uniform vec3 sunCenter;
 	uniform float mapTexel;
 	uniform float shadows;
 	varying vec2 vUV;
@@ -326,16 +335,20 @@ const MOON_FRAGMENT = `
 		vec3 albedo = texture2D(surfaceMap, vUV).rgb;
 		vec4 normalHeight = texture2D(normalMap, vUV);
 		vec3 normal = normalize(mat3(world) * (normalHeight.xyz * 2.0 - 1.0));
-		vec3 toSun = normalize(-vPositionW);
-		vec3 toEye = normalize(cameraPosition - vPositionW);
+		// The scene is drawn around the camera. -vPositionW is the view direction; the Sun sits at sunCenter.
+		vec3 toSun = normalize(sunCenter - vPositionW);
+		vec3 toEye = normalize(-vPositionW);
 		float incidence = clamp((dot(normal, toSun) + wrap) / (1.0 + wrap), 0.0, 1.0);
 		float emission = max(dot(normal, toEye), 0.0);
 		float dusty = 2.0 * incidence / (incidence + emission + 0.1);
 		float light = min(mix(dusty, incidence, ice), 1.3);
 		// Bumps can tilt toward the Sun, but not ground the body's own curve has turned into night.
 		float horizon = smoothstep(-horizonSoftness, 0.08, dot(normalize(vRoundW), toSun) + wrap);
+		// A low sun skims the surface and hits every rim, so the march marks that whole side
+		// as shadowed. Fade the cast shadow out there and let the body's shading carry it.
+		float sunUp = dot(sunObject, normalize(vDirection));
 		if (shadows > 0.5 && incidence * horizon > 0.0) {
-			light *= shadow(normalize(vDirection), normalHeight.a);
+			light *= mix(1.0, shadow(normalize(vDirection), normalHeight.a), smoothstep(0.08, 0.4, sunUp));
 		}
 		gl_FragColor = vec4(albedo * (sunColor * sunlight * light * horizon + nightSide), 1.0);
 	}
@@ -444,9 +457,12 @@ float noise(vec3 p) {
 	);
 }
 
-// 1 for detail several texels across, fading to 0 as it shrinks toward one texel, so nothing aliases.
+// Smallest feature the 2048 map kept, in radians. Anything finer shades as a black speck.
+const float MIN_FEATURE = 0.0046;
+
+// 1 once a feature is broad enough to read as terrain, fading to 0 as it shrinks to MIN_FEATURE.
 float resolvable(float size) {
-	return smoothstep(1.5, 4.0, size / texelAngle);
+	return smoothstep(MIN_FEATURE, MIN_FEATURE * 2.67, size);
 }
 
 float fbm(vec3 d, float scale, float octaves) {
@@ -543,12 +559,12 @@ void craterLayer(vec3 d, float freq, float seed, float density, float fresh) {
 	}
 }
 
-// Craters from the largest class (cells per radius) down to the smallest the map can hold.
+// Craters from the largest class down to MIN_FEATURE. Finer classes shade as black specks.
 // Each class is 1.45 times smaller and, at a fixed chance per cell, about twice as common.
 void craters(vec3 d, float largest, float density, float fresh, float seed) {
 	float freq = largest;
 	for (int layer = 0; layer < 16; layer++) {
-		if (0.2 / freq < texelAngle * 1.5) break;
+		if (0.2 / freq < MIN_FEATURE) break;
 		craterLayer(d, freq, seed + float(layer) * 17.0, density, fresh);
 		freq *= 1.45;
 	}
