@@ -8,6 +8,7 @@ import {
 	scanLabel,
 	showsCard,
 	secondsLeft,
+	targetYields,
 	travelAction,
 	viewAction,
 	type ScanTarget,
@@ -44,8 +45,13 @@ expect(scanCard(marsOre).text.includes("ore") && scanCard(marsOre).text.includes
 expect(scanCard(phobosHydrogen).label === "Hydrogen mine", "a moon's generator is named for its mineral");
 expect(scanCard(mars).owner === undefined, "a body has no owner");
 
-expect(destinationName(sun) === "the Sun", "the Sun reads with its article");
-expect(destinationName(collector) === "a collector at the Sun", "a collector reads with the body it circles");
+expect(targetYields(bodyScan("neptune")).join() === "hydrogen,nitrogen,carbon", "Neptune lists every mineral mined there");
+expect(targetYields(bodyScan("triton")).join() === targetYields(bodyScan("neptune")).join(), "a moon yields what its planet yields");
+expect(targetYields(bodyScan("moon")).length === 0 && targetYields(bodyScan("earth")).length === 0, "Earth and its Moon yield nothing");
+expect(targetYields(sun).join() === "energy" && targetYields(collector).join() === "energy", "Sol and its collectors give energy");
+expect(targetYields(marsOre).join() === "ore", "a mine yields its own mineral");
+expect(destinationName(sun) === "Sol", "the star reads as Sol");
+expect(destinationName(collector) === "a collector at Sol", "a collector reads with the body it circles");
 expect(destinationName(earthStation) === "Earth's station", "the station reads as Earth's");
 expect(destinationName(marsOre) === "the ore mine at Mars", "a generator reads as that mineral's mine");
 expect(destinationName(phobosHydrogen) === "the hydrogen mine at Phobos", "a moon generator names the moon");

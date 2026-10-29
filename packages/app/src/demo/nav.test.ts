@@ -37,7 +37,7 @@ expect(bearing(fixAt(0, 0, 0, 1)) === 0, "heading up the map is a bearing of 0")
 expect(bearing(fixAt(0, 0, 1, 0)) === 90, "heading +X is a bearing of 90");
 expect(bearing(fixAt(0, 0, -1, 0)) === 270, "heading -X is a bearing of 270");
 
-expect(bodyLabel("earth") === "Earth" && bodyLabel("sun") === "Sun", "bodies read by their names");
+expect(bodyLabel("earth") === "Earth" && bodyLabel("sun") === "Sol", "bodies read by their names");
 
 if (failures.length > 0) {
 	console.error(failures.join("\n"));

@@ -634,7 +634,7 @@ function assistCandidates(layout: JourneyLayout, fromId: string, toId: string): 
 	const candidates: AssistCandidate[] = [];
 	if (fromId !== "sun" && toId !== "sun") {
 		const sun = layout.bodies.find((body) => body.id === "sun")!;
-		candidates.push({ name: "Sun", center: sun.center, flyby: flybyRadius("sun") });
+		candidates.push({ name: "Sol", center: sun.center, flyby: flybyRadius("sun") });
 	}
 	for (const spec of PLANETS) {
 		if (spec.name === fromId || spec.name === toId) {

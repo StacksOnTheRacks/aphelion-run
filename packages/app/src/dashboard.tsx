@@ -6,7 +6,7 @@ import { Inter } from "next/font/google";
 import type { PilotViewpoint, ScreenRect } from "./demo/cockpit";
 import type { EnvironmentDemo } from "./demo/environment";
 import { bearing, bodyLabel, localBody } from "./demo/nav";
-import { Housing } from "./hud";
+import { HudTile } from "./hud";
 import { MAP_SIZE, drawLocal, drawSystem, holdStock, type HoldStock } from "./nav-glass";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "600", "700"] });
@@ -279,27 +279,14 @@ function PilotCorner({
 	const outside = viewpoint === "exterior";
 	return (
 		<div className="flex items-end gap-3">
-			<button
-				type="button"
-				onClick={onExit}
-				aria-label="Exit to the chart"
-				title="Back to the chart"
-				className="pointer-events-auto relative isolate flex size-14 items-center justify-center text-[12px] font-bold tracking-[1px] text-[#ffd73d] uppercase hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none"
-			>
-				<Housing cut={{ tl: 10, tr: 10, bl: 10, br: 10 }} />
-				Exit
-			</button>
-			<button
-				type="button"
-				onClick={onToggleViewpoint}
-				aria-label={outside ? "Switch to interior view" : "Switch to exterior view"}
+			<HudTile compact label="Exit" ariaLabel="Exit to the chart" title="Back to the chart" onClick={onExit} />
+			<HudTile
+				label={outside ? "Interior" : "Exterior"}
+				icon="/hud/crosshair.svg"
+				ariaLabel={outside ? "Switch to interior view" : "Switch to exterior view"}
 				title={outside ? "Back in the cockpit" : "Outside the ship"}
-				className="pointer-events-auto relative isolate flex size-20 flex-col items-center justify-center gap-1.5 text-[13px] font-bold tracking-[1px] text-[#ffd73d] uppercase hover:brightness-110 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none min-[900px]:size-[88px] min-[900px]:gap-1.5 min-[900px]:text-[11px]"
-			>
-				<Housing cut={{ tl: 12, tr: 12, bl: 12, br: 12 }} />
-				<img src="/hud/crosshair.svg" alt="" width={20} height={20} />
-				{outside ? "Interior" : "Exterior"}
-			</button>
+				onClick={onToggleViewpoint}
+			/>
 		</div>
 	);
 }

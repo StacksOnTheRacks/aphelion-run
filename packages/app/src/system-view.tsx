@@ -21,10 +21,11 @@ import {
 	showsCard,
 	secondsLeft,
 	travelAction,
+	targetYields,
 	viewAction,
 	type ScanTarget,
 } from "./demo/scan";
-import { viewPlaque } from "./demo/view-plaque";
+import { pilotPlaque, viewPlaque } from "./demo/view-plaque";
 import { PilotCornerDock } from "./dashboard";
 import { holdStock, paintCenterPanel, type CargoLabel } from "./nav-glass";
 import { Hud, useHudAnchors } from "./hud";
@@ -39,7 +40,7 @@ const STEP_TITLE: Record<string, string> = {
 	Galaxy: "Back to the galaxy",
 	System: "Back to the system",
 	Planet: "Back to the planet",
-	Sun: "Back to the Sun",
+	Sol: "Back to Sol",
 };
 
 /** The hold the HUD shows. Fractions between those whole units do not change the screen. */
@@ -74,12 +75,14 @@ function sameBerth(left: ScanTarget | null, right: ScanTarget | null): boolean {
  * To counts down and then flies the ship there from wherever it sits. The cockpit has no names and
  * no picks.
  *
- * The HUD reads the chart on screen, the warehouse, and the ranger. The plaque names that chart:
- * Sol System, a wide planetary chart such as Earth System, or the body or craft once the camera is closer.
+ * The HUD reads the chart on screen, the warehouse, and the ranger. On a chart the plaque names the
+ * area in frame: Sol System, a wide planetary chart such as Earth System, Sol itself, or the body
+ * once the camera is closer. While piloting it names the body the ship is docked at, or Sol System
+ * when the ship is in open space.
  * Pilot enters the cockpit on a desktop or a large tablet. The ship list then leaves. The dash is geometry in the scene, and it turns with the head. Exit and the view switch sit at the lower right, in the chart step's corner, and the view switch is that step's size. Exit stays the smaller plate. The ship list stays hidden out there too. A phone stays on the
  * chart, and shrinking the window below that leaves the cockpit. Locate opens the planetary chart where the ship is docked.
  * Recall returns the ship to its home base. A countdown that is already headed there can be cancelled.
- * The lower right, on a chart, is one step back: System from a planet or the Sun, Planet from a moon
+ * The lower right, on a chart, is one step back: System from a planet or Sol, Planet from a moon
  * or from an inner orbit, and Galaxy from the system. While piloting that corner is Exit and the view switch. Escape takes the
  * first chart step, Home on the system chart and otherwise that lower-right step, and leaves the
  * cockpit for the chart. Dragging turns the pilot's head, or swings the exterior camera around the ship.
@@ -87,7 +90,6 @@ function sameBerth(left: ScanTarget | null, right: ScanTarget | null): boolean {
 export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLeave: () => void }) {
 	const { anchors, keepOut } = useHudAnchors();
 	const [view, setView] = useState<DemoView>(() => system.view());
-	const [riding, setRiding] = useState<ScanTarget | null>(null);
 	const [mode, setMode] = useState<Mode>("chart");
 	const [viewpoint, setViewpoint] = useState<PilotViewpoint>("interior");
 	const [found, setFound] = useState<ScanTarget[]>([]);
@@ -107,8 +109,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const trail = steps.filter((button) => button.target !== "ship");
 
 	const go = useCallback(
-		(next: DemoView, ride: ScanTarget | null = null) => {
-			setRiding(ride);
+		(next: DemoView) => {
 			setView(next);
 			system.go(next);
 		},
@@ -127,7 +128,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		[system]
 	);
 
-	useEffect(() => system.onSelect((target) => go(target.view, target.riding ?? null)), [system, go]);
+	useEffect(() => system.onSelect((target) => go(target.view)), [system, go]);
 	useEffect(() => system.onScan(pick), [system, pick]);
 	useEffect(() => system.onScanFound(setFound), [system]);
 	useEffect(() => system.onFraming(setClose), [system]);
@@ -231,6 +232,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 				label,
 				onSelect: () => pick(target),
 				current: target.id === focus?.id,
+				resources: targetYields(target),
 			};
 		});
 	}, [found, piloting, pick, view]);
@@ -338,7 +340,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	};
 	const recallState = recallPlan();
 
-	const location = viewPlaque(view, close, riding);
+	const location = piloting ? pilotPlaque(flight ? null : (docked?.host ?? null)) : viewPlaque(view, close);
 	const reserve =
 		scanned && (scanned.kind === "collector" || scanned.kind === "generator")
 			? `${Math.round(system.charge(scanned.id)).toLocaleString("en-US")} remaining`

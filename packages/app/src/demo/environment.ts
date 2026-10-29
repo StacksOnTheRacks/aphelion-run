@@ -400,10 +400,10 @@ function planetStops(name: PlanetName): ViewStop[] {
 /** Sun, then each planet outward. A planet with moons lists the planet first, then each moon. */
 export const PLACES: ViewPlace[] = [
 	{
-		label: "Sun",
+		label: "Sol",
 		subjects: [
 			{
-				label: "Sun",
+				label: "Sol",
 				stops: [
 					{ view: "sun-outer", label: "Outer orbit" },
 					{ view: "sun-inner", label: "Inner orbit" },
@@ -569,7 +569,7 @@ export type JourneyStop = { id: string; label: string; group?: string };
 
 /** The Sun, then each planet followed by its moons. */
 export const JOURNEY_STOPS: JourneyStop[] = [
-	{ id: "sun", label: "Sun" },
+	{ id: "sun", label: "Sol" },
 	...PLANETS.flatMap((spec): JourneyStop[] => [
 		{ id: spec.name, label: PLANET_LABEL[spec.name], group: PLANET_LABEL[spec.name] },
 		...spec.moons.map((moon) => ({ id: moon.name, label: title(moon.name), group: PLANET_LABEL[spec.name] })),
@@ -611,7 +611,7 @@ export function choosePick(craft: { id: string; host: string } | null, bodyId: s
 /** A body the pointer can pick, and the view a click on it opens: that body's outer orbit. */
 export type BodyTarget = { id: string; label: string; view: DemoView };
 
-const SUN_TARGET: BodyTarget = { id: "sun", label: "Sun", view: "sun-outer" };
+const SUN_TARGET: BodyTarget = { id: "sun", label: "Sol", view: "sun-outer" };
 
 function planetTarget(spec: PlanetSpec): BodyTarget {
 	return { id: spec.name, label: PLANET_LABEL[spec.name], view: planetOrbitView(spec.name, "outer") };
@@ -754,7 +754,7 @@ export function chartButtons(view: DemoView): ChartButton[] {
 		return [{ label: "System", target: "system" }];
 	}
 	if (view === "sun-inner") {
-		return [{ label: "Sun", target: "sun-outer" }];
+		return [{ label: "Sol", target: "sun-outer" }];
 	}
 	for (const spec of PLANETS) {
 		const outer = planetOrbitView(spec.name, "outer");
@@ -877,7 +877,7 @@ export function planJourney(layout: JourneyLayout, fromId: string, toId: string,
 	const sunBody = byId.get("sun");
 	const candidates = [
 		...(sunBody && fromId !== "sun" && toId !== "sun"
-			? [{ name: "Sun", center: sunBody.center, flyby: flybyRadius("sun") }]
+			? [{ name: "Sol", center: sunBody.center, flyby: flybyRadius("sun") }]
 			: []),
 		...PLANETS.filter((spec) => spec.name !== fromId && spec.name !== toId).flatMap((spec) => {
 			const body = byId.get(spec.name);

@@ -185,7 +185,7 @@ export function systemCard(id: string): SystemCard | null {
 		return {
 			id: SOL_ID,
 			label: "Sol",
-			text: "Pilots base on its planets and moons, take energy from the Sun, and sell the haul at Earth.",
+			text: "Pilots base on its planets and moons, take energy from Sol, and sell the haul at Earth.",
 			charted: true,
 		};
 	}

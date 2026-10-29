@@ -1,7 +1,7 @@
 import type { Faction } from "./bases";
 import { STARTING_DOCK_ID } from "./energy";
 import { JOURNEY_STOPS, PLANETS, bodyTarget, type DemoView } from "./environment";
-import type { Mineral } from "./generators";
+import { PLANET_YIELDS, type Mineral } from "./generators";
 
 /** Seconds between Travel To and the ship starting to move. */
 export const DEPARTURE_SECONDS = 5;
@@ -49,10 +49,10 @@ const OWNER_LABEL: Record<Faction | "empty", string> = {
 	empty: "Unoccupied",
 };
 
-/** A journey stop's name, with "the" before the Sun and the Moon so it reads in a sentence. */
+/** A journey stop's name, with "the" before the Moon so it reads in a sentence. */
 export function placeName(id: string): string {
 	const label = JOURNEY_STOPS.find((stop) => stop.id === id)?.label ?? id;
-	return label === "Sun" || label === "Moon" ? `the ${label}` : label;
+	return label === "Moon" ? `the ${label}` : label;
 }
 
 function stopLabel(id: string): string {
@@ -61,6 +61,26 @@ function stopLabel(id: string): string {
 
 function moonPlanet(id: string): string | null {
 	return PLANETS.find((spec) => spec.moons.some((moon) => moon.name === id))?.name ?? null;
+}
+
+/** What a ship can take at a target: Sol's collectors give energy, a mine gives its mineral, and a body lists every mine around it. */
+export type Yield = Mineral | "energy";
+
+export function targetYields(target: ScanTarget): Yield[] {
+	if (target.kind === "collector" || target.kind === "star") {
+		return ["energy"];
+	}
+	if (target.kind === "generator") {
+		return target.resource ? [target.resource] : [];
+	}
+	if (target.kind === "planet") {
+		return [...(PLANET_YIELDS[target.id] ?? [])];
+	}
+	if (target.kind === "moon" && target.id !== "moon") {
+		const planet = moonPlanet(target.id);
+		return planet ? [...(PLANET_YIELDS[planet] ?? [])] : [];
+	}
+	return [];
 }
 
 function bodyText(target: ScanTarget): string {
@@ -85,7 +105,7 @@ function craftText(target: ScanTarget): string {
 		return "The black market dock in Earth's inner orbit. Energy is sold here for Solscrip.";
 	}
 	if (target.kind === "collector") {
-		return "Holds the Sun's energy in its inner orbit. A ship docks here to siphon it.";
+		return "Holds Sol's energy in its inner orbit. A ship docks here to siphon it.";
 	}
 	if (target.kind === "generator") {
 		const mineral = target.resource ?? "minerals";

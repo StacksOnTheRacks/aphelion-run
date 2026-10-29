@@ -1,19 +1,13 @@
 import { scanScope, viewTrail, type DemoView } from "./environment";
-import { scanLabel, type ScanTarget } from "./scan";
+import { bodyLabel } from "./nav";
 
 /**
- * The location plaque names the chart, not the ship.
- * The whole system is Sol. A wide outer chart names that body as a system. Inside the close orbit,
- * on an inner orbit, or on a moon chart, it names the body in frame. Riding a craft names that craft.
+ * The chart plaque names the area in frame.
+ * The whole system is Sol System. A wide planet chart names that planet and what orbits it.
+ * Sol is the star, so its chart names Sol. A moon chart, a close framing, or an inner orbit
+ * names the body in frame.
  */
-export function viewPlaque(
-	view: DemoView,
-	close: boolean,
-	riding: ScanTarget | null
-): { title: string; detail: null } {
-	if (riding) {
-		return { title: scanLabel(riding), detail: null };
-	}
+export function viewPlaque(view: DemoView, close: boolean): { title: string; detail: null } {
 	if (view === "system") {
 		return { title: "Sol System", detail: null };
 	}
@@ -21,6 +15,17 @@ export function viewPlaque(
 	if (!focus) {
 		return { title: "Sol System", detail: null };
 	}
+	if (focus.id === "sun") {
+		return { title: focus.label, detail: null };
+	}
 	const wide = scanScope(view, close).craftHost === null;
 	return { title: wide ? `${focus.label} System` : focus.label, detail: null };
+}
+
+/**
+ * The pilot plaque names where the ship is. Docked, that is the body it sits on.
+ * Out in open space, that is the Sol system.
+ */
+export function pilotPlaque(host: string | null): { title: string; detail: null } {
+	return { title: host ? bodyLabel(host) : "Sol System", detail: null };
 }

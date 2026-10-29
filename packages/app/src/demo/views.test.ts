@@ -1,8 +1,7 @@
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 
 import { isDoubleTap } from "./cockpit";
-import { viewPlaque } from "./view-plaque";
-import type { ScanTarget } from "./scan";
+import { pilotPlaque, viewPlaque } from "./view-plaque";
 import { isPick } from "./pointer";
 import { WHEEL_ZOOM_FRACTION, wheelNotch } from "./zoom";
 import {
@@ -163,21 +162,19 @@ expect(bodyTarget("earth").view === "earth-outer", "an Earth station's planetary
 expect(bodyTarget("sun").view === "sun-outer", "a Sun collector's planetary chart is the Sun's outer orbit");
 expect(bodyTarget("triton").view === "neptune-triton-outer", "a moon dock's planetary chart is that moon's outer orbit");
 
-const corporateStation: ScanTarget = {
-	id: "earth-station-corporate-0",
-	host: "earth",
-	kind: "station",
-	owner: "corporate",
-};
-expect(viewPlaque("system", false, null).title === "Sol System", "the system chart is Sol System");
-expect(viewPlaque("system", false, null).detail === null, "the plaque has no ship status");
-expect(viewPlaque("neptune-outer", false, null).title === "Neptune System", "a wide planet chart names that system");
-expect(viewPlaque("sun-outer", false, null).title === "Sun System", "the Sun's wide chart names the Sun's system");
-expect(viewPlaque("earth-outer", false, null).title === "Earth System", "Earth's wide chart names Earth's system");
-expect(viewPlaque("neptune-outer", true, null).title === "Neptune", "a planet zoomed in names the planet");
-expect(viewPlaque("neptune-triton-outer", false, null).title === "Triton", "a moon chart names the moon");
-expect(viewPlaque("earth-inner", false, null).title === "Earth", "an inner orbit names the body");
-expect(viewPlaque("earth-outer", false, corporateStation).title === "Home base", "the ship's station reads as its home base");
+expect(viewPlaque("system", false).title === "Sol System", "the system chart is Sol System");
+expect(viewPlaque("system", false).detail === null, "the plaque has no ship status");
+expect(viewPlaque("neptune-outer", false).title === "Neptune System", "a wide planet chart names that system");
+expect(viewPlaque("sun-outer", false).title === "Sol", "Sol's chart names the star");
+expect(viewPlaque("sun-inner", false).title === "Sol", "Sol's inner orbit still names the star");
+expect(viewPlaque("earth-outer", false).title === "Earth System", "Earth's wide chart names Earth's system");
+expect(viewPlaque("neptune-outer", true).title === "Neptune", "a planet zoomed in names the planet");
+expect(viewPlaque("neptune-triton-outer", false).title === "Triton", "a moon chart names the moon");
+expect(viewPlaque("earth-inner", false).title === "Earth", "an inner orbit names the body");
+expect(pilotPlaque(null).title === "Sol System", "a ship in open space reads as Sol System");
+expect(pilotPlaque("titan").title === "Titan", "a ship docked at a moon reads as that moon");
+expect(pilotPlaque("sun").title === "Sol", "a ship docked at the star reads as Sol");
+expect(pilotPlaque("earth").title === "Earth", "a ship docked at a planet reads as that planet");
 expect(systemSteps[1]?.target === "galaxy", "Galaxy leaves Sol");
 expect(
 	chartButtons("earth-outer")[0]?.label === "System" && chartButtons("earth-outer")[0]?.target === "system",
@@ -194,8 +191,8 @@ expect(
 );
 expect(chartButtons("saturn-titan-inner")[0]?.target === "saturn-outer", "a moon's orbit steps back to the planet");
 expect(
-	chartButtons("sun-inner")[0]?.label === "Sun" && chartButtons("sun-inner")[0]?.target === "sun-outer",
-	"the Sun's orbit steps back to the Sun"
+	chartButtons("sun-inner")[0]?.label === "Sol" && chartButtons("sun-inner")[0]?.target === "sun-outer",
+	"Sol's orbit steps back to Sol"
 );
 expect(chartButtons("jupiter-outer").length === 1, "a planet view has one step");
 expect(wideChartStep("jupiter-outer")?.label === "Planet" && wideChartStep("jupiter-outer")?.target === "wide", "a close planet chart steps back out to the planet");
