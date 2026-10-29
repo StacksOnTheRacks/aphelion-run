@@ -27,7 +27,7 @@ import {
 } from "./demo/scan";
 import { pilotPlaque, viewPlaque } from "./demo/view-plaque";
 import { PilotCornerDock } from "./dashboard";
-import { holdStock, paintCenterPanel, type CargoLabel } from "./nav-glass";
+import { centerHit, centerPage, holdStock, paintCenterPanel, type CargoLabel } from "./nav-glass";
 import { Hud, useHudAnchors } from "./hud";
 import { PILOT_VIEWPORT } from "./pilot-viewport";
 import { ScanModal } from "./scan-card";
@@ -134,6 +134,9 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	useEffect(() => system.onFraming(setClose), [system]);
 	const flightRef = useRef(flight);
 	flightRef.current = flight;
+	const pageRef = useRef(centerPage(false));
+	const homeRef = useRef({ enabled: false, detail: "Home base" });
+	const recallRef = useRef(() => {});
 	useEffect(
 		() =>
 			system.onHold((next) => {
@@ -153,6 +156,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		() =>
 			system.onNav((fix) => {
 				const live = system.hold();
+				pageRef.current = centerPage(live.siphoning);
 				system.paintCenter((context, width, height) =>
 					paintCenterPanel(
 						context,
@@ -164,9 +168,20 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 							Ore: live.cargo.ore,
 							Nitrogen: live.cargo.nitrogen,
 							Carbon: live.cargo.carbon,
-						})
+						}),
+						{ page: pageRef.current, home: homeRef.current }
 					)
 				);
+			}),
+		[system]
+	);
+	useEffect(
+		() =>
+			system.onCenterTap((point) => {
+				const hit = centerHit(point.width, point.height, point.x, point.y, pageRef.current);
+				if (hit?.kind === "home") {
+					recallRef.current();
+				}
 			}),
 		[system]
 	);
@@ -226,7 +241,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		}
 		const focus = viewTrail(view).filter((body) => !body.id.endsWith("-stop")).at(-1);
 		return found.map((target) => {
-			const label = scanLabel(target);
+			const label = scanLabel(target, docked?.id === target.id);
 			return {
 				id: target.id,
 				label,
@@ -235,7 +250,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 				resources: targetYields(target),
 			};
 		});
-	}, [found, piloting, pick, view]);
+	}, [found, piloting, pick, view, docked?.id]);
 
 	const take = useCallback(
 		(button: ChartButton) => {
@@ -339,6 +354,8 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		setNow(Date.now());
 	};
 	const recallState = recallPlan();
+	homeRef.current = { enabled: recallState.plan.enabled, detail: recallState.plan.title };
+	recallRef.current = recall;
 
 	const location = piloting ? pilotPlaque(flight ? null : (docked?.host ?? null)) : viewPlaque(view, close);
 	const reserve =
@@ -391,7 +408,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 			/>
 			{scanned ? (
 				<ScanModal
-					card={scanCard(scanned)}
+					card={scanCard(scanned, docked?.id === scanned.id)}
 					note={reserve}
 					view={viewAction(scanned, view, close)}
 					travel={travelAction(scanned, ship, quote)}

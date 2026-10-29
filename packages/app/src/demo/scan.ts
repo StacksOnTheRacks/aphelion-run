@@ -85,7 +85,7 @@ export function targetYields(target: ScanTarget): Yield[] {
 
 function bodyText(target: ScanTarget): string {
 	if (target.kind === "star") {
-		return "Collectors circle in its inner orbit. Energy is siphoned there.";
+		return "Solar collectors circle in its inner orbit. Energy is siphoned there.";
 	}
 	if (target.id === "earth") {
 		return "Its station is the black market. Earth yields nothing a ship can mine.";
@@ -105,7 +105,7 @@ function craftText(target: ScanTarget): string {
 		return "The black market dock in Earth's inner orbit. Energy is sold here for Solscrip.";
 	}
 	if (target.kind === "collector") {
-		return "Holds Sol's energy in its inner orbit. A ship docks here to siphon it.";
+		return "A solar collector in Sol's inner orbit. A ship docks here to siphon its energy. It is occupied only while a ship is docked.";
 	}
 	if (target.kind === "generator") {
 		const mineral = target.resource ?? "minerals";
@@ -131,7 +131,7 @@ export function destinationName(target: ScanTarget): string {
 		case "home":
 			return `a home base at ${placeName(target.host)}`;
 		case "collector":
-			return `a collector at ${placeName(target.host)}`;
+			return `a solar collector at ${placeName(target.host)}`;
 		case "generator":
 			return `the ${target.resource ?? "mineral"} mine at ${placeName(target.host)}`;
 		default:
@@ -148,7 +148,7 @@ const MINERAL_LABEL: Record<Mineral, string> = {
 
 function craftLabel(target: ScanTarget): string {
 	if (target.kind === "collector") {
-		return "Collector";
+		return "Solar Collector";
 	}
 	if (target.kind === "generator") {
 		const mineral = target.resource ? MINERAL_LABEL[target.resource] : "Mineral";
@@ -157,7 +157,7 @@ function craftLabel(target: ScanTarget): string {
 	return `${stopLabel(target.host)} ${target.kind === "station" ? "station" : "home base"}`;
 }
 
-export function scanCard(target: ScanTarget): ScanCard {
+export function scanCard(target: ScanTarget, occupied = false): ScanCard {
 	if (target.id === STARTING_DOCK_ID) {
 		return {
 			id: target.id,
@@ -167,11 +167,12 @@ export function scanCard(target: ScanTarget): ScanCard {
 		};
 	}
 	const body = target.kind === "star" || target.kind === "planet" || target.kind === "moon";
+	const collector = target.kind === "collector";
 	return {
 		id: target.id,
-		kind: KIND_LABEL[target.kind],
+		kind: collector ? "Solar collector" : KIND_LABEL[target.kind],
 		label: body ? stopLabel(target.id) : craftLabel(target),
-		owner: target.owner ? OWNER_LABEL[target.owner] : undefined,
+		owner: collector ? (occupied ? "Occupied" : undefined) : target.owner ? OWNER_LABEL[target.owner] : undefined,
 		text: body ? bodyText(target) : craftText(target),
 	};
 }
@@ -180,9 +181,12 @@ export function scanCard(target: ScanTarget): ScanCard {
  * A found object's name on the scene. Several craft of one kind are often in view together, so a craft
  * reads by who holds it.
  */
-export function scanLabel(target: ScanTarget): string {
+export function scanLabel(target: ScanTarget, occupied = false): string {
 	if (target.id === STARTING_DOCK_ID) {
 		return "Home base";
+	}
+	if (target.kind === "collector") {
+		return occupied ? "Occupied solar collector" : "Solar Collector";
 	}
 	const card = scanCard(target);
 	if (target.id !== target.host && card.owner) {

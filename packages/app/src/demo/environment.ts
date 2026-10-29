@@ -468,7 +468,7 @@ const SATELLITE_COUNT = 150;
 const SATELLITE_BAND_INNER = 19;
 const SATELLITE_BAND_OUTER = 30;
 /** Angular speed at radius r is SATELLITE_ORBIT_RATE / r^1.5, so inner satellites lap outer ones. */
-const SATELLITE_ORBIT_RATE = 2.35;
+const SATELLITE_ORBIT_RATE = 1.175;
 
 type SatelliteOwner = "corporate" | "marauder" | "empty";
 
@@ -1042,6 +1042,8 @@ export type EnvironmentDemo = LabelSource & {
 	onNav: (listener: (fix: NavFix) => void) => () => void;
 	/** Redraws the center screen. Does nothing when that glass is missing. */
 	paintCenter: (paint: CenterPaint) => void;
+	/** A tap on the center glass, in that picture's pixels from its top left. */
+	onCenterTap: (listener: (point: { x: number; y: number; width: number; height: number }) => void) => () => void;
 };
 
 /** Energy and mined cargo aboard, and the mine the ship is drawing from while docked. */
@@ -1544,7 +1546,7 @@ export async function createEnvironment(
 		}
 
 		for (const base of spinningBases) {
-			base.angle += deltaSeconds * BASE_SPIN * ORBIT_PACE;
+			base.angle += deltaSeconds * (base.trail ? MINE_SPIN : BASE_SPIN) * ORBIT_PACE;
 			base.mesh.position.set(Math.cos(base.angle) * base.radius, 0, Math.sin(base.angle) * base.radius);
 			base.mesh.rotation.y = -base.angle;
 		}
@@ -2424,6 +2426,7 @@ export async function createEnvironment(
 			};
 		},
 		paintCenter: cockpit.paintCenter,
+		onCenterTap: cockpit.onCenterTap,
 	};
 }
 
@@ -2446,7 +2449,7 @@ function courseLabel(target: ScanTarget): string {
 		case "home":
 			return `${named(target.host)} home`;
 		case "collector":
-			return "Collector";
+			return "Solar collector";
 		case "generator":
 			return `${MINERAL_NAME[target.resource ?? ""] ?? "Mineral"} mine`;
 		default:
@@ -3282,6 +3285,8 @@ function buildSaturnRing(scene: Scene, saturn: Mesh, planetRadius: number): Mesh
 
 /** Radians per second before the game-speed scale. Slow enough that a base reads as orbiting, not as a moon. */
 const BASE_SPIN = 0.06;
+/** Mines orbit at half the pace of homes and stations. */
+const MINE_SPIN = BASE_SPIN / 2;
 
 /** Angular speed of the craft the inner camera rides with. Matches the satellites or bases already in the scene. */
 function rideSpeed(focus: Focus): number {
@@ -3302,7 +3307,7 @@ type SpinningBase = {
 function dockOf(base: SpinningBase): Dock {
 	return {
 		position: () => base.mesh.position.clone(),
-		rate: BASE_SPIN * ORBIT_PACE,
+		rate: (base.trail ? MINE_SPIN : BASE_SPIN) * ORBIT_PACE,
 		...(base.trail ? { mount: "trail" as const } : {}),
 	};
 }
@@ -3511,7 +3516,7 @@ function addGeneratorSlots(
 			kind: "generator",
 			resource: slot.resource,
 			reach: Math.max(slot.size.width, slot.size.depth) / 2,
-			rate: BASE_SPIN * ORBIT_PACE,
+			rate: MINE_SPIN * ORBIT_PACE,
 			angle: () => craft.angle,
 			position: (out) => out.copyFrom(mesh.getAbsolutePosition()),
 		});
@@ -3526,8 +3531,12 @@ type SatelliteOrbit = {
 	phase: number;
 };
 
+/** One solar color. The old faction tints are not part of the collectors. */
+const SOLAR_COLLECTOR = { color: new Color3(0.95, 0.78, 0.35), glow: new Color3(0.55, 0.38, 0.08) };
+
 /**
- * Every satellite of one owner is a thin instance of a single box, so the swarm costs three draw calls.
+ * The collectors are one swarm in three draw batches. A collector is occupied only while a ship is
+ * docked there, which the label reads from the berth, not from these batches.
  * Their matrices are rewritten each frame as they orbit.
  */
 function buildSatelliteSwarm(
@@ -3540,8 +3549,8 @@ function buildSatelliteSwarm(
 		const look = SATELLITE_LOOK[owner];
 		const count = Math.round(SATELLITE_COUNT * look.share);
 		const material = new StandardMaterial(`satellites-${owner}`, scene);
-		material.diffuseColor = look.color;
-		material.emissiveColor = look.glow;
+		material.diffuseColor = SOLAR_COLLECTOR.color;
+		material.emissiveColor = SOLAR_COLLECTOR.glow;
 		material.specularColor = new Color3(0.2, 0.2, 0.2);
 
 		const mesh = MeshBuilder.CreateBox(`satellites-${owner}`, MINE_SIZE, scene);

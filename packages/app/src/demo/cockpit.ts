@@ -335,11 +335,11 @@ export type CenterPaint = (context: CanvasRenderingContext2D, width: number, hei
  * The shared screen material stays as it is; only this mesh gets the new glass.
  * A missing screen leaves the painter as a no-op.
  */
-function centerGlass(scene: Scene): (paint: CenterPaint) => void {
+function centerGlass(scene: Scene): { paint: (paint: CenterPaint) => void; width: number; height: number } {
 	const mesh = scene.getMeshByName("Cockpit MFD Center");
 	const aspect = mesh ? screenAspect(mesh) : null;
 	if (!mesh || aspect === null) {
-		return () => {};
+		return { paint: () => {}, width: 0, height: 0 };
 	}
 	const width = 1024;
 	const height = Math.max(1, Math.round(width / aspect));
@@ -362,9 +362,14 @@ function centerGlass(scene: Scene): (paint: CenterPaint) => void {
 	glass.backFaceCulling = false;
 	glass.zOffset = 2;
 	mesh.material = glass;
-	return (paint) => {
-		paint(context, width, height);
-		texture.update(false);
+	mesh.isPickable = true;
+	return {
+		width,
+		height,
+		paint: (paint) => {
+			paint(context, width, height);
+			texture.update(false);
+		},
 	};
 }
 
@@ -385,6 +390,8 @@ export type Cockpit = {
 	setAftRects: (rects: { port: ScreenRect; starboard: ScreenRect }) => void;
 	/** Redraws the center screen. Does nothing when that glass is missing. */
 	paintCenter: (paint: CenterPaint) => void;
+	/** A tap on the center glass, in that picture's pixels from its top left. Interior view only. */
+	onCenterTap: (listener: (point: { x: number; y: number; width: number; height: number }) => void) => () => void;
 };
 
 export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, glow: GlowLayer): Cockpit {
@@ -443,7 +450,9 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 	feed(scene, aftStarboard, "Cockpit MFD Starboard");
 	labelFeed(scene, glow, "Cockpit MFD Port", "AFT · PORT", "right");
 	labelFeed(scene, glow, "Cockpit MFD Starboard", "AFT · STBD", "left");
-	const paintCenter = centerGlass(scene);
+	const centerTaps = new Set<(point: { x: number; y: number; width: number; height: number }) => void>();
+	const center = centerGlass(scene);
+	const paintCenter = center.paint;
 	const rigs = [windscreen, aftPort, aftStarboard];
 	const mirrored = new Set<Camera>(rigs.filter((each) => each.mirrored).flatMap((each) => each.cameras));
 	// The glow costs a full pass per camera, and the aft views are too small to need it.
@@ -464,9 +473,24 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 	let aimOrbit: ExteriorOrbit = { ...EXTERIOR_HOME };
 	let orbit: ExteriorOrbit = { ...EXTERIOR_HOME };
 	let drag: { id: number; x: number; y: number; originX: number; originY: number } | null = null;
+	let glassPress: { id: number; x: number; y: number } | null = null;
 	let lastTap: Tap | null = null;
 	const fingers = new Set<number>();
 	const canvas = engine.getRenderingCanvas();
+	/** A point on the center glass, in its picture's pixels. Null when the tap misses the glass. */
+	const glassPoint = (clientX: number, clientY: number): { x: number; y: number; width: number; height: number } | null => {
+		const box = canvas?.getBoundingClientRect();
+		if (!active || viewpoint !== "interior" || center.width < 1 || !box || box.width < 1 || box.height < 1) {
+			return null;
+		}
+		const x = ((clientX - box.left) * engine.getRenderWidth()) / box.width;
+		const y = ((clientY - box.top) * engine.getRenderHeight()) / box.height;
+		const dash = windscreen.cameras[windscreen.cameras.length - 1];
+		const hit = scene.pick(x, y, (mesh) => mesh.name === "Cockpit MFD Center", false, dash);
+		const uv = hit?.hit ? hit.getTextureCoordinates() : null;
+		// The glass's v already runs from the top of the picture downward.
+		return uv ? { x: uv.x * center.width, y: uv.y * center.height, width: center.width, height: center.height } : null;
+	};
 	const radiansPerPixel = () => {
 		const height = Math.max(1, canvas?.clientHeight ?? 1);
 		return viewpoint === "exterior" ? EXTERIOR_SWING / height : WINDSCREEN_FOV / height;
@@ -475,10 +499,15 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 		fingers.add(event.pointerId);
 		if (!active || event.button !== 0 || fingers.size > 1) {
 			drag = null;
+			glassPress = null;
 			lastTap = null;
 			return;
 		}
-		if (drag) {
+		if (drag || glassPress) {
+			return;
+		}
+		if (glassPoint(event.clientX, event.clientY)) {
+			glassPress = { id: event.pointerId, x: event.clientX, y: event.clientY };
 			return;
 		}
 		drag = {
@@ -490,7 +519,7 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 		};
 	};
 	const onMove = (event: PointerEvent) => {
-		if (!drag || event.pointerId !== drag.id) {
+		if (glassPress?.id === event.pointerId || !drag || event.pointerId !== drag.id) {
 			return;
 		}
 		const scale = radiansPerPixel();
@@ -506,6 +535,24 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 	};
 	const onUp = (event: PointerEvent) => {
 		fingers.delete(event.pointerId);
+		if (glassPress?.id === event.pointerId) {
+			const start = glassPress;
+			glassPress = null;
+			lastTap = null;
+			if (!active || fingers.size > 0) {
+				return;
+			}
+			if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > DOUBLE_TAP_SLOP) {
+				return;
+			}
+			const point = glassPoint(event.clientX, event.clientY);
+			if (point) {
+				for (const listener of centerTaps) {
+					listener(point);
+				}
+			}
+			return;
+		}
 		if (!drag || event.pointerId !== drag.id) {
 			return;
 		}
@@ -535,6 +582,10 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 	};
 	const onCancel = (event: PointerEvent) => {
 		fingers.delete(event.pointerId);
+		if (glassPress?.id === event.pointerId) {
+			glassPress = null;
+			lastTap = null;
+		}
 		if (drag && event.pointerId === drag.id) {
 			drag = null;
 			lastTap = null;
@@ -675,6 +726,7 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 		setActive(on) {
 			active = on;
 			drag = null;
+			glassPress = null;
 			if (on) {
 				aim = { ...rest };
 				aimOrbit = { ...EXTERIOR_HOME };
@@ -689,6 +741,7 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 			}
 			viewpoint = next;
 			drag = null;
+			glassPress = null;
 			lastTap = null;
 			if (active) {
 				update(true);
@@ -699,5 +752,11 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 			// The side screens carry the aft pictures. A rectangle on the page no longer places them.
 		},
 		paintCenter,
+		onCenterTap(listener) {
+			centerTaps.add(listener);
+			return () => {
+				centerTaps.delete(listener);
+			};
+		},
 	};
 }

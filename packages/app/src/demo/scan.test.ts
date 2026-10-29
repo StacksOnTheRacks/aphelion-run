@@ -39,7 +39,8 @@ expect(scanCard(titan).text.includes("Saturn"), "a moon's card names its planet"
 expect(scanCard(marsHome).label === "Mars home base", "a home base is named for its body");
 expect(scanCard(marsHome).owner === "Corporate", "a craft's card shows who holds it");
 expect(scanCard(earthStation).label === "Earth station", "Earth's station is named for Earth");
-expect(scanCard(collector).owner === "Unoccupied", "an empty collector reads as unoccupied");
+expect(scanCard(collector).owner === undefined && scanCard(collector).label === "Solar Collector", "a solar collector has no faction");
+expect(scanCard(collector, true).owner === "Occupied", "a collector is occupied only while a ship is docked");
 expect(scanCard(marsOre).kind === "Generator" && scanCard(marsOre).label === "Ore mine", "a generator is named for its mineral");
 expect(scanCard(marsOre).text.includes("ore") && scanCard(marsOre).text.includes("Mars"), "a generator's card says where it mines");
 expect(scanCard(phobosHydrogen).label === "Hydrogen mine", "a moon's generator is named for its mineral");
@@ -51,7 +52,7 @@ expect(targetYields(bodyScan("moon")).length === 0 && targetYields(bodyScan("ear
 expect(targetYields(sun).join() === "energy" && targetYields(collector).join() === "energy", "Sol and its collectors give energy");
 expect(targetYields(marsOre).join() === "ore", "a mine yields its own mineral");
 expect(destinationName(sun) === "Sol", "the star reads as Sol");
-expect(destinationName(collector) === "a collector at Sol", "a collector reads with the body it circles");
+expect(destinationName(collector) === "a solar collector at Sol", "a collector reads with the body it circles");
 expect(destinationName(earthStation) === "Earth's station", "the station reads as Earth's");
 expect(destinationName(marsOre) === "the ore mine at Mars", "a generator reads as that mineral's mine");
 expect(destinationName(phobosHydrogen) === "the hydrogen mine at Phobos", "a moon generator names the moon");
@@ -110,7 +111,8 @@ expect(
 );
 
 expect(scanLabel(mars) === "Mars", "a scanned body is named on the scene");
-expect(scanLabel(collector) === "Unoccupied collector", "a scanned collector reads by who holds it");
+expect(scanLabel(collector) === "Solar Collector", "a collector with no ship docked is just a solar collector");
+expect(scanLabel(collector, true) === "Occupied solar collector", "a collector with a ship docked reads as occupied");
 expect(scanLabel(marsHome) === "Corporate home base", "a scanned home base reads by who holds it");
 expect(scanLabel(earthStation) === "Marauder station", "a scanned station reads by who holds it");
 expect(scanLabel(marsOre) === "Ore mine", "a scanned generator reads by its mineral");
