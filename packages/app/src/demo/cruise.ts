@@ -1,5 +1,5 @@
 /**
- * A coasting cruise. The engine burns to change velocity and is dark while the speed holds.
+ * A coasting cruise. The engine burns to change velocity and is not thrusting while the speed holds.
  * The climb hands the ship off already moving; the floor of the slider sits just above that.
  * A faster coast costs more because the burns that reach it and leave it are larger.
  */

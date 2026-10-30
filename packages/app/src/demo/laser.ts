@@ -1,7 +1,10 @@
 import { Constants } from "@babylonjs/core/Engines/constants";
+import { Light } from "@babylonjs/core/Lights/light";
+import { PointLight } from "@babylonjs/core/Lights/pointLight";
 import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
@@ -10,7 +13,7 @@ import type { Scene } from "@babylonjs/core/scene";
 /**
  * The mining laser, in the same light as the engine plumes: white at the muzzle, gold through the
  * body, ember where it meets the target. A wide cone washes forward and a thin beam pulses down
- * its middle. Sparks streak out of the muzzle, and a flare sits at each end.
+ * its middle. The moving marks run back from the target into the muzzle, and a flare sits at each end.
  *
  * The meshes are on the world layer, not the hull's. The windscreen does not draw the ship, and the
  * beam is the thing ahead of the glass. It is drawn in view space, so a mirrored camera still sees it.
@@ -19,8 +22,25 @@ import type { Scene } from "@babylonjs/core/scene";
 /**
  * Radii in world units. The cone is narrow at the muzzle and wider where it lands.
  * `wash` scales the cone, the sparks, and the end flares against the beam. It defaults to 1.
+ * `gain` multiplies the whole beam. It defaults to 1.
  */
-export type BeamShape = { core: number; coneNear: number; coneFar: number; flare: number; wash?: number };
+export type BeamShape = {
+	core: number;
+	coneNear: number;
+	coneFar: number;
+	flare: number;
+	wash?: number;
+	gain?: number;
+};
+
+/**
+ * A mine's shot lights a small patch of the body it hits. The lamp sits just off the surface
+ * and dies within `IMPACT_RANGE`, so the night side shows only where the beam lands.
+ */
+export const IMPACT_RANGE = 0.2;
+export const IMPACT_LIFT = 0.04;
+export const IMPACT_INTENSITY = 2.2;
+export const IMPACT_COLOR = Color3.FromHexString("#F0C48A");
 
 /** How often a mine's own laser repeats, and how long each burst lasts. */
 export const MINE_FIRE_PERIOD = 5;
@@ -66,6 +86,10 @@ export function mineBeamSpan(
 export type SiphonBeam = {
 	/** Ease toward on or off. `from` is the muzzle and `to` is the face it hits, both in world space. */
 	set: (on: boolean, from: Vector3, to: Vector3, deltaSeconds: number) => void;
+	/** Eased 0–1 while the beam is drawn. Zero once it reads as off. */
+	readonly strength: number;
+	/** World point the beam last hit. */
+	readonly hit: Vector3;
 };
 
 /** Below this the laser reads as off, the same threshold as a plume. */
@@ -141,7 +165,7 @@ const CONE_FRAGMENT = `
 	}
 `;
 
-/** The beam itself: a tight core, packets of light running forward, and a pulse that reads as one beat. */
+/** The beam itself: a tight core, packets of light running back toward the muzzle, and a pulse that reads as one beat. */
 const BEAM_FRAGMENT = `
 	precision highp float;
 	uniform vec3 hot;
@@ -155,7 +179,7 @@ const BEAM_FRAGMENT = `
 		float facing = abs(dot(normalize(vViewNormal), normalize(-vViewPosition)));
 		float body = pow(facing, 2.6);
 		float along = smoothstep(0.0, 0.02, vT);
-		float packet = pow(0.5 + 0.5 * sin(vT * 34.0 - time * 18.0), 6.0);
+		float packet = pow(0.5 + 0.5 * sin(vT * 34.0 + time * 18.0), 6.0);
 		float pulse = 0.42 + 0.58 * pow(0.5 + 0.5 * sin(time * 7.5), 1.5);
 		vec3 color = mix(hot, warm, smoothstep(0.72, 1.0, vT));
 		float light = body * along * (0.72 + 0.28 * packet) * pulse;
@@ -163,7 +187,7 @@ const BEAM_FRAGMENT = `
 	}
 `;
 
-/** Sparks leaving the muzzle and dying as they reach the target. Narrower than an engine's spray. */
+/** Sparks leaving the target and dying as they reach the muzzle. Narrower than an engine's spray. */
 const SPARK_FRAGMENT = `
 	precision highp float;
 	uniform vec3 hot;
@@ -185,13 +209,14 @@ const SPARK_FRAGMENT = `
 			float live = step(0.55, hash(id + 2.0));
 			float speed = 1.1 + 1.6 * hash(id + 4.0);
 			float head = fract(time * speed + hash(id + 1.7));
-			float behind = head - vT;
+			float along = 1.0 - head;
+			float behind = vT - along;
 			float trail = step(0.0, behind) * exp(-behind * 22.0);
 			float across = fract(around * lanes) - 0.5;
 			float thin = exp(-across * across * 220.0);
 			light += live * trail * thin * (1.0 - head);
 		}
-		float ends = smoothstep(0.0, 0.05, vT) * (1.0 - smoothstep(0.82, 1.0, vT));
+		float ends = smoothstep(0.0, 0.04, vT) * (1.0 - smoothstep(0.96, 1.0, vT));
 		vec3 color = mix(hot, cool, smoothstep(0.15, 1.0, vT));
 		gl_FragColor = vec4(color * light * ends * intensity * 1.8, 1.0);
 	}
@@ -237,6 +262,7 @@ const FLARE_FRAGMENT = `
 
 export function createSiphonBeam(scene: Scene, shape: BeamShape, name = "siphon"): SiphonBeam {
 	const wash = shape.wash ?? 1;
+	const gain = shape.gain ?? 1;
 	const root = new TransformNode(`${name}-beam`, scene);
 	root.rotationQuaternion = new Quaternion();
 
@@ -331,11 +357,17 @@ export function createSiphonBeam(scene: Scene, shape: BeamShape, name = "siphon"
 	const direction = new Vector3();
 	const lastFrom = new Vector3();
 	const lastTo = new Vector3();
+	const hit = new Vector3();
 	let hasSpan = false;
 	let intensity = 0;
+	let strength = 0;
 	let lit: boolean | null = null;
 
 	return {
+		get strength() {
+			return strength;
+		},
+		hit,
 		set(on, from, to, deltaSeconds) {
 			direction.copyFrom(to).subtractInPlace(from);
 			if (direction.lengthSquared() > 1e-8) {
@@ -349,6 +381,10 @@ export function createSiphonBeam(scene: Scene, shape: BeamShape, name = "siphon"
 			const follow = deltaSeconds <= 0 ? 1 : 1 - Math.exp(-deltaSeconds * 10);
 			intensity += ((live ? 1 : 0) - intensity) * follow;
 			const shown = intensity > LIT && reach > 1e-4;
+			strength = shown ? intensity : 0;
+			if (hasSpan) {
+				hit.copyFrom(lastTo);
+			}
 			if (shown !== lit) {
 				lit = shown;
 				for (const mesh of meshes) {
@@ -368,12 +404,68 @@ export function createSiphonBeam(scene: Scene, shape: BeamShape, name = "siphon"
 			beamMesh.scaling.set(width, width, 1);
 			for (const material of materials) {
 				material.setFloat("time", time);
-				material.setFloat("intensity", material === beamMaterial ? intensity : intensity * wash);
+				material.setFloat("intensity", (material === beamMaterial ? intensity : intensity * wash) * gain);
 			}
 			muzzleFlare.material.setFloat("size", shape.flare * (0.85 + 0.35 * intensity));
 			impactFlare.material.setFloat("size", shape.flare * 1.35 * (0.85 + 0.35 * intensity));
 		},
 	};
+}
+
+const lift = new Vector3();
+
+/**
+ * A short-range lamp for the body a mine is cutting. It only lights `body`, and it stays off
+ * until `placeImpactLight` turns it up.
+ */
+export function createImpactLight(scene: Scene, body: AbstractMesh, name: string): PointLight {
+	const light = new PointLight(`${name}-impact`, Vector3.Zero(), scene);
+	light.diffuse = IMPACT_COLOR.clone();
+	light.specular = Color3.Black();
+	light.intensity = 0;
+	light.range = IMPACT_RANGE;
+	light.falloffType = Light.FALLOFF_STANDARD;
+	light.includedOnlyMeshes = [body];
+	light.setEnabled(false);
+	return light;
+}
+
+/**
+ * Park the lamp just off `hit`, outside `bodyCenter`, and match it to the beam's eased strength.
+ * A dark face picks up the pool. A face already in sunlight only gains a warm spot.
+ */
+export function placeImpactLight(light: PointLight, hit: Vector3, bodyCenter: Vector3, strength: number): void {
+	if (strength <= LIT || !liftOffSurface(hit, bodyCenter, light.position)) {
+		light.intensity = 0;
+		light.setEnabled(false);
+		return;
+	}
+	light.intensity = IMPACT_INTENSITY * strength;
+	light.setEnabled(true);
+}
+
+/**
+ * The same point `placeImpactLight` uses, shifted into the rendered scene.
+ * `origin` is the floating-origin offset. False when `hit` sits on `bodyCenter`.
+ */
+export function impactPosition(hit: Vector3, bodyCenter: Vector3, origin: Vector3, out: Vector3): boolean {
+	if (!liftOffSurface(hit, bodyCenter, out)) {
+		return false;
+	}
+	out.subtractInPlace(origin);
+	return true;
+}
+
+/** Writes a point `IMPACT_LIFT` outside the body. The scratch `lift` is the outward direction. */
+function liftOffSurface(hit: Vector3, bodyCenter: Vector3, out: Vector3): boolean {
+	lift.copyFrom(hit).subtractInPlace(bodyCenter);
+	const height = lift.length();
+	if (height < 1e-4) {
+		return false;
+	}
+	lift.scaleInPlace(IMPACT_LIFT / height);
+	out.copyFrom(hit).addInPlace(lift);
+	return true;
 }
 
 /** Points the cone's +Z along `direction`. The left-handed look turns that axis the other way. */

@@ -136,8 +136,9 @@ export type ShipModel = {
 	readonly position: Vector3;
 	place: (position: Vector3, heading: Vector3, deltaSeconds: number) => void;
 	/**
-	 * Impulse is inner orbit: side thrusters only. Photon is the burn between bodies.
-	 * `burn` is how hard that engine is working, from 0 to 1.
+	 * Impulse is inner orbit, the climb, and a dock: side thrusters only, main engine dark.
+	 * Photon is the cruise and the drop after it. `burn` is how hard that engine is thrusting, from 0 to 1.
+	 * A photon leg at 0 is the engine idling: the fan keeps turning and the bell stays lit, with no exhaust.
 	 */
 	drive: (leg: Drive, burn: number) => void;
 	/** Radius of the beacon in CSS pixels while it is drawn. Null while the hull is showing. */
@@ -390,7 +391,8 @@ async function attachCockpit(scene: Scene, facing: TransformNode): Promise<void>
 
 /**
  * The ranger from the Blender file. The glTF is geometry and materials only: scene lights are
- * dropped, and the engine glow materials stay dark until a plume, which is drawn here, is firing.
+ * dropped. The bell stays dark until the cruise engine is lit. A burn draws the plume here; a coast
+ * leaves the fan turning and the bell glowing, with no exhaust.
  * The nose is turned onto +Z so `lookAt` points it along the heading.
  */
 export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> {
@@ -400,6 +402,7 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 	for (const light of container.lights) {
 		light.dispose();
 	}
+	const engineGlow: { material: PBRMaterial; color: Color3; intensity: number }[] = [];
 	for (const material of container.materials) {
 		if (!(material instanceof PBRMaterial)) {
 			continue;
@@ -423,6 +426,14 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 		}
 		if (material.name !== "Ranger Engine Glow" && material.name !== "Ranger Intake Glow") {
 			continue;
+		}
+		// The bell's authored glow. A coast lights it again. The intake glow stays dark.
+		if (material.name === "Ranger Engine Glow") {
+			engineGlow.push({
+				material,
+				color: material.emissiveColor.clone(),
+				intensity: material.emissiveIntensity > 0 ? material.emissiveIntensity : 1,
+			});
 		}
 		material.emissiveColor.set(0, 0, 0);
 		material.emissiveIntensity = 0;
@@ -505,6 +516,8 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 
 	const engine = scene.getEngine();
 	const shown: Plumes = { main: 0, port: 0, starboard: 0, dorsal: 0, ventral: 0 };
+	/** 1 while the cruise engine is lit, including a coast. Eases off when that leg ends. */
+	let spool = 0;
 	const previous = new Vector3();
 	let hasPrevious = false;
 	let leg: Drive = "impulse";
@@ -536,9 +549,16 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 			}
 			plume.set(shown[pair.field], hullOn);
 		}
-		// The rear fan turns with the main engine and stops as that burn eases off. Side thrusters do not drive it.
-		if (deltaSeconds > 0 && shown.main > 0) {
-			fan.hub.rotate(fan.axis, shown.main * FAN_TURNS * Math.PI * 2 * deltaSeconds, Space.LOCAL);
+		// The cruise keeps the fan turning and the bell lit after the plume is gone. A coast is that
+		// state: photon drive, no burn, so `shown.main` eases to 0 and the exhaust goes with it.
+		const lit = leg === "photon" ? 1 : 0;
+		spool += (lit - spool) * follow;
+		if (deltaSeconds > 0 && spool > 1e-3) {
+			fan.hub.rotate(fan.axis, spool * FAN_TURNS * Math.PI * 2 * deltaSeconds, Space.LOCAL);
+		}
+		for (const glow of engineGlow) {
+			glow.material.emissiveColor.copyFrom(glow.color);
+			glow.material.emissiveIntensity = glow.intensity * spool;
 		}
 	};
 

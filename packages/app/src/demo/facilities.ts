@@ -53,7 +53,10 @@ export type Facility = {
 	readonly boreInset: number;
 	/** World position of the access port that faces `ship`. Null when the ship is not alongside. */
 	portPoint: (ship: Vector3, out: Vector3) => Vector3 | null;
-	/** `bore` opens the face toward the body. `ship` opens the access port on that side. */
+	/**
+	 * `bore` opens the face toward the body. `ship` opens the access port on that side.
+	 * Null shuts both side ports.
+	 */
 	update: (bore: boolean, ship: Vector3 | null, deltaSeconds: number) => void;
 };
 

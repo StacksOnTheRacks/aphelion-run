@@ -19,7 +19,7 @@ const straight: CruiseCorner[] = [];
 	expect(fast.speed > slow.speed, "the fast coast is the quicker one");
 	expect(fast.cost > slow.cost, "a faster coast costs more");
 	expect(fast.spans.length === 2 && slow.spans.length === 2, "a straight course burns to speed up and to slow down");
-	expect(slow.thrusting(0.01) && !slow.thrusting(slow.seconds / 2), "the engine is lit at the start and dark in the middle");
+	expect(slow.thrusting(0.01) && !slow.thrusting(slow.seconds / 2), "the engine is thrusting at the start and not in the middle");
 	expect(fast.thrusting(fast.seconds - 0.01), "the engine is lit again to arrive");
 }
 
@@ -28,7 +28,7 @@ const straight: CruiseCorner[] = [];
 	const long = planCruise(2000, straight, 8, orbit, shipMax);
 	expect(short.speed === long.speed, "the same setting holds on a longer course");
 	expect(short.cost === long.cost, "a longer coast does not add energy");
-	expect(long.coastSeconds > short.coastSeconds, "the extra distance is flown with the engine dark");
+	expect(long.coastSeconds > short.coastSeconds, "the extra distance is flown without thrust");
 	expect(short.cost === cruiseCost(short.thrustSeconds), "the quote is the burn rate times the thrust");
 }
 

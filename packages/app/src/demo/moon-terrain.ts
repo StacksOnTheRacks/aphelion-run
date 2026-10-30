@@ -1,5 +1,6 @@
 import { Constants } from "@babylonjs/core/Engines/constants";
 import type { Color3 } from "@babylonjs/core/Maths/math.color";
+import { IMPACT_COLOR, IMPACT_RANGE } from "./laser";
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import { ProceduralTexture } from "@babylonjs/core/Materials/Textures/Procedurals/proceduralTexture";
@@ -92,6 +93,14 @@ export function createMoonTerrain(scene: Scene, sunlight: Sunlight) {
 					"sunCenter",
 					"mapTexel",
 					"shadows",
+					"beamPoint0",
+					"beamPoint1",
+					"beamPoint2",
+					"beamStrength0",
+					"beamStrength1",
+					"beamStrength2",
+					"beamRange",
+					"beamColor",
 				],
 				samplers: ["surfaceMap", "normalMap"],
 			},
@@ -107,6 +116,15 @@ export function createMoonTerrain(scene: Scene, sunlight: Sunlight) {
 		// A lumpy moon's own bulges decide where night falls, so the sphere-based cutoff stays loose.
 		material.setFloat("horizonSoftness", Math.min(...axes) < 0.9 ? 0.4 : 0.15);
 		material.setFloat("shadows", (terrain.relief ?? 1) > 0 ? 1 : 0);
+		const beamPoints = [new Vector3(), new Vector3(), new Vector3()];
+		material.setVector3("beamPoint0", beamPoints[0]);
+		material.setVector3("beamPoint1", beamPoints[1]);
+		material.setVector3("beamPoint2", beamPoints[2]);
+		material.setFloat("beamStrength0", 0);
+		material.setFloat("beamStrength1", 0);
+		material.setFloat("beamStrength2", 0);
+		material.setFloat("beamRange", IMPACT_RANGE);
+		material.setColor3("beamColor", IMPACT_COLOR);
 		mesh.material = material;
 
 		const inverseWorld = new Matrix();
@@ -294,6 +312,14 @@ const MOON_FRAGMENT = `
 	uniform vec3 sunCenter;
 	uniform float mapTexel;
 	uniform float shadows;
+	uniform vec3 beamPoint0;
+	uniform vec3 beamPoint1;
+	uniform vec3 beamPoint2;
+	uniform float beamStrength0;
+	uniform float beamStrength1;
+	uniform float beamStrength2;
+	uniform float beamRange;
+	uniform vec3 beamColor;
 	varying vec2 vUV;
 	varying vec3 vPositionW;
 	varying vec3 vRoundW;
@@ -331,6 +357,18 @@ const MOON_FRAGMENT = `
 		return lit;
 	}
 
+	// A mine's beam, already lifted off the surface. Strength is zero while that mine is dark.
+	vec3 beamPool(vec3 point, float strength, vec3 normal) {
+		if (strength <= 0.001) {
+			return vec3(0.0);
+		}
+		vec3 offset = point - vPositionW;
+		float dist = length(offset);
+		float atten = max(0.0, 1.0 - dist / max(beamRange, 0.0001));
+		float facing = max(dot(normal, offset / max(dist, 0.0001)), 0.0);
+		return beamColor * strength * facing * atten;
+	}
+
 	void main() {
 		vec3 albedo = texture2D(surfaceMap, vUV).rgb;
 		vec4 normalHeight = texture2D(normalMap, vUV);
@@ -350,7 +388,10 @@ const MOON_FRAGMENT = `
 		if (shadows > 0.5 && incidence * horizon > 0.0) {
 			light *= mix(1.0, shadow(normalize(vDirection), normalHeight.a), smoothstep(0.08, 0.4, sunUp));
 		}
-		gl_FragColor = vec4(albedo * (sunColor * sunlight * light * horizon + nightSide), 1.0);
+		vec3 mined = beamPool(beamPoint0, beamStrength0, normal)
+			+ beamPool(beamPoint1, beamStrength1, normal)
+			+ beamPool(beamPoint2, beamStrength2, normal);
+		gl_FragColor = vec4(albedo * (sunColor * sunlight * light * horizon + nightSide) + albedo * mined, 1.0);
 	}
 `;
 

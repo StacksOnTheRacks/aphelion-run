@@ -25,8 +25,8 @@ import { MAX_YAW, headingAt, pointAt, type Route, type RouteKind } from "./route
 
 /**
  * A ship flying a planned trip. Leaving a dock, it eases out to a hover, then climbs to the origin's
- * outer orbit. It burns up to the chosen coast speed, crosses with the engine dark, and burns again
- * to arrive, then drops to a hover and eases in to dock. A pad is met from above. A mine or collector
+ * outer orbit. It burns up to the chosen coast speed, crosses with the engine lit and no exhaust, and burns again
+ * to arrive. The drop keeps that idle until the ship eases in to dock. A pad is met from above. A mine or collector
  * is met from behind. Once coupled, the hull shifts so the muzzle sits on the access port's axis
  * and the laser fires straight into the opening. The climb and the drop
  * each take the same time on every body; speed eases so the handoff into the cruise does not jump.
@@ -706,8 +706,12 @@ export function createJourney(
 			return;
 		}
 		const cruiseT = flight.elapsed - flight.climbSeconds;
-		const powered = flight.phase === "transit" && flight.profile.thrusting(cruiseT);
-		ship.drive(powered ? "photon" : "impulse", powered ? flight.profile.burn(cruiseT) : 0);
+		// Lit from the first burn through the drop. A coast, and the drop after the last burn, are
+		// photon at zero: the fan and the bell stay on, and the exhaust does not. The climb is before
+		// that, and a dock is after.
+		const onCruise = flight.phase === "transit" && cruiseT >= 0 && cruiseT < flight.profile.seconds;
+		const lit = onCruise || flight.phase === "approach";
+		ship.drive(lit ? "photon" : "impulse", onCruise ? flight.profile.burn(cruiseT) : 0);
 		ship.place(position, heading, deltaSeconds);
 	};
 

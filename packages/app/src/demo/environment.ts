@@ -64,7 +64,20 @@ import { CLIMB_PACE, createJourney, cruiseProfile, hoverDeparture, tripSeconds, 
 import { CHART_LAYER, createCockpit, type CenterPaint, type PilotViewpoint, type ScreenRect } from "./cockpit";
 import { loadFacilities, type Facility, type FacilityKit } from "./facilities";
 import { HULL_LENGTH, loadRanger } from "./ranger";
-import { MINE_FIRE_PERIOD, createSiphonBeam, mineBeamSpan, mineFiring, type BeamShape, type SiphonBeam } from "./laser";
+import {
+	IMPACT_COLOR,
+	IMPACT_INTENSITY,
+	IMPACT_RANGE,
+	MINE_FIRE_PERIOD,
+	createImpactLight,
+	createSiphonBeam,
+	impactPosition,
+	mineBeamSpan,
+	mineFiring,
+	placeImpactLight,
+	type BeamShape,
+	type SiphonBeam,
+} from "./laser";
 import { awayFrom, type LabelFrame, type LabelSource } from "./labels";
 import type { NavBody, NavFix, NavPoint } from "./nav";
 import type { TravelClock } from "../travel-clock";
@@ -1769,14 +1782,15 @@ export async function createEnvironment(
 	const bodyAt = new Vector3();
 	let mineClock = 0;
 	/**
-	 * The laser is on only while a docked ship is drawing. The coupled pose puts the muzzle on the
-	 * access port's axis, so the shot from the muzzle to that port runs straight into the opening.
+	 * The laser and the side access port are on only while a docked ship is drawing. The coupled
+	 * pose puts the muzzle on the access port's axis, so the shot from the muzzle to that port
+	 * runs straight into the opening. When drawing stops, the port shuts.
 	 */
 	const aimBeam = (deltaSeconds: number) => {
 		const pose = journey.ship();
 		const berthed = journey.docked() !== null && dockId ? crafts.find((item) => item.id === dockId) : undefined;
 		const drawing = siphoning ? berthed : undefined;
-		swarm.collector.update(false, berthed?.kind === "collector" ? ranger.position : null, deltaSeconds);
+		swarm.collector.update(false, drawing?.kind === "collector" ? ranger.position : null, deltaSeconds);
 		if (!drawing || !pose) {
 			ranger.beam(false, null, null, 0, deltaSeconds);
 			return;
@@ -1801,25 +1815,59 @@ export async function createEnvironment(
 	const aimMines = (deltaSeconds: number) => {
 		mineClock += deltaSeconds;
 		const berthed = journey.docked() !== null ? dockId : null;
+		touchedImpacts.length = 0;
 		for (const laser of mineLasers) {
 			laser.mesh.computeWorldMatrix(true);
 			laser.mesh.getWorldMatrix().getTranslationToRef(mineAt);
 			const parent = laser.mesh.parent;
 			if (!(parent instanceof TransformNode)) {
 				laser.beam.set(false, mineAt, mineAt, deltaSeconds);
+				paintImpact(laser, mineAt);
 				continue;
 			}
 			parent.getWorldMatrix().getTranslationToRef(bodyAt);
 			const drawing = siphoning && berthed === laser.id;
 			const firing = !drawing && mineFiring(mineClock, laser.phase);
-			laser.facility.update(firing, berthed === laser.id ? ranger.position : null, deltaSeconds);
+			laser.facility.update(firing, drawing ? ranger.position : null, deltaSeconds);
 			const span = mineBeamSpan(mineAt, bodyAt, laser.bodyRadius, laser.facility.boreInset);
 			if (!span) {
 				laser.beam.set(false, mineAt, mineAt, deltaSeconds);
+				paintImpact(laser, bodyAt);
 				continue;
 			}
 			laser.beam.set(firing, span.from, span.to, deltaSeconds);
+			paintImpact(laser, bodyAt);
 		}
+		for (const material of touchedImpacts) {
+			const slot = shaderImpacts.get(material);
+			if (!slot) {
+				continue;
+			}
+			for (let index = slot.used; index < 3; index++) {
+				material.setFloat(`beamStrength${index}`, 0);
+			}
+		}
+	};
+
+	const paintImpact = (laser: MineLaser, bodyCenter: Vector3) => {
+		if (laser.impact) {
+			placeImpactLight(laser.impact, laser.beam.hit, bodyCenter, laser.beam.strength);
+			return;
+		}
+		const material = laser.body.material;
+		if (!(material instanceof ShaderMaterial)) {
+			return;
+		}
+		const slot = noteImpact(material);
+		const point = slot.points[slot.used];
+		if (laser.beam.strength <= 0 || !point || slot.used >= slot.points.length) {
+			return;
+		}
+		if (!impactPosition(laser.beam.hit, bodyCenter, scene.floatingOriginOffset, point)) {
+			return;
+		}
+		material.setFloat(`beamStrength${slot.used}`, IMPACT_INTENSITY * laser.beam.strength);
+		slot.used += 1;
 	};
 
 	let publishTrip = () => {};
@@ -3514,6 +3562,7 @@ function buildHabitats(
 			body.spec.name,
 			inner,
 			body.spec.diameter / 2,
+			body.mesh,
 			mineLasers
 		);
 		for (const moon of body.moons) {
@@ -3542,6 +3591,7 @@ function buildHabitats(
 				moon.mesh.name,
 				moonInner,
 				moon.radius,
+				moon.mesh,
 				mineLasers
 			);
 		}
@@ -3613,18 +3663,46 @@ type MineLaser = {
 	beam: SiphonBeam;
 	mesh: TransformNode;
 	facility: Facility;
+	/** The body this mine cuts. The impact light and the moon shader both read it. */
+	body: Mesh;
 	bodyRadius: number;
 	phase: number;
+	/** Set for a standard-material body. A shader moon takes the beam through its own material. */
+	impact: PointLight | null;
 };
 
+type ShaderImpact = { points: Vector3[]; used: number };
+const shaderImpacts = new WeakMap<ShaderMaterial, ShaderImpact>();
+const touchedImpacts: ShaderMaterial[] = [];
+
+function noteImpact(material: ShaderMaterial): ShaderImpact {
+	let slot = shaderImpacts.get(material);
+	if (!slot) {
+		const points = [new Vector3(), new Vector3(), new Vector3()];
+		material.setVector3("beamPoint0", points[0]);
+		material.setVector3("beamPoint1", points[1]);
+		material.setVector3("beamPoint2", points[2]);
+		material.setFloat("beamRange", IMPACT_RANGE);
+		material.setColor3("beamColor", IMPACT_COLOR);
+		slot = { points, used: 0 };
+		shaderImpacts.set(material, slot);
+	}
+	if (!touchedImpacts.includes(material)) {
+		slot.used = 0;
+		touchedImpacts.push(material);
+	}
+	return slot;
+}
+
 /**
- * A thin beam into the body. Thickness stays a fraction of the mine's face, so a long reach
- * does not swell into a flood. The sheath and the end flares hug that beam and draw fainter.
+ * A thin beam into the body, drawn twice as bright as the ship's siphon. Thickness stays a
+ * fraction of the mine's face, so a long reach does not swell into a flood. The sheath and the
+ * end flares hug that beam and draw fainter.
  */
 function mineLaserShape(reach: number): BeamShape {
 	const face = MINE_SIZE.width;
 	const core = Math.min(face * 0.16, Math.max(face * 0.08, reach * 0.0015));
-	return { core, coneNear: core * 1.35, coneFar: core * 2.1, flare: core * 2.2, wash: 0.32 };
+	return { core, coneNear: core * 1.35, coneFar: core * 2.1, flare: core * 2.2, wash: 0.32, gain: 2 };
 }
 
 function addGeneratorSlots(
@@ -3637,8 +3715,12 @@ function addGeneratorSlots(
 	host: string,
 	view: DemoView,
 	bodyRadius: number,
+	surface: Mesh,
 	mineLasers: MineLaser[]
 ): void {
+	if (surface.material instanceof StandardMaterial && surface.material.maxSimultaneousLights < 4) {
+		surface.material.maxSimultaneousLights = 4;
+	}
 	for (const slot of slots) {
 		const facility = facilities.placeMine(parent, `${host}-generator-${slot.resource}`, slot.resource);
 		const mesh = facility.root;
@@ -3650,8 +3732,10 @@ function addGeneratorSlots(
 			beam: createSiphonBeam(scene, mineLaserShape(Math.max(reach, MINE_SIZE.width)), mesh.name),
 			mesh,
 			facility,
+			body: surface,
 			bodyRadius,
 			phase: (slot.angle / (Math.PI * 2)) * MINE_FIRE_PERIOD,
+			impact: surface.material instanceof StandardMaterial ? createImpactLight(scene, surface, mesh.name) : null,
 		});
 		const craft: SpinningBase = { mesh, angle: slot.angle, radius: slot.radius, trail: true };
 		spinning.push(craft);
