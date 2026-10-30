@@ -55,18 +55,19 @@ import {
 	STARTING_ENERGY,
 	burnEnergy,
 	cargoFrom,
-	cruiseCost,
 	depositAtHome,
 	drawFromDock,
 	type Cargo,
 	type SolSession,
 } from "./energy";
-import { CLIMB_PACE, createJourney, hoverDeparture, journeySeconds, type Dock, type Harbor, type JourneyPlan } from "./journey";
+import { CLIMB_PACE, createJourney, cruiseProfile, hoverDeparture, tripSeconds, type Dock, type Harbor, type JourneyPlan } from "./journey";
 import { CHART_LAYER, createCockpit, type CenterPaint, type PilotViewpoint, type ScreenRect } from "./cockpit";
+import { loadFacilities, type Facility, type FacilityKit } from "./facilities";
 import { HULL_LENGTH, loadRanger } from "./ranger";
 import { MINE_FIRE_PERIOD, createSiphonBeam, mineBeamSpan, mineFiring, type BeamShape, type SiphonBeam } from "./laser";
 import { awayFrom, type LabelFrame, type LabelSource } from "./labels";
 import type { NavBody, NavFix, NavPoint } from "./nav";
+import type { TravelClock } from "../travel-clock";
 import type { ScanKind, ScanTarget } from "./scan";
 import { createMoonTerrain } from "./moon-terrain";
 import { trackPicks } from "./pointer";
@@ -848,9 +849,9 @@ export type Departure = { at: Vector3; turn: number; speed?: number };
 
 /**
  * From one body to another, in three parts. The ship climbs slowly from the base nearest the
- * destination out to a tangent on the origin's outer orbit, burns fast along that tangent to a
- * tangent on the destination's outer orbit, and then drops inward to dock there. When `depart` is
- * set the ship is already docked at the origin, and the climb starts from there instead.
+ * destination out to a tangent on the origin's outer orbit, coasts to a tangent on the destination's
+ * outer orbit, and then drops inward to dock there. When `depart` is set the ship is already docked
+ * at the origin, and the climb starts from there instead.
  *
  * The climb leaves with the orbit. It eases outward while it keeps turning the way the satellite
  * circles, and meets the burn along the outer orbit. Heading back against the orbit is taken only
@@ -859,9 +860,9 @@ export type Departure = { at: Vector3; turn: number; speed?: number };
  * The burn always arrives the same way, so the ship is already facing the dock it will settle onto.
  *
  * Every planet that is not an end of the trip may give an assist, and so may the Sun. An assist passes
- * just outside that body's outer orbit, and the ship is still burning, so the pass is not a place it
- * can be attacked. A course that would cross the Sun takes that pass, so the burn wraps the Sun in
- * the planets' plane instead of cutting through it.
+ * just outside that body's outer orbit with the engine dark: gravity bends the path, so the pass is
+ * not a burn. A course that would cross the Sun takes that pass, so the route wraps the Sun in the
+ * planets' plane instead of cutting through it.
  */
 export function planJourney(layout: JourneyLayout, fromId: string, toId: string, depart?: Departure): JourneyPlan {
 	const byId = new Map(layout.bodies.map((body) => [body.id, body]));
@@ -979,7 +980,7 @@ export type EnvironmentDemo = LabelSource & {
 	 * While a burn is underway that body is the dock the ship left. The chart learns the view through `onSelect`.
 	 */
 	home: () => void;
-	/** Calls back when the chart is sent to a body, by View or by Home. `riding` is the craft the camera follows. */
+	/** Calls back when the chart is sent to a body. `riding` is the craft the camera follows. */
 	onSelect: (listener: (target: BodyTarget & { riding?: ScanTarget | null }) => void) => () => void;
 	/**
 	 * While on, the scene names what is near the camera through `onScanFound`, and a click names what it
@@ -996,7 +997,7 @@ export type EnvironmentDemo = LabelSource & {
 	 * named ids change. Empty while not scanning or while the camera is still flying to a view.
 	 */
 	onScanFound: (listener: (found: ScanTarget[]) => void) => () => void;
-	/** Takes the camera to a scanned body's outer orbit, or rides alongside a scanned craft. On a wide planet or Sun chart, View of that body comes in to the close framing instead. */
+	/** Takes the camera to a scanned body's outer orbit, or rides alongside a scanned craft. On a wide planet or Sun chart, that body comes in to the close framing instead. */
 	visit: (target: ScanTarget) => void;
 	/** Pulls a close planet chart back out to the wide shot, where the moons are named. */
 	widen: () => void;
@@ -1009,9 +1010,22 @@ export type EnvironmentDemo = LabelSource & {
 	 * Flies the ship from where it sits, its dock or its orbit at Earth, to the target's body and docks
 	 * it there: with the target itself when that is a craft. `onDone` runs once it has docked.
 	 */
-	travel: (target: ScanTarget, onDone: () => void, cost?: number) => void;
-	/** Energy the photon cruise to `target` would spend from where the ship is berthed. */
-	quote: (target: ScanTarget) => number;
+	travel: (target: ScanTarget, onDone: () => void, cost?: number, speed?: number) => void;
+	/**
+	 * Energy the burns to `target` would spend from where the ship is berthed.
+	 * `speed` is the coast. Absent, or below the handoff, selects the slow end.
+	 */
+	quote: (target: ScanTarget, speed?: number) => number;
+	/**
+	 * Burn cost and travel time for a coast to `target`. Time runs from undock to soft dock.
+	 * Null when the target is in the ship's orbit.
+	 */
+	preview: (target: ScanTarget, speed?: number) => { cost: number; seconds: number } | null;
+	/**
+	 * The coast speeds that fit on the trip to `target`, and the energy a cheapest return to home
+	 * or a Sol collector still needs after arrival. Null when the target is in the ship's orbit.
+	 */
+	offer: (target: ScanTarget) => { minSpeed: number; maxSpeed: number; reserve: number } | null;
 	/** The craft the ship is berthed at. During a burn this is still the dock it left. */
 	berth: () => ScanTarget | null;
 	/** Earth's corporate station, the ship's home. Recall returns here. */
@@ -1030,7 +1044,7 @@ export type EnvironmentDemo = LabelSource & {
 	/** Puts the camera in the ranger's cockpit, with both aft views, or back on the chart where it left. */
 	setPiloting: (on: boolean) => void;
 	/**
-	 * Interior looks out the windscreen. Exterior orbits the hull and leaves the course undrawn.
+	 * Interior looks out the windscreen. Exterior orbits the hull and draws the course chevrons.
 	 * Takes effect while piloting; the chart stays put until then.
 	 */
 	setViewpoint: (viewpoint: PilotViewpoint) => void;
@@ -1040,6 +1054,11 @@ export type EnvironmentDemo = LabelSource & {
 	zoom: (direction: ZoomDirection) => void;
 	/** Calls back every frame while piloting with where the ship is in the system. Returns a stop function. */
 	onNav: (listener: (fix: NavFix) => void) => () => void;
+	/**
+	 * Seconds left on the trip underway, including while the chart is up. Null when the ship is down.
+	 * The callback runs at once, and again as the clock changes.
+	 */
+	onTravel: (listener: (clock: TravelClock | null) => void) => () => void;
 	/** Redraws the center screen. Does nothing when that glass is missing. */
 	paintCenter: (paint: CenterPaint) => void;
 	/** A tap on the center glass, in that picture's pixels from its top left. */
@@ -1160,7 +1179,8 @@ export async function createEnvironment(
 
 	const crafts: Craft[] = [];
 	const mineLasers: MineLaser[] = [];
-	const spinningBases = buildHabitats(scene, bodies, crafts, mineLasers);
+	const facilities = await loadFacilities(scene);
+	const spinningBases = buildHabitats(scene, bodies, crafts, mineLasers, facilities);
 	const ranger = await loadRanger(scene, camera);
 	const canopyGlass = scene.getMeshByName("cockpit-canopy-glass");
 	if (canopyGlass instanceof Mesh) {
@@ -1182,7 +1202,7 @@ export async function createEnvironment(
 	};
 	crafts.push(player);
 
-	const swarm = buildSatelliteSwarm(scene, crafts);
+	const swarm = buildSatelliteSwarm(crafts, facilities);
 
 	/** The Sun's satellites, or the bases and stations circling a planet or moon. */
 	const harborOf = (id: string): Harbor => {
@@ -1551,7 +1571,7 @@ export async function createEnvironment(
 			base.mesh.rotation.y = -base.angle;
 		}
 
-		swarm.update(deltaSeconds * ORBIT_PACE);
+		swarm.update(deltaSeconds * ORBIT_PACE, collectorDock);
 		sun.update(deltaSeconds);
 	};
 
@@ -1748,12 +1768,29 @@ export async function createEnvironment(
 	const mineAt = new Vector3();
 	const bodyAt = new Vector3();
 	let mineClock = 0;
-	/** The laser is on only while a docked ship is drawing. It meets the near face of that block. */
+	/**
+	 * The laser is on only while a docked ship is drawing. The coupled pose puts the muzzle on the
+	 * access port's axis, so the shot from the muzzle to that port runs straight into the opening.
+	 */
 	const aimBeam = (deltaSeconds: number) => {
 		const pose = journey.ship();
-		const craft = siphoning && dockId ? crafts.find((item) => item.id === dockId) : undefined;
-		if (!craft || !pose) {
+		const berthed = journey.docked() !== null && dockId ? crafts.find((item) => item.id === dockId) : undefined;
+		const drawing = siphoning ? berthed : undefined;
+		swarm.collector.update(false, berthed?.kind === "collector" ? ranger.position : null, deltaSeconds);
+		if (!drawing || !pose) {
 			ranger.beam(false, null, null, 0, deltaSeconds);
+			return;
+		}
+		const craft = drawing;
+		if (craft.kind === "collector") {
+			swarm.collector.portPoint(ranger.position, beamCenter);
+			ranger.beam(true, beamCenter, pose.heading, 0, deltaSeconds);
+			return;
+		}
+		const laser = mineLasers.find((item) => item.id === craft.id);
+		if (laser) {
+			laser.facility.portPoint(ranger.position, beamCenter);
+			ranger.beam(true, beamCenter, pose.heading, 0, deltaSeconds);
 			return;
 		}
 		craft.position(beamCenter);
@@ -1763,7 +1800,7 @@ export async function createEnvironment(
 	/** Mines drill the body they circle. Drawing from one holds its beam until the ship lets go. */
 	const aimMines = (deltaSeconds: number) => {
 		mineClock += deltaSeconds;
-		const quiet = siphoning ? dockId : null;
+		const berthed = journey.docked() !== null ? dockId : null;
 		for (const laser of mineLasers) {
 			laser.mesh.computeWorldMatrix(true);
 			laser.mesh.getWorldMatrix().getTranslationToRef(mineAt);
@@ -1773,20 +1810,30 @@ export async function createEnvironment(
 				continue;
 			}
 			parent.getWorldMatrix().getTranslationToRef(bodyAt);
-			const span = mineBeamSpan(mineAt, bodyAt, laser.bodyRadius, MINE_SIZE.width / 2);
+			const drawing = siphoning && berthed === laser.id;
+			const firing = !drawing && mineFiring(mineClock, laser.phase);
+			laser.facility.update(firing, berthed === laser.id ? ranger.position : null, deltaSeconds);
+			const span = mineBeamSpan(mineAt, bodyAt, laser.bodyRadius, laser.facility.boreInset);
 			if (!span) {
 				laser.beam.set(false, mineAt, mineAt, deltaSeconds);
 				continue;
 			}
-			laser.beam.set(quiet !== laser.id && mineFiring(mineClock, laser.phase), span.from, span.to, deltaSeconds);
+			laser.beam.set(firing, span.from, span.to, deltaSeconds);
 		}
 	};
 
+	let publishTrip = () => {};
+	let sampleFuel = () => {};
+	let collectorDock: string | null = null;
 	scene.onBeforeRenderObservable.add(() => {
 		const deltaSeconds = engine.getDeltaTime() / 1000;
+		const dockedCraft = journey.docked() !== null && dockId ? crafts.find((item) => item.id === dockId) : undefined;
+		collectorDock = dockedCraft?.kind === "collector" ? dockedCraft.id : null;
 		const before = sunAngle(focusPosition(SHOTS[active].focus));
 		placeBodies(deltaSeconds);
 		journey.update(deltaSeconds, focusPosition);
+		publishTrip();
+		sampleFuel();
 		settleDock(deltaSeconds);
 		aimBeam(deltaSeconds);
 		aimMines(deltaSeconds);
@@ -2120,6 +2167,44 @@ export async function createEnvironment(
 	const navCourse: { from: readonly Vector3[] | null; points: NavPoint[] } = { from: null, points: [] };
 	/** Where the current burn is headed, in the short form the center screen shows. */
 	let courseName: string | null = null;
+	const travelListeners = new Set<(clock: TravelClock | null) => void>();
+	let trip: TravelClock | null = null;
+	let tripKey = "";
+	/** Energy spent across the trip, one sample per slice of the clock. Cleared once the ship is down. */
+	const FUEL_BINS = 40;
+	let fuelBins: number[] = [];
+	sampleFuel = () => {
+		const course = journey.course();
+		if (!course) {
+			fuelBins = [];
+			return;
+		}
+		const spent = Math.max(0, departEnergy - energy);
+		const index = Math.min(FUEL_BINS - 1, Math.floor(course.progress * (FUEL_BINS - 1)));
+		if (fuelBins.length === 0) {
+			fuelBins = [spent];
+		}
+		const last = fuelBins[fuelBins.length - 1] ?? spent;
+		while (fuelBins.length <= index) {
+			fuelBins.push(last);
+		}
+		fuelBins[index] = spent;
+	};
+	publishTrip = () => {
+		const course = journey.course();
+		const next: TravelClock | null = course
+			? { remaining: course.remaining, total: course.total, name: courseName ?? "En route" }
+			: null;
+		const key = next ? `${Math.floor(next.remaining * 10)}|${next.total}|${next.name}` : "";
+		if (key === tripKey) {
+			return;
+		}
+		tripKey = key;
+		trip = next;
+		for (const listener of travelListeners) {
+			listener(trip);
+		}
+	};
 	scene.onAfterRenderObservable.add(() => {
 		if (!piloting || navListeners.size === 0) {
 			return;
@@ -2145,7 +2230,16 @@ export async function createEnvironment(
 			ship: { x: ranger.position.x, z: ranger.position.z, hx: heading.x, hz: heading.z },
 			bodies: navBodies,
 			edge: navEdge,
-			course: course ? { points: navCourse.points, progress: course.progress, name: courseName ?? "En route" } : null,
+			course: course
+				? {
+						points: navCourse.points,
+						progress: course.progress,
+						name: courseName ?? "En route",
+						remaining: course.remaining,
+						total: course.total,
+						spent: fuelBins.slice(),
+					}
+				: null,
 		};
 		for (const listener of navListeners) {
 			listener(fix);
@@ -2202,6 +2296,21 @@ export async function createEnvironment(
 		return null;
 	};
 
+	/** The cruise the ship would actually fly: the departure, the chosen coast, and the dock it arrives at. */
+	const coursePlan = (target: ScanTarget, speed: number): JourneyPlan => {
+		const docked = journey.docked();
+		const fromId = docked?.id ?? journey.host() ?? "earth";
+		const plan = departurePlan(target);
+		const dock = target.id === target.host ? undefined : dockById.get(target.id);
+		return {
+			...plan,
+			coastSpeed: speed,
+			arrive: { ...plan.arrive, dock },
+			departDock: docked?.dock,
+			departBody: docked?.dock ? fromId : undefined,
+		};
+	};
+
 	/** The cruise from the ship's current dock to `target`, using where the bodies are right now. */
 	const departurePlan = (target: ScanTarget): JourneyPlan => {
 		placeBodies(0);
@@ -2215,6 +2324,23 @@ export async function createEnvironment(
 		const rate = docked?.rate ?? 0.35 * ORBIT_PACE;
 		const depart = { at: origin, turn, speed: Math.abs(rate) * radius };
 		return planJourney(journeyLayout(), fromId, target.host, depart);
+	};
+
+	/** Energy for the cheapest slow coast from `target` back to home or to Sol. */
+	const returnReserve = (target: ScanTarget): number => {
+		const home = craftById.get(STARTING_DOCK_ID);
+		const homeHost = home && home.kind !== "ship" ? home.host : "earth";
+		if (target.kind === "collector" || target.id === STARTING_DOCK_ID || target.host === homeHost || target.host === "sun") {
+			return 0;
+		}
+		const between = (fromId: string, toId: string) => {
+			if (fromId === toId) {
+				return 0;
+			}
+			placeBodies(0);
+			return cruiseProfile(planJourney(journeyLayout(), fromId, toId), 0).cost;
+		};
+		return Math.min(between(target.host, homeHost), between(target.host, "sun"));
 	};
 
 	return {
@@ -2289,14 +2415,30 @@ export async function createEnvironment(
 				framingListeners.delete(listener);
 			};
 		},
-		quote(target) {
+		quote(target, speed = 0) {
 			const fromId = journey.docked()?.id ?? journey.host() ?? "earth";
 			if (fromId === target.host) {
 				return 0;
 			}
-			return cruiseCost(journeySeconds(departurePlan(target).cruise.total));
+			return cruiseProfile(departurePlan(target), speed).cost;
 		},
-		travel(target, onDone, cost) {
+		preview(target, speed = 0) {
+			const fromId = journey.docked()?.id ?? journey.host() ?? "earth";
+			if (fromId === target.host) {
+				return null;
+			}
+			const plan = coursePlan(target, speed);
+			return { cost: cruiseProfile(plan, speed).cost, seconds: tripSeconds(plan, speed) };
+		},
+		offer(target) {
+			const fromId = journey.docked()?.id ?? journey.host() ?? "earth";
+			if (fromId === target.host) {
+				return null;
+			}
+			const profile = cruiseProfile(departurePlan(target), 0);
+			return { minSpeed: profile.minSpeed, maxSpeed: profile.maxSpeed, reserve: returnReserve(target) };
+		},
+		travel(target, onDone, cost, speed = 0) {
 			courseName = courseLabel(target);
 			const docked = journey.docked();
 			const fromId = docked?.id ?? journey.host() ?? "earth";
@@ -2306,13 +2448,14 @@ export async function createEnvironment(
 			siphonId = null;
 			dockId = null;
 			const dock = target.id === target.host ? undefined : dockById.get(target.id);
-			quoted = cost ?? cruiseCost(journeySeconds(plan.cruise.total));
+			quoted = cost ?? cruiseProfile(plan, speed).cost;
 			departEnergy = energy;
 			burning = true;
 			publishHold();
 			journey.start(
 				{
 					...plan,
+					coastSpeed: speed,
 					arrive: { ...plan.arrive, dock },
 					departDock: docked?.dock,
 					departBody: docked?.dock ? fromId : undefined,
@@ -2423,6 +2566,13 @@ export async function createEnvironment(
 			navListeners.add(listener);
 			return () => {
 				navListeners.delete(listener);
+			};
+		},
+		onTravel(listener) {
+			travelListeners.add(listener);
+			listener(trip);
+			return () => {
+				travelListeners.delete(listener);
 			};
 		},
 		paintCenter: cockpit.paintCenter,
@@ -3297,7 +3447,7 @@ function rideSpeed(focus: Focus): number {
 }
 
 type SpinningBase = {
-	mesh: Mesh;
+	mesh: TransformNode;
 	angle: number;
 	radius: number;
 	/** A mine. The ship trails it on the orbit instead of sitting above a pad. */
@@ -3332,10 +3482,15 @@ type Craft = {
 	position: (out: Vector3) => Vector3;
 };
 
-function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[], mineLasers: MineLaser[]): SpinningBase[] {
+function buildHabitats(
+	scene: Scene,
+	bodies: PlanetBody[],
+	crafts: Craft[],
+	mineLasers: MineLaser[],
+	facilities: FacilityKit
+): SpinningBase[] {
 	const materials = factionMaterials(scene);
 	const homeMaterial = playerHomeMaterial(scene);
-	const generatorMaterial = grayBoxMaterial(scene);
 	const spinning: SpinningBase[] = [];
 	for (const body of bodies) {
 		const input = {
@@ -3353,7 +3508,7 @@ function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[], mine
 			scene,
 			body.anchor,
 			planetGeneratorSlots(body.spec.name, input),
-			generatorMaterial,
+			facilities,
 			spinning,
 			crafts,
 			body.spec.name,
@@ -3381,7 +3536,7 @@ function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[], mine
 				scene,
 				moon.baseAnchor,
 				moonGeneratorSlots(body.spec.name, moon.radius * 2),
-				generatorMaterial,
+				facilities,
 				spinning,
 				crafts,
 				moon.mesh.name,
@@ -3392,15 +3547,6 @@ function buildHabitats(scene: Scene, bodies: PlanetBody[], crafts: Craft[], mine
 		}
 	}
 	return spinning;
-}
-
-/** Neutral gray, so a mine reads apart from the faction-colored homes and stations. */
-function grayBoxMaterial(scene: Scene): StandardMaterial {
-	const material = new StandardMaterial("generators", scene);
-	material.diffuseColor = new Color3(0.55, 0.56, 0.58);
-	material.emissiveColor = new Color3(0.16, 0.17, 0.18);
-	material.specularColor = new Color3(0.15, 0.15, 0.15);
-	return material;
 }
 
 /** Teal, so the ship's home reads apart from the gold corporate craft and the red marauder craft. */
@@ -3465,7 +3611,8 @@ function addBaseSlots(
 type MineLaser = {
 	id: string;
 	beam: SiphonBeam;
-	mesh: Mesh;
+	mesh: TransformNode;
+	facility: Facility;
 	bodyRadius: number;
 	phase: number;
 };
@@ -3484,7 +3631,7 @@ function addGeneratorSlots(
 	scene: Scene,
 	parent: TransformNode,
 	slots: GeneratorSlot[],
-	material: StandardMaterial,
+	facilities: FacilityKit,
 	spinning: SpinningBase[],
 	crafts: Craft[],
 	host: string,
@@ -3493,17 +3640,16 @@ function addGeneratorSlots(
 	mineLasers: MineLaser[]
 ): void {
 	for (const slot of slots) {
-		const mesh = MeshBuilder.CreateBox(`${host}-generator-${slot.resource}`, slot.size, scene);
-		mesh.material = material;
-		mesh.parent = parent;
-		mesh.isPickable = false;
+		const facility = facilities.placeMine(parent, `${host}-generator-${slot.resource}`, slot.resource);
+		const mesh = facility.root;
 		mesh.position.set(Math.cos(slot.angle) * slot.radius, 0, Math.sin(slot.angle) * slot.radius);
 		mesh.rotation.y = -slot.angle;
-		const reach = slot.radius - bodyRadius - MINE_SIZE.width / 2;
+		const reach = slot.radius - bodyRadius - MINE_SIZE.depth / 2;
 		mineLasers.push({
 			id: mesh.name,
 			beam: createSiphonBeam(scene, mineLaserShape(Math.max(reach, MINE_SIZE.width)), mesh.name),
 			mesh,
+			facility,
 			bodyRadius,
 			phase: (slot.angle / (Math.PI * 2)) * MINE_FIRE_PERIOD,
 		});
@@ -3515,7 +3661,7 @@ function addGeneratorSlots(
 			view,
 			kind: "generator",
 			resource: slot.resource,
-			reach: Math.max(slot.size.width, slot.size.depth) / 2,
+			reach: MINE_SIZE.depth / 2,
 			rate: MINE_SPIN * ORBIT_PACE,
 			angle: () => craft.angle,
 			position: (out) => out.copyFrom(mesh.getAbsolutePosition()),
@@ -3531,69 +3677,63 @@ type SatelliteOrbit = {
 	phase: number;
 };
 
-/** One solar color. The old faction tints are not part of the collectors. */
-const SOLAR_COLLECTOR = { color: new Color3(0.95, 0.78, 0.35), glow: new Color3(0.55, 0.38, 0.08) };
-
 /**
- * The collectors are one swarm in three draw batches. A collector is occupied only while a ship is
- * docked there, which the label reads from the berth, not from these batches.
- * Their matrices are rewritten each frame as they orbit.
+ * The collectors are one swarm. A collector is occupied only while a ship is docked there, which
+ * the label reads from the berth. That one is a live model so its access port can open; the rest
+ * stay a single thin-instance batch, drawn shut.
+ * The joined mesh faces its panels down +X. Orbit yaw sends +X outward, so the batch yaws an extra
+ * half-turn and the panels face the Sun. The live model carries that half-turn on a child.
  */
 function buildSatelliteSwarm(
-	scene: Scene,
-	crafts: Craft[]
-): { update: (deltaSeconds: number) => void; docks: Dock[]; dockById: Map<string, Dock> } {
+	crafts: Craft[],
+	facilities: FacilityKit
+): {
+	update: (deltaSeconds: number, dockedId: string | null) => void;
+	docks: Dock[];
+	dockById: Map<string, Dock>;
+	collector: Facility;
+} {
 	const random = seededRandom(7);
 	const owners = Object.keys(SATELLITE_LOOK) as SatelliteOwner[];
-	const groups = owners.map((owner) => {
-		const look = SATELLITE_LOOK[owner];
-		const count = Math.round(SATELLITE_COUNT * look.share);
-		const material = new StandardMaterial(`satellites-${owner}`, scene);
-		material.diffuseColor = SOLAR_COLLECTOR.color;
-		material.emissiveColor = SOLAR_COLLECTOR.glow;
-		material.specularColor = new Color3(0.2, 0.2, 0.2);
-
-		const mesh = MeshBuilder.CreateBox(`satellites-${owner}`, MINE_SIZE, scene);
-		mesh.material = material;
-		mesh.isPickable = false;
-		mesh.alwaysSelectAsActiveMesh = true;
-
-		const orbits: SatelliteOrbit[] = [];
-		for (let i = 0; i < count; i++) {
+	const slots: { id: string; owner: SatelliteOwner; orbit: SatelliteOrbit }[] = [];
+	for (const owner of owners) {
+		const count = Math.round(SATELLITE_COUNT * SATELLITE_LOOK[owner].share);
+		for (let index = 0; index < count; index++) {
 			const radius = SATELLITE_BAND_INNER + random() * (SATELLITE_BAND_OUTER - SATELLITE_BAND_INNER);
-			orbits.push({
-				radius,
-				angle: random() * Math.PI * 2,
-				speed: SATELLITE_ORBIT_RATE / Math.pow(radius, 1.5),
-				tilt: (random() - 0.5) * 0.08,
-				phase: random() * Math.PI * 2,
+			slots.push({
+				id: `satellites-${owner}-${index}`,
+				owner,
+				orbit: {
+					radius,
+					angle: random() * Math.PI * 2,
+					speed: SATELLITE_ORBIT_RATE / Math.pow(radius, 1.5),
+					tilt: (random() - 0.5) * 0.08,
+					phase: random() * Math.PI * 2,
+				},
 			});
 		}
+	}
 
-		const matrices = new Float32Array(count * 16);
-		mesh.thinInstanceSetBuffer("matrix", matrices, 16, false);
-		orbits.forEach((orbit, index) => {
-			crafts.push({
-				id: `${mesh.name}-${index}`,
-				host: "sun",
-				view: "sun-inner",
-				kind: "collector",
-				owner,
-				reach: Math.max(MINE_SIZE.width, MINE_SIZE.depth) / 2,
-				rate: orbit.speed * ORBIT_PACE,
-				angle: () => orbit.angle,
-				position: (out) =>
-					out.set(
-						Math.cos(orbit.angle) * orbit.radius,
-						Math.sin(orbit.angle + orbit.phase) * orbit.radius * orbit.tilt,
-						Math.sin(orbit.angle) * orbit.radius
-					),
-			});
+	const mesh = facilities.collectorMesh();
+	const collector = facilities.liveCollector();
+	const matrices = new Float32Array(slots.length * 16);
+	mesh.thinInstanceSetBuffer("matrix", matrices, 16, false);
+	for (const slot of slots) {
+		crafts.push({
+			id: slot.id,
+			host: "sun",
+			view: "sun-inner",
+			kind: "collector",
+			owner: slot.owner,
+			reach: MINE_SIZE.depth / 2,
+			rate: slot.orbit.speed * ORBIT_PACE,
+			angle: () => slot.orbit.angle,
+			position: (out) => place(slot.orbit, out),
 		});
-		return { mesh, orbits, matrices };
-	});
+	}
 
-	const scale = Vector3.One();
+	const shown = new Vector3(MINE_SIZE.depth / 2, MINE_SIZE.depth / 2, MINE_SIZE.depth / 2);
+	const hidden = Vector3.Zero();
 	const rotation = new Quaternion();
 	const position = new Vector3();
 	const matrix = new Matrix();
@@ -3605,31 +3745,39 @@ function buildSatelliteSwarm(
 			Math.sin(orbit.angle) * orbit.radius
 		);
 
-	const update = (deltaSeconds: number) => {
-		for (const group of groups) {
-			group.orbits.forEach((orbit, index) => {
-				orbit.angle += orbit.speed * deltaSeconds;
-				place(orbit, position);
-				Quaternion.RotationYawPitchRollToRef(-orbit.angle, 0, 0, rotation);
-				Matrix.ComposeToRef(scale, rotation, position, matrix);
-				matrix.copyToArray(group.matrices, index * 16);
-			});
-			group.mesh.thinInstanceBufferUpdated("matrix");
+	const update = (deltaSeconds: number, dockedId: string | null) => {
+		let parked = false;
+		slots.forEach((slot, index) => {
+			slot.orbit.angle += slot.orbit.speed * deltaSeconds;
+			place(slot.orbit, position);
+			const docked = slot.id === dockedId;
+			Quaternion.RotationYawPitchRollToRef(-slot.orbit.angle + Math.PI, 0, 0, rotation);
+			Matrix.ComposeToRef(docked ? hidden : shown, rotation, position, matrix);
+			matrix.copyToArray(matrices, index * 16);
+			if (!docked) {
+				return;
+			}
+			parked = true;
+			collector.root.setEnabled(true);
+			collector.root.position.copyFrom(position);
+			collector.root.rotation.y = -slot.orbit.angle;
+		});
+		if (!parked) {
+			collector.root.setEnabled(false);
 		}
+		mesh.thinInstanceBufferUpdated("matrix");
 	};
 
-	update(0);
+	update(0, null);
 	const dockById = new Map<string, Dock>();
-	for (const group of groups) {
-		group.orbits.forEach((orbit, index) => {
-			dockById.set(`${group.mesh.name}-${index}`, {
-				position: () => place(orbit, new Vector3()),
-				rate: orbit.speed * ORBIT_PACE,
-				mount: "trail",
-			});
+	for (const slot of slots) {
+		dockById.set(slot.id, {
+			position: () => place(slot.orbit, new Vector3()),
+			rate: slot.orbit.speed * ORBIT_PACE,
+			mount: "trail",
 		});
 	}
-	return { update, docks: [...dockById.values()], dockById };
+	return { update, docks: [...dockById.values()], dockById, collector };
 }
 
 function seededRandom(seed: number): () => number {

@@ -1,5 +1,6 @@
 import { CARGO_CAPACITY, ENERGY_CAPACITY } from "./demo/energy";
 import { LOCAL_REACH, bearing, bodyLabel, localBody, localPoint, systemPoint, type NavBody, type NavFix } from "./demo/nav";
+import { formatTravelTime, travelShare } from "./travel-clock";
 
 const AMBER = "#FCD34D";
 const BONE = "#E8E4D9";
@@ -222,19 +223,28 @@ export const CARGO_LABELS = ["Hydrogen", "Ore", "Nitrogen", "Carbon"] as const;
 
 export type CargoLabel = (typeof CARGO_LABELS)[number];
 
-/** Energy aboard, and the other containers. An uncounted mineral is empty. Amounts sit against capacity. */
+/**
+ * Energy aboard, and the shared hold. Energy has its own tank. The minerals are counts in one store,
+ * and their sum is the cargo against that store's limit. An uncounted mineral is empty.
+ */
 export type HoldStock = {
 	energy: number;
 	energyCapacity: number;
-	containers: readonly { label: string; amount: number; capacity: number }[];
+	/** Mineral units aboard, of any mix. */
+	cargo: number;
+	cargoCapacity: number;
+	counts: readonly { label: string; amount: number }[];
 };
 
 /** The hold as the center screen draws it. Minerals default to empty until they are counted aboard. */
 export function holdStock(energy: number, minerals: Partial<Record<CargoLabel, number>> = {}): HoldStock {
+	const counts = CARGO_LABELS.map((label) => ({ label, amount: minerals[label] ?? 0 }));
 	return {
 		energy,
 		energyCapacity: ENERGY_CAPACITY,
-		containers: CARGO_LABELS.map((label) => ({ label, amount: minerals[label] ?? 0, capacity: CARGO_CAPACITY })),
+		cargo: counts.reduce((sum, line) => sum + line.amount, 0),
+		cargoCapacity: CARGO_CAPACITY,
+		counts,
 	};
 }
 
@@ -265,17 +275,11 @@ export function centerPage(mining: boolean): CenterPage {
 	return mining ? "mining" : "nav";
 }
 
-/** What Home can do this moment. `detail` is the short line under the control. */
-export type CenterHome = { enabled: boolean; detail: string };
-
-export type CenterHit = { kind: "home" };
-
 type Rect = { x: number; y: number; w: number; h: number };
 
 type CenterFrame = {
 	header: Rect;
 	content: Rect;
-	home: Rect;
 	tabs: { page: CenterPage; label: string; rect: Rect }[];
 	gap: number;
 };
@@ -292,7 +296,7 @@ const PAGE_TITLE: Record<CenterPage, string> = {
 	battle: "Battle",
 };
 
-/** The header, the page, and the tab row, in the glass's pixels. Home sits on the nav page. */
+/** The header, the page, and the tab row, in the glass's pixels. */
 export function centerFrame(width: number, height: number): CenterFrame {
 	const pad = Math.max(12, Math.round(Math.min(width, height) * 0.045));
 	const gap = Math.max(8, Math.round(pad * 0.55));
@@ -307,12 +311,10 @@ export function centerFrame(width: number, height: number): CenterFrame {
 		h: Math.max(1, tabsTop - gap - (header.y + header.h + gap)),
 	};
 	const tabW = (content.w - gap * (PAGES.length - 1)) / PAGES.length;
-	const homeW = Math.max(96, Math.round(content.w * 0.2));
 	return {
 		header,
 		content,
 		gap,
-		home: { x: content.x + content.w - homeW, y: content.y, w: homeW, h: content.h },
 		tabs: PAGES.map((entry, index) => ({
 			page: entry.page,
 			label: entry.label,
@@ -321,16 +323,8 @@ export function centerFrame(width: number, height: number): CenterFrame {
 	};
 }
 
-function inside(rect: Rect, x: number, y: number): boolean {
-	return x >= rect.x && y >= rect.y && x < rect.x + rect.w && y < rect.y + rect.h;
-}
-
-/** Home on the navigation page. The mode marks are not controls. */
-export function centerHit(width: number, height: number, x: number, y: number, page: CenterPage): CenterHit | null {
-	const frame = centerFrame(width, height);
-	if (page === "nav" && inside(frame.home, x, y)) {
-		return { kind: "home" };
-	}
+/** Nothing on the center glass takes a tap. The mode marks are labels. */
+export function centerHit(_width: number, _height: number, _x: number, _y: number, _page: CenterPage): null {
 	return null;
 }
 
@@ -366,8 +360,8 @@ function plate(context: CanvasRenderingContext2D, rect: Rect, fill: CanvasGradie
 }
 
 /**
- * The center glass. Nav keeps the course dial and sets a course home. Mining shows the hold
- * while the ship is drawing. The mode marks follow that, and only Home takes a tap.
+ * The center glass. Nav keeps the course dial, the travel clock, the fuel spent on that trip,
+ * and the minerals in the hold. Mining shows the same hold while the ship is drawing.
  * Drawn in the glass texture's pixels, with the top of the canvas at the top of the screen.
  */
 export function paintCenterPanel(
@@ -376,7 +370,7 @@ export function paintCenterPanel(
 	height: number,
 	fix: NavFix,
 	stock: HoldStock,
-	screen: { page: CenterPage; home: CenterHome }
+	screen: { page: CenterPage }
 ): void {
 	const frame = centerFrame(width, height);
 	context.setTransform(1, 0, 0, 1, 0, 0);
@@ -394,7 +388,7 @@ export function paintCenterPanel(
 
 	paintHeader(context, frame, screen.page, fix);
 	if (screen.page === "nav") {
-		paintNav(context, frame, fix, screen.home);
+		paintNav(context, frame, fix, stock);
 	} else if (screen.page === "mining") {
 		paintMining(context, frame.content, stock);
 	} else {
@@ -431,12 +425,125 @@ function paintHeader(context: CanvasRenderingContext2D, frame: CenterFrame, page
 	context.stroke();
 }
 
-function paintNav(context: CanvasRenderingContext2D, frame: CenterFrame, fix: NavFix, home: CenterHome): void {
+/** A ring of the time still left, with the clock drawn in the middle. Full at departure, empty on arrival. */
+function paintTravelClock(
+	context: CanvasRenderingContext2D,
+	cx: number,
+	cy: number,
+	radius: number,
+	remaining: number,
+	total: number
+): void {
+	const share = travelShare(remaining, total);
+	const width = Math.max(3, radius * 0.14);
+	context.save();
+	context.beginPath();
+	context.arc(cx, cy, radius, 0, Math.PI * 2);
+	context.strokeStyle = "rgba(255,215,61,0.2)";
+	context.lineWidth = width;
+	context.lineCap = "butt";
+	context.stroke();
+	if (share > 0) {
+		context.beginPath();
+		context.arc(cx, cy, radius, -Math.PI / 2, -Math.PI / 2 + share * Math.PI * 2);
+		context.strokeStyle = "#FFD73D";
+		context.lineCap = share > 0.985 ? "butt" : "round";
+		context.stroke();
+	}
+	const label = formatTravelTime(remaining);
+	let size = Math.max(10, Math.round(radius * (label.length > 5 ? 0.38 : 0.48)));
+	context.letterSpacing = "0px";
+	context.textAlign = "center";
+	context.textBaseline = "middle";
+	context.fillStyle = "#FFD73D";
+	context.font = `700 ${size}px ${FACE}`;
+	while (size > 8 && context.measureText(label).width > radius * 1.65) {
+		size -= 1;
+		context.font = `700 ${size}px ${FACE}`;
+	}
+	context.fillText(label, cx, cy);
+	context.restore();
+}
+
+/** Energy spent so far on the trip, sampled across the clock. Flat while the engine is dark. */
+function paintFuelChart(context: CanvasRenderingContext2D, rect: Rect, samples: readonly number[]): void {
+	const title = Math.max(11, Math.round(rect.h * 0.14));
+	write(context, "FUEL", title, "rgba(232,228,217,0.45)", "left", rect.x, rect.y, 600);
+	const latest = samples.length > 0 ? samples[samples.length - 1] : 0;
+	write(context, amountLabel(latest), title, AMBER, "right", rect.x + rect.w, rect.y, 700);
+	const top = rect.y + title + 8;
+	const plot: Rect = { x: rect.x, y: top, w: rect.w, h: Math.max(8, rect.y + rect.h - top) };
+	context.strokeStyle = "rgba(255,215,61,0.22)";
+	context.lineWidth = 1;
+	context.strokeRect(plot.x + 0.5, plot.y + 0.5, plot.w - 1, plot.h - 1);
+	const series = samples.length === 0 ? [0, 0] : samples.length === 1 ? [samples[0], samples[0]] : samples;
+	const peak = Math.max(1, ...series);
+	const pointAt = (index: number) => ({
+		x: plot.x + (index / (series.length - 1)) * plot.w,
+		y: plot.y + plot.h - 3 - (series[index] / peak) * (plot.h - 6),
+	});
+	context.beginPath();
+	series.forEach((_, index) => {
+		const point = pointAt(index);
+		if (index === 0) {
+			context.moveTo(point.x, plot.y + plot.h);
+			context.lineTo(point.x, point.y);
+		} else {
+			context.lineTo(point.x, point.y);
+		}
+	});
+	const end = pointAt(series.length - 1);
+	context.lineTo(end.x, plot.y + plot.h);
+	context.closePath();
+	const wash = context.createLinearGradient(plot.x, plot.y, plot.x, plot.y + plot.h);
+	wash.addColorStop(0, "rgba(255,215,61,0.35)");
+	wash.addColorStop(1, "rgba(255,215,61,0.02)");
+	context.fillStyle = wash;
+	context.fill();
+	context.beginPath();
+	series.forEach((_, index) => {
+		const point = pointAt(index);
+		if (index === 0) {
+			context.moveTo(point.x, point.y);
+		} else {
+			context.lineTo(point.x, point.y);
+		}
+	});
+	context.strokeStyle = "#FFD73D";
+	context.lineWidth = 2;
+	context.lineJoin = "round";
+	context.stroke();
+}
+
+/** Minerals aboard. Energy stays in its own tank and is not a hold count. */
+function paintHoldCounts(context: CanvasRenderingContext2D, rect: Rect, stock: HoldStock): void {
+	const title = Math.max(11, Math.round(rect.h * 0.09));
+	write(context, "HOLD", title, "rgba(232,228,217,0.45)", "left", rect.x, rect.y, 600);
+	const rows = Math.max(1, stock.counts.length);
+	const rowH = (rect.h - title - 8) / rows;
+	const size = Math.max(11, Math.min(18, Math.round(rowH * 0.42)));
+	stock.counts.forEach((line, index) => {
+		const y = rect.y + title + 10 + index * rowH + (rowH - size) / 2;
+		write(context, line.label.toUpperCase(), size, "rgba(232,228,217,0.5)", "left", rect.x, y, 600);
+		write(context, amountLabel(line.amount), size, line.amount > 0 ? AMBER : BONE, "right", rect.x + rect.w, y, 700);
+	});
+}
+
+function paintNav(context: CanvasRenderingContext2D, frame: CenterFrame, fix: NavFix, stock: HoldStock): void {
 	const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 	const seconds = reduce ? null : performance.now() / 1000;
 	const local = localBody(fix);
-	const { content, home: homeRect, gap } = frame;
-	const map = Math.min(content.h, homeRect.x - gap - content.x);
+	const { content, gap } = frame;
+	const holdW = Math.max(120, Math.min(200, Math.round(content.w * 0.18)));
+	const clock = fix.course && fix.course.total > 0 ? fix.course : null;
+	let timerBox = 0;
+	let chartW = 0;
+	if (clock) {
+		timerBox = Math.min(content.h * 0.92, content.h);
+		chartW = Math.max(96, Math.min(timerBox * 1.35, Math.round(content.w * 0.22)));
+	}
+	const reserved = holdW + (timerBox > 0 ? gap + timerBox + gap + chartW : 0) + gap;
+	const map = Math.min(content.h, Math.max(64, content.w - reserved - gap - 140));
 	const discX = content.x;
 	const discY = content.y + (content.h - map) / 2;
 	const cx = discX + map / 2;
@@ -465,7 +572,11 @@ function paintNav(context: CanvasRenderingContext2D, frame: CenterFrame, fix: Na
 	write(context, (local ? bodyLabel(local.id) : "Sol").toUpperCase(), caption, AMBER, "center", cx, cy + map * 0.34, 700);
 
 	const textX = discX + map + gap;
-	const textW = Math.max(1, homeRect.x - gap - textX);
+	const right = content.x + content.w;
+	const holdX = right - holdW;
+	const chartX = timerBox > 0 ? holdX - gap - chartW : holdX;
+	const timerX = timerBox > 0 ? chartX - gap - timerBox : holdX;
+	const readW = Math.max(1, timerX - gap - textX);
 	const term = Math.max(11, Math.round(content.h * 0.055));
 	const value = Math.max(13, Math.round(content.h * 0.078));
 	const rowGap = Math.round(content.h * 0.035);
@@ -482,65 +593,78 @@ function paintNav(context: CanvasRenderingContext2D, frame: CenterFrame, fix: Na
 	for (const reading of readings) {
 		write(context, reading.term.toUpperCase(), term, "rgba(232,228,217,0.42)", "left", textX, y, 400);
 		y += line(term);
-		write(context, fitAt(context, reading.value.toUpperCase(), value, textW), value, BONE, "left", textX, y, 700);
+		write(context, fitAt(context, reading.value.toUpperCase(), value, readW), value, BONE, "left", textX, y, 700);
 		y += line(value) + rowGap;
 	}
 	const progress = fix.course ? Math.floor(fix.course.progress * 100) : null;
 	write(context, "RUN", term, "rgba(232,228,217,0.42)", "left", textX, y, 400);
-	write(context, progress === null ? "—" : `${progress}%`, term, AMBER, "right", textX + textW, y, 600);
+	write(context, progress === null ? "—" : `${progress}%`, term, AMBER, "right", textX + readW, y, 600);
 	y += line(term);
 	context.fillStyle = "rgba(255,215,61,0.12)";
-	context.fillRect(textX, y, textW, bar);
-	const fill = context.createLinearGradient(textX, y, textX + textW, y);
+	context.fillRect(textX, y, readW, bar);
+	const fill = context.createLinearGradient(textX, y, textX + readW, y);
 	fill.addColorStop(0, "#C8641E");
 	fill.addColorStop(1, "#FFD73D");
 	context.fillStyle = fill;
-	context.fillRect(textX, y, textW * ((progress ?? 0) / 100), bar);
+	context.fillRect(textX, y, readW * ((progress ?? 0) / 100), bar);
 
-	paintHome(context, homeRect, home);
+	if (clock && timerBox > 0) {
+		const timerY = content.y + (content.h - timerBox) / 2;
+		paintTravelClock(context, timerX + timerBox / 2, timerY + timerBox / 2, timerBox / 2 - 3, clock.remaining, clock.total);
+		paintFuelChart(context, { x: chartX, y: timerY, w: chartW, h: timerBox }, clock.spent);
+	}
+	paintHoldCounts(context, { x: holdX, y: content.y, w: holdW, h: content.h }, stock);
 }
 
-function paintHome(context: CanvasRenderingContext2D, rect: Rect, home: CenterHome): void {
-	const fill = home.enabled ? vertical(context, rect, "#FFF0A8", "#C8941A") : vertical(context, rect, "#1C1810", "#0C0B08");
-	plate(context, rect, fill, home.enabled ? "rgba(255,240,168,0.9)" : "rgba(255,215,61,0.28)", 12);
-	const title = Math.max(16, Math.round(rect.h * 0.16));
-	const detail = Math.max(10, Math.round(rect.h * 0.075));
-	const ink = home.enabled ? "#1A1200" : "rgba(255,215,61,0.45)";
-	const sub = home.enabled ? "rgba(26,18,0,0.72)" : "rgba(168,144,96,0.9)";
-	write(context, "HOME", title, ink, "center", rect.x + rect.w / 2, rect.y + rect.h * 0.38, 700);
-	write(context, fitAt(context, home.detail.toUpperCase(), detail, rect.w - 16), detail, sub, "center", rect.x + rect.w / 2, rect.y + rect.h * 0.58, 600);
+function paintMeter(
+	context: CanvasRenderingContext2D,
+	area: Rect,
+	y: number,
+	rowH: number,
+	row: { label: string; amount: number; capacity: number; ink: string }
+): void {
+	const label = Math.max(11, Math.round(rowH * 0.34));
+	const barH = Math.max(7, Math.round(rowH * 0.28));
+	const amount = amountLabel(row.amount);
+	const share = row.capacity > 0 ? Math.max(0, Math.min(1, row.amount / row.capacity)) : 0;
+	write(context, row.label.toUpperCase(), label, "rgba(232,228,217,0.5)", "left", area.x, y, 600);
+	write(context, amount, label, row.ink, "right", area.x + area.w, y, 700);
+	const barY = y + label + Math.max(4, Math.round((rowH - label - barH) / 2));
+	context.fillStyle = "rgba(255,215,61,0.1)";
+	context.fillRect(area.x, barY, area.w, barH);
+	if (share > 0) {
+		const fill = context.createLinearGradient(area.x, barY, area.x + area.w, barY);
+		fill.addColorStop(0, "#C8641E");
+		fill.addColorStop(0.7, "#E9A92A");
+		fill.addColorStop(1, "#FFD73D");
+		context.fillStyle = fill;
+		context.fillRect(area.x, barY, Math.max(2, area.w * share), barH);
+	}
+	context.fillStyle = "rgba(255,215,61,0.35)";
+	for (const tick of [0.25, 0.5, 0.75]) {
+		context.fillRect(area.x + area.w * tick, barY, 1, barH);
+	}
 }
 
 function paintMining(context: CanvasRenderingContext2D, area: Rect, stock: HoldStock): void {
-	const rows = [
-		{ label: "Energy", amount: stock.energy, capacity: stock.energyCapacity },
-		...stock.containers.map((container) => ({ label: container.label, amount: container.amount, capacity: container.capacity })),
+	const meters = [
+		{ label: "Energy", amount: stock.energy, capacity: stock.energyCapacity, ink: AMBER },
+		{ label: "Cargo", amount: stock.cargo, capacity: stock.cargoCapacity, ink: BONE },
 	];
-	const gap = Math.max(6, Math.round(area.h * 0.025));
-	const rowH = (area.h - gap * (rows.length - 1)) / rows.length;
-	const label = Math.max(11, Math.round(rowH * 0.34));
-	const barH = Math.max(7, Math.round(rowH * 0.28));
-	rows.forEach((row, index) => {
-		const y = area.y + index * (rowH + gap);
-		const amount = amountLabel(row.amount);
-		const share = row.capacity > 0 ? Math.max(0, Math.min(1, row.amount / row.capacity)) : 0;
-		write(context, row.label.toUpperCase(), label, "rgba(232,228,217,0.5)", "left", area.x, y, 600);
-		write(context, amount, label, row.label === "Energy" ? AMBER : BONE, "right", area.x + area.w, y, 700);
-		const barY = y + label + Math.max(4, Math.round((rowH - label - barH) / 2));
-		context.fillStyle = "rgba(255,215,61,0.1)";
-		context.fillRect(area.x, barY, area.w, barH);
-		if (share > 0) {
-			const fill = context.createLinearGradient(area.x, barY, area.x + area.w, barY);
-			fill.addColorStop(0, "#C8641E");
-			fill.addColorStop(0.7, "#E9A92A");
-			fill.addColorStop(1, "#FFD73D");
-			context.fillStyle = fill;
-			context.fillRect(area.x, barY, Math.max(2, area.w * share), barH);
-		}
-		context.fillStyle = "rgba(255,215,61,0.35)";
-		for (const tick of [0.25, 0.5, 0.75]) {
-			context.fillRect(area.x + area.w * tick, barY, 1, barH);
-		}
+	const gap = Math.max(6, Math.round(area.h * 0.02));
+	const countH = Math.max(18, Math.round(area.h * 0.12));
+	const countsH = countH * stock.counts.length;
+	const meterSpace = Math.max(meters.length * 28, area.h - countsH - gap);
+	const meterH = (meterSpace - gap) / meters.length;
+	meters.forEach((row, index) => {
+		paintMeter(context, area, area.y + index * (meterH + gap), meterH, row);
+	});
+	const countsTop = area.y + meters.length * (meterH + gap);
+	const countSize = Math.max(11, Math.round(countH * 0.55));
+	stock.counts.forEach((line, index) => {
+		const y = countsTop + index * countH + (countH - countSize) / 2;
+		write(context, line.label.toUpperCase(), countSize, "rgba(232,228,217,0.5)", "left", area.x, y, 600);
+		write(context, amountLabel(line.amount), countSize, BONE, "right", area.x + area.w, y, 700);
 	});
 }
 

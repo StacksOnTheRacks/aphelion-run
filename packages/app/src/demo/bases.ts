@@ -76,8 +76,8 @@ export const DOCK_SIZE: BoxSize = { width: 0.05, height: 0.008, depth: 0.05 };
 
 /**
  * Mines and collectors. Width is across the orbit, depth is along it, toward the ship.
- * Half as wide as a landing pad and a little deeper, with a square face so the forward laser
- * meets the block instead of a flat edge.
+ * Half as wide as a landing pad and a little deeper. Both are drawn as a sphere of this depth,
+ * so the ship still meets the surface it used to meet on the block.
  */
 export const MINE_SIZE: BoxSize = {
 	width: DOCK_SIZE.width * 0.5,

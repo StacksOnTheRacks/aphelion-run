@@ -1,11 +1,10 @@
 /**
- * Mine docks from the generators table. One gray box per mineral, inside the inner orbit.
+ * Mine docks from the generators table. One gray sphere per mineral, inside the inner orbit.
  * A moon uses its planet's yield. The Sun's collectors and Earth's station are already
  * in the scene, and the Moon yields nothing.
  *
  * The ring sits outside the base halo and inside the outer orbit. Saturn's stays in
- * the gap inside the rings. A mine is narrower across the orbit than a landing pad, longer along
- * it, and tall enough that the face the ship meets is square.
+ * the gap inside the rings.
  */
 
 import {
@@ -24,7 +23,7 @@ export type Mineral = "hydrogen" | "ore" | "nitrogen" | "carbon";
 
 export type GeneratorSlot = {
 	resource: Mineral;
-	/** Angle around the host, radians. Width of the box points along this radius. */
+	/** Angle around the host, radians. */
 	angle: number;
 	radius: number;
 	size: BoxSize;

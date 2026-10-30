@@ -1,15 +1,17 @@
 /**
  * Energy and mined cargo. These figures belong to the demo. The brief still sets no amounts.
- * A photon cruise spends the burn rate for each second it runs. Docking at a collector or a mine
- * draws from it until the source is empty or the ship is full for that resource. Leaving the dock
- * fills the source again. A collector's draw lands in the energy tank. A mine's draw lands in cargo.
+ * A photon burn spends the burn rate for each second the main engine is lit. A coast spends nothing.
+ * Docking at a collector or a mine draws from it until the source is empty or the ship is full.
+ * Leaving the dock fills the source again. A collector's draw lands in the energy tank. A mine's
+ * draw lands in the hold, which is one store shared by every mineral. Energy and solscript stay
+ * outside that store.
  */
 
 import type { Mineral } from "./generators";
 
 /** Energy aboard a new ship. */
 export const STARTING_ENERGY = 1000;
-/** Energy spent per second of the photon cruise. The impulse legs spend nothing. */
+/** Energy spent per second the main engine is lit. A coast spends nothing. */
 export const BURN_RATE = 4;
 /** Energy or mineral moved per second from a docked source into the ship. */
 export const SIPHON_RATE = 25;
@@ -17,7 +19,10 @@ export const SIPHON_RATE = 25;
 export const COLLECTOR_CHARGE = 2000;
 /** A mine's full load. The same figure as a collector, since the yields name the mineral and not an amount. */
 export const MINE_FULL = COLLECTOR_CHARGE;
-/** How much of one mineral the hold can carry. One full mine fills an empty container. */
+/**
+ * Mineral units the hold can carry, of any mix. One full mine fills an empty hold.
+ * Energy stays in its own tank. Solscript is not cargo.
+ */
 export const CARGO_CAPACITY = MINE_FULL;
 /**
  * How much energy the tank can hold. The starting tank plus one full collector, so the first
@@ -51,6 +56,16 @@ export type SolSession = {
 /** An empty mineral ledger. */
 export function emptyCargo(): Cargo {
 	return { hydrogen: 0, ore: 0, nitrogen: 0, carbon: 0 };
+}
+
+/** Mineral units aboard, whatever the mix. */
+export function cargoUsed(cargo: Cargo): number {
+	return MINERALS.reduce((sum, mineral) => sum + Math.max(0, cargo[mineral]), 0);
+}
+
+/** Room left in the shared hold. */
+export function cargoRoom(cargo: Cargo, capacity = CARGO_CAPACITY): number {
+	return Math.max(0, capacity - cargoUsed(cargo));
 }
 
 /** A ledger with any missing mineral filled in as empty. */
@@ -114,7 +129,7 @@ export function siphonEnergy(
 
 const SETTLED = 1e-3;
 
-/** A dock the ship can draw from. A collector fills the energy tank. A generator fills one cargo container. */
+/** A dock the ship can draw from. A collector fills the energy tank. A generator fills the shared hold. */
 export type DrawSource = {
 	kind: "collector" | "generator";
 	resource?: Mineral;
@@ -144,9 +159,10 @@ export function drawFromDock(
 	if (!resource) {
 		return { energy: hold.energy, cargo: hold.cargo, remaining: MINE_FULL, release: true };
 	}
-	const next = siphonEnergy(hold.cargo[resource], source.remaining, seconds, SIPHON_RATE, CARGO_CAPACITY);
-	const cargo: Cargo = { ...hold.cargo, [resource]: next.ship };
-	const release = next.collector <= SETTLED || next.ship >= CARGO_CAPACITY - SETTLED;
+	const room = cargoRoom(hold.cargo);
+	const next = siphonEnergy(0, source.remaining, seconds, SIPHON_RATE, room);
+	const cargo: Cargo = { ...hold.cargo, [resource]: hold.cargo[resource] + next.ship };
+	const release = next.collector <= SETTLED || cargoRoom(cargo) <= SETTLED;
 	return {
 		energy: hold.energy,
 		cargo,

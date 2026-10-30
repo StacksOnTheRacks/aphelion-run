@@ -1,4 +1,4 @@
-import { COLLECTOR_CHARGE, CARGO_CAPACITY, ENERGY_CAPACITY, MINE_FULL, STARTING_ENERGY, burnEnergy, cruiseCost, depositAtHome, drawFromDock, emptyCargo, freshSession, siphonEnergy } from "./energy";
+import { COLLECTOR_CHARGE, CARGO_CAPACITY, ENERGY_CAPACITY, MINE_FULL, STARTING_ENERGY, burnEnergy, cargoUsed, cruiseCost, depositAtHome, drawFromDock, emptyCargo, freshSession, siphonEnergy } from "./energy";
 import { JOURNEY_MAX_SECONDS, JOURNEY_MIN_SECONDS } from "./journey";
 
 const failures: string[] = [];
@@ -68,6 +68,23 @@ while (steps < 200) {
 }
 expect(steps === 80 && mining.cargo.ore === CARGO_CAPACITY && remaining === 0, "a full ore mine fills the hold in 80 seconds and then sits empty");
 expect(mining.energy === STARTING_ENERGY, "mining ore does not change the energy tank");
+expect(cargoUsed(mining.cargo) === CARGO_CAPACITY, "a full mine uses the whole shared hold");
+
+const sharing = drawFromDock(
+	{ energy: STARTING_ENERGY, cargo: { ...emptyCargo(), ore: 1800 } },
+	{ kind: "generator", resource: "hydrogen", remaining: MINE_FULL },
+	20
+);
+expect(
+	sharing.release && sharing.cargo.ore === 1800 && sharing.cargo.hydrogen === 200 && sharing.remaining === MINE_FULL - 200,
+	"a second mineral fills only the room the first one left"
+);
+const packed = drawFromDock(
+	{ energy: STARTING_ENERGY, cargo: { ...emptyCargo(), ore: CARGO_CAPACITY } },
+	{ kind: "generator", resource: "hydrogen", remaining: MINE_FULL },
+	5
+);
+expect(packed.release && packed.cargo.hydrogen === 0 && packed.remaining === MINE_FULL, "a full hold takes nothing from the next mine");
 
 const mined = drawFromDock(fresh, { kind: "generator", resource: "hydrogen", remaining: MINE_FULL }, 10);
 expect(mined.release === false && mined.cargo.hydrogen === 250 && mined.remaining === MINE_FULL - 250, "ten seconds at a mine moves 250");

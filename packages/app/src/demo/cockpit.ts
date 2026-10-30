@@ -38,7 +38,7 @@ const WORLD_LAYER = 0x0fffffff;
  * layer too.
  */
 export const CHART_LAYER = 0x40000000;
-/** Course chevrons in front of the pilot. The windscreen draws them; the chart, the aft views, and the exterior camera do not. */
+/** Course chevrons in front of the pilot. The windscreen and the exterior camera draw them. The chart and the aft views do not. */
 export const PILOT_LAYER = 0x20000000;
 
 /** Vertical field of view out the windscreen, wider than the chart's so the dash reads under the view. */
@@ -379,8 +379,8 @@ export type Cockpit = {
 	/** Draws the cockpit instead of `chart`, or hands the screen back to it. */
 	setActive: (on: boolean) => void;
 	/**
-	 * Interior is the windscreen and the aft views. Exterior orbits the hull.
-	 * The exterior camera leaves out the course: chevrons and the path line stay on the windscreen.
+	 * Interior is the windscreen and the aft views. Exterior orbits the hull and draws the course chevrons.
+	 * Aft views leave the course out.
 	 */
 	setViewpoint: (viewpoint: PilotViewpoint) => void;
 	/**
@@ -440,8 +440,8 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 	// The dash sits centimeters from the eye, inside the near plane that clips the world.
 	// This camera is second, so it clears depth only and the panel lands on the world already drawn.
 	windscreen.cameras.push(camera("cockpit-dash", COCKPIT_LAYER, WINDSCREEN_FOV, SHIP_NEAR, SHIP_FAR, null));
-	// The world and the hull, and neither the course nor the orbit lines. Those are drawn on the glass.
-	const exterior = camera("cockpit-exterior", WORLD_LAYER | SHIP_LAYER, EXTERIOR_FOV, WORLD_NEAR, WORLD_FAR, null);
+	// The world, the hull, and the course chevrons. Orbit lines stay on the chart.
+	const exterior = camera("cockpit-exterior", WORLD_LAYER | SHIP_LAYER | PILOT_LAYER, EXTERIOR_FOV, WORLD_NEAR, WORLD_FAR, null);
 	const aftPort = rig("cockpit-aft-port", mounts.port, AFT_FOV, null, true);
 	const aftStarboard = rig("cockpit-aft-starboard", mounts.starboard, AFT_FOV, null, true);
 	// The world pass and the hull pass share one picture. The second camera clears depth only, so the

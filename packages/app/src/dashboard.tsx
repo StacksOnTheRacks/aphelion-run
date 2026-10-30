@@ -396,17 +396,17 @@ function MapPane({ label, canvasRef }: { label: string; canvasRef: RefObject<HTM
 	);
 }
 
-/** Energy and each mineral, as a bar of how full that container is. */
+/** Energy in its own tank, then the shared hold: one fill for every mineral, and a count of each. */
 function HoldPane({ stock }: { stock: HoldStock }) {
-	const rows = [
+	const meters = [
 		{ label: "Energy", amount: stock.energy, capacity: stock.energyCapacity },
-		...stock.containers,
+		{ label: "Cargo", amount: stock.cargo, capacity: stock.cargoCapacity },
 	];
 	return (
 		<section aria-label="Hold" className="flex shrink-0 flex-col justify-center gap-1.5" style={{ width: MAP_SIZE, height: MAP_SIZE }}>
 			<p className="text-[10px] font-semibold tracking-[1.6px] text-[#fcd34d] uppercase">Hold</p>
 			<ul className="flex flex-col gap-1.5">
-				{rows.map((line) => {
+				{meters.map((line) => {
 					const amount = Math.round(line.amount);
 					const capacity = Math.max(1, Math.round(line.capacity));
 					const share = Math.max(0, Math.min(100, (amount / capacity) * 100));
@@ -429,6 +429,17 @@ function HoldPane({ stock }: { stock: HoldStock }) {
 					);
 				})}
 			</ul>
+			<ul aria-label="Cargo" className="flex flex-col gap-0.5">
+				{stock.counts.map((line) => {
+					const amount = Math.round(line.amount);
+					return (
+						<li key={line.label} className="flex items-baseline justify-between gap-2 text-[10px] tracking-[1.2px] uppercase">
+							<span className="text-[#E8E4D9]/45">{line.label}</span>
+							<span className="text-[#e8e4d9]">{amount.toLocaleString("en-US")}</span>
+						</li>
+					);
+				})}
+			</ul>
 		</section>
 	);
 }
@@ -443,10 +454,10 @@ function stockOf(hold: { energy: number; cargo: { hydrogen: number; ore: number;
 }
 
 function sameStock(left: HoldStock, right: HoldStock): boolean {
-	if (Math.round(left.energy) !== Math.round(right.energy)) {
+	if (Math.round(left.energy) !== Math.round(right.energy) || Math.round(left.cargo) !== Math.round(right.cargo)) {
 		return false;
 	}
-	return left.containers.every((line, index) => Math.round(line.amount) === Math.round(right.containers[index]?.amount ?? -1));
+	return left.counts.every((line, index) => Math.round(line.amount) === Math.round(right.counts[index]?.amount ?? -1));
 }
 
 function Reading({ term, value }: { term: string; value: string }) {

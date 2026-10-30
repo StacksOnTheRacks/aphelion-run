@@ -27,23 +27,23 @@ import { HULL_LENGTH } from "./ranger";
 import {
 	APPROACH_MIN_SWEEP,
 	CLIMB_PACE,
+	JOURNEY_PACE,
 	ORBIT_LEG_SECONDS,
 	SOFT_DOCK_SECONDS,
-	JOURNEY_MAX_SECONDS,
-	JOURNEY_MIN_SECONDS,
 	approachPoint,
 	berthPoint,
 	climbDistance,
 	climbDuration,
-	cruiseDistance,
-	cruiseSpeed,
+	cruiseProfile,
 	flightSchedule,
 	hoverDeparture,
 	journeySeconds,
 	legPose,
 	planApproach,
 	poseRise,
+	trailAlignment,
 	trailDistance,
+	tripSeconds,
 	type Approach,
 	type Dock,
 } from "./journey";
@@ -675,24 +675,9 @@ function assistCandidates(layout: JourneyLayout, fromId: string, toId: string): 
 }
 
 {
-	const cruise = 800;
-	const seconds = journeySeconds(cruise);
-	expect(Math.abs(cruiseSpeed(0, cruise, seconds) - CLIMB_PACE) < 1e-6, "a burn starts at the slow speed");
-	expect(Math.abs(cruiseSpeed(seconds, cruise, seconds) - CLIMB_PACE) < 1e-6, "a burn ends at the slow speed");
-	expect(cruiseSpeed(seconds / 2, cruise, seconds) > CLIMB_PACE, "a burn is fastest in the middle");
-	expect(Math.abs(cruiseDistance(seconds, cruise, seconds) - cruise) < 1e-3, "a burn covers its length in the planned time");
-}
-
-{
-	expect(journeySeconds(0) === JOURNEY_MIN_SECONDS, "a short hop still lasts the minimum");
-	expect(Math.abs(journeySeconds(1120) - 80) < 1, "Neptune to the Sun takes about 80 seconds");
-	expect(journeySeconds(1e6) === JOURNEY_MAX_SECONDS, "the longest trips are capped");
-}
-
-{
-	expect(journeySeconds(0) === JOURNEY_MIN_SECONDS, "a short hop still lasts the minimum");
-	expect(Math.abs(journeySeconds(1120) - 80) < 1, "Neptune to the Sun takes about 80 seconds");
-	expect(journeySeconds(1e6) === JOURNEY_MAX_SECONDS, "the longest trips are capped");
+	expect(journeySeconds(0) === 0, "a zero-length course takes no time at cruise pace");
+	expect(Math.abs(journeySeconds(1120) - 80) < 1e-6, "at maximum coast, Neptune to the Sun is 80 seconds of pace");
+	expect(journeySeconds(1e6) === 1e6 / JOURNEY_PACE, "a long course is not capped");
 }
 
 {
@@ -890,7 +875,8 @@ function maxYaw(plan: Parameters<typeof legPose>[0], seconds: number): number {
 		(sum, _point, index) => (index === 0 ? 0 : sum + Vector3.Distance(plan.climb[index - 1], plan.climb[index])),
 		0
 	);
-	const clock = flightSchedule(true, length, plan.departSpeed, plan.cruise.total, true);
+	const profile = cruiseProfile(plan);
+	const clock = flightSchedule(true, length, plan.departSpeed, profile.seconds, true);
 	expect(clock.undockSeconds === SOFT_DOCK_SECONDS, "undock is three seconds");
 	expect(clock.climbSeconds === ORBIT_LEG_SECONDS, "the climb is seven seconds");
 	expect(clock.dropSeconds === ORBIT_LEG_SECONDS, "the drop is seven seconds");
@@ -900,6 +886,11 @@ function maxYaw(plan: Parameters<typeof legPose>[0], seconds: number): number {
 			1e-9,
 		"the clock is the sum of the phases"
 	);
+	const berth: Dock = { position: () => Vector3.Zero(), rate: 1 };
+	const flown = { ...plan, departDock: berth, departBody: "earth", arrive: { ...plan.arrive, dock: berth } };
+	expect(Math.abs(tripSeconds(flown, profile.speed) - clock.total) < 1e-6, "travel time is that clock once the ship is coupled");
+	const slower = tripSeconds(flown, cruiseProfile(plan, 0).speed);
+	expect(tripSeconds(flown, profile.maxSpeed) < slower, "a faster coast shortens the trip");
 	const burnEnd = clock.climbSeconds + clock.cruiseSeconds;
 	const pose = legPose(plan, burnEnd);
 	const again = legPose(plan, burnEnd);
@@ -958,6 +949,32 @@ function maxYaw(plan: Parameters<typeof legPose>[0], seconds: number): number {
 	const pad: Dock = { rate, position: () => at.clone() };
 	const raised = berthPoint(pad, 20, "coupled");
 	expect(Math.abs(raised.x - at.x) < 1e-9 && Math.abs(raised.z - at.z) < 1e-9 && raised.y > at.y, "a pad still lifts the ship above it");
+}
+
+// Coupled to a mine or collector, the muzzle — not the hull center — lies on the port axis, so the laser fires straight into the opening.
+{
+	const radius = 11;
+	const at = new Vector3(radius, 0.2, 0);
+	const muzzle = new Vector3(0.001, -0.009, 0.004);
+	const distance = trailDistance("coupled");
+	for (const rate of [0.06, -0.06]) {
+		const aligned = trailAlignment(at, rate, distance, muzzle);
+		const right = Vector3.Cross(Vector3.Up(), aligned.heading).normalize();
+		const muzzleAt = aligned.point.add(right.scale(muzzle.x)).add(Vector3.Up().scale(muzzle.y));
+		const fromCraft = muzzleAt.subtract(at);
+		const along = Vector3.Dot(fromCraft, aligned.heading);
+		const lateral = fromCraft.subtract(aligned.heading.scale(along));
+		const name = rate > 0 ? "prograde" : "retrograde";
+		expect(lateral.length() < 1e-6, `${name}: the muzzle sits on the line through the craft`);
+		expect(along < -distance + 0.01, `${name}: the muzzle is behind the craft`);
+		expect(Math.abs(aligned.heading.y) < 1e-9, `${name}: the shot stays level with the opening`);
+		const ahead = at.subtract(aligned.point);
+		expect(Vector3.Dot(ahead, aligned.heading) > 0.99 * ahead.length(), `${name}: the nose points straight at the craft`);
+		expect(
+			Math.abs(Math.hypot(aligned.point.x, aligned.point.z) - radius) > 0.0001,
+			`${name}: the hull sits on the port axis, off the circle`
+		);
+	}
 }
 
 // Retrograde departures and ordinary climbs yaw no faster than the cap.

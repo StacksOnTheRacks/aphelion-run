@@ -19,26 +19,29 @@ import type { Scene } from "@babylonjs/core/scene";
 import { MINE_SIZE } from "./bases";
 import type { RingBody } from "./camera-path";
 import { CHART_LAYER, PILOT_LAYER } from "./cockpit";
+import { planCruise, type CruiseCorner, type CruiseProfile } from "./cruise";
 import { HULL_LENGTH, type ShipModel } from "./ranger";
 import { MAX_YAW, headingAt, pointAt, type Route, type RouteKind } from "./route";
 
 /**
  * A ship flying a planned trip. Leaving a dock, it eases out to a hover, then climbs to the origin's
- * outer orbit. It burns fast along the bright line to the destination's outer orbit, drops to a hover,
- * and eases in to dock. A pad is met from above. A mine or collector is met from behind, on the same
- * orbit, so the forward laser points at it. The climb and the drop each take the same time on every
- * body; speed eases so the handoff into the burn does not jump. The bright line is the way ahead and
- * shortens as the ship goes. It is drawn at a fixed width on screen, so the route reads from the
- * whole-system view and from beside a planet alike. From the cockpit the burn is a run of chevrons
- * that fade with distance. The climb out to the outer orbit, and the drop in to dock, stay clear of
- * them. Nothing here moves the camera.
+ * outer orbit. It burns up to the chosen coast speed, crosses with the engine dark, and burns again
+ * to arrive, then drops to a hover and eases in to dock. A pad is met from above. A mine or collector
+ * is met from behind. Once coupled, the hull shifts so the muzzle sits on the access port's axis
+ * and the laser fires straight into the opening. The climb and the drop
+ * each take the same time on every body; speed eases so the handoff into the cruise does not jump.
+ * The line ahead is bright where the engine is lit and dull on the coast. It shortens as the ship
+ * goes. It is drawn at a fixed width on screen, so the route reads from the whole-system view and
+ * from beside a planet alike. From the cockpit, and from outside the hull, the course is a run of
+ * chevrons that fade with distance. The climb out to the outer orbit, and the drop in to dock, stay
+ * clear of them. Nothing here moves the camera.
  *
- * The clock does not depend on the camera. Soft undock, the climb, the burn, the drop, and soft dock
- * each last a fixed time, and the path is fixed when the trip starts. A server can sample the same
- * schedule without a viewport.
+ * The clock does not depend on the camera. Soft undock, the climb, the drop, and soft dock each last
+ * a fixed time. The cruise lasts as long as the chosen speed takes to cover it. The path is fixed
+ * when the trip starts. A server can sample the same schedule without a viewport.
  */
 
-/** World units a ship covers per second on a fast burn, on average. Neptune to the Sun takes about 80 seconds. */
+/** Fastest coast the drive will build, in world units per second. */
 export const JOURNEY_PACE = 14;
 /**
  * Speed at the outer orbit, where a climb meets the burn and a drop leaves it, in world units per
@@ -58,7 +61,7 @@ export const HULL_CLEARANCE = 0.04;
 /**
  * Space between a mine's trailing face and the ship's nose when the ship is coupled.
  * The pilot's eye sits just behind the nose, and the windscreen clips the world 0.02 out. A gap
- * this short of the hull keeps the whole block past that clip through a full head turn. Any closer
+ * this short of the hull keeps the whole craft past that clip through a full head turn. Any closer
  * and looking aside cuts the face into a wall across the glass.
  */
 const TRAIL_GAP = 0.03;
@@ -78,7 +81,7 @@ export function poseRise(dockRadius: number, outerRadius: number, kind: "coupled
 
 /**
  * How far behind a mine or collector the ship sits, along the orbit. Coupled leaves the nose clear
- * of the trailing face by enough that the block stays whole out the windscreen. Hover is one hull
+ * of the surface by enough that the sphere stays whole out the windscreen. Hover is one hull
  * further aft, and docking slides between the two.
  */
 export function trailDistance(kind: "coupled" | "hover"): number {
@@ -99,6 +102,39 @@ function poseOn(at: Vector3, dock: Dock, outer: number, kind: "coupled" | "hover
 /** Where the ship sits relative to the body, for `dock` where it is now. */
 export function berthPoint(dock: Dock, outer: number, kind: "coupled" | "hover"): Vector3 {
 	return poseOn(dock.position(), dock, outer, kind);
+}
+
+/** Which way a craft at `relative` is circling. Level, in the plane of the orbit. */
+function orbitHeadingOf(relative: Vector3, rate: number): Vector3 {
+	const angle = Math.atan2(relative.z, relative.x);
+	const turn = Math.sign(rate) || 1;
+	return new Vector3(-Math.sin(angle) * turn, 0, Math.cos(angle) * turn);
+}
+
+/**
+ * Coupled pose behind a mine or collector. The hull sits on the tangent through the craft,
+ * `distance` back, shifted so `muzzle` lies on that line. The heading points along it,
+ * into the access port, and the laser fires straight through the opening.
+ * `muzzle` is in world units along the ship's axes: +Z nose, +X starboard, +Y up.
+ */
+export function trailAlignment(
+	at: Vector3,
+	rate: number,
+	distance: number,
+	muzzle: Vector3
+): { point: Vector3; heading: Vector3 } {
+	const heading = orbitHeadingOf(at, rate);
+	const right = Vector3.Cross(Vector3.Up(), heading);
+	if (right.lengthSquared() > 1e-8) {
+		right.normalize();
+	} else {
+		right.set(1, 0, 0);
+	}
+	const point = at
+		.subtract(heading.scale(distance))
+		.subtract(right.scale(muzzle.x))
+		.subtract(Vector3.Up().scale(muzzle.y));
+	return { point, heading };
 }
 
 /** Coupled at `share` 0, hover at `share` 1. Soft dock eases the other way. */
@@ -129,7 +165,7 @@ function lagOnOrbit(at: Vector3, rate: number, distance: number): Vector3 {
 }
 /** The ship swings at least this far around the body on the way in, so it closes on its dock from behind. */
 export const APPROACH_MIN_SWEEP = 0.8;
-/** A hop between neighbours still lasts long enough to watch; the longest burns are capped. */
+/** Kept for the energy figures. The cruise itself is no longer clamped to this range. */
 export const JOURNEY_MIN_SECONDS = 16;
 export const JOURNEY_MAX_SECONDS = 120;
 
@@ -180,22 +216,9 @@ function legDistance(t: number, profile: LegProfile): number {
 	return Math.min(profile.length, Math.max(0, covered));
 }
 
+/** Seconds to cover `total` at the ship's maximum coast. The cruise a player flies can be slower. */
 export function journeySeconds(total: number): number {
-	return Math.min(JOURNEY_MAX_SECONDS, Math.max(JOURNEY_MIN_SECONDS, total / JOURNEY_PACE));
-}
-
-/**
- * Speed `t` seconds into a burn. It starts at `departSpeed` (the climb's exit, normally `CLIMB_PACE`)
- * and ends at `CLIMB_PACE`, peaking in the middle when the trip is long enough. A burn already slower
- * than those ends stays at one speed, so a short climb does not jump when the burn starts.
- */
-export function cruiseSpeed(t: number, length: number, seconds: number, departSpeed = CLIMB_PACE): number {
-	return legSpeed(t, legProfile(seconds, length, departSpeed, CLIMB_PACE));
-}
-
-/** How far along a burn the ship is after `t` seconds. At `t === seconds` this is `length`. */
-export function cruiseDistance(t: number, length: number, seconds: number, departSpeed = CLIMB_PACE): number {
-	return legDistance(t, legProfile(seconds, length, departSpeed, CLIMB_PACE));
+	return Math.max(0, total / JOURNEY_PACE);
 }
 
 /** How long a climb of `length` takes. Every climb that has anywhere to go takes `ORBIT_LEG_SECONDS`. */
@@ -323,19 +346,18 @@ export type FlightSchedule = {
 
 /**
  * Phase lengths for a trip. Soft undock and soft dock are three seconds when the ship is coupled.
- * The climb and the drop are seven seconds when they have somewhere to go. The burn is
- * `journeySeconds` of the smoothed cruise.
+ * The climb and the drop are seven seconds when they have somewhere to go. `cruiseSeconds` is the
+ * coasting cruise, burns included.
  */
 export function flightSchedule(
 	coupled: boolean,
 	climbLength: number,
 	departSpeed: number,
-	cruiseLength: number,
+	cruiseSeconds: number,
 	docks: boolean
 ): FlightSchedule {
 	const undockSeconds = coupled ? SOFT_DOCK_SECONDS : 0;
 	const climbSeconds = climbDuration(climbLength, departSpeed);
-	const cruiseSeconds = journeySeconds(cruiseLength);
 	const dropSeconds = docks ? ORBIT_LEG_SECONDS : 0;
 	const dockSeconds = docks ? SOFT_DOCK_SECONDS : 0;
 	return {
@@ -356,12 +378,11 @@ export function legPose(plan: JourneyPlan, elapsed: number): { point: Vector3; h
 	const pace = climbPace(plan.climb, plan.departSpeed);
 	const climbLength = polylineLength(plan.climb);
 	const climbSeconds = climbDuration(climbLength, plan.departSpeed);
-	const cruiseSeconds = journeySeconds(plan.cruise.total);
+	const profile = cruiseProfile(plan);
 	const distance =
 		elapsed <= climbSeconds
 			? pace.distance(elapsed)
-			: climbLength +
-				cruiseDistance(Math.max(0, elapsed - climbSeconds), plan.cruise.total, cruiseSeconds, pace.endSpeed);
+			: climbLength + profile.distanceAt(Math.max(0, elapsed - climbSeconds));
 	const path = stitch(plan);
 	const along = Math.min(Math.max(0, distance), path.total);
 	return { point: pointAt(path, along), heading: headingAt(path, along) };
@@ -375,8 +396,9 @@ export type Arrival = { id: string; turn: number; dock?: Dock };
 
 /**
  * A trip in three parts. `climb` is the slow walk from a base, or from the craft the ship is docked
- * with, out to the departure tangent. `cruise` is the fast burn. `arrive` is where the burn ends; the
- * drop to a dock is planned on arrival, because the craft keep moving.
+ * with, out to the departure tangent. `cruise` is the coast, with burns only where the velocity
+ * changes. `arrive` is where that cruise ends; the drop to a dock is planned on arrival, because
+ * the craft keep moving.
  */
 export type JourneyPlan = {
 	climb: Vector3[];
@@ -384,11 +406,45 @@ export type JourneyPlan = {
 	arrive: Arrival;
 	/** Speed the ship is already moving when the climb starts. The climb eases from here toward `CLIMB_PACE`. */
 	departSpeed: number;
+	/** Coast speed chosen in the planner. Absent selects the slow end. */
+	coastSpeed?: number;
 	/** The craft being left, when the ship is coupled. Absent when it is only circling. */
 	departDock?: Dock;
 	/** Body `departDock` circles. */
 	departBody?: string;
 };
+
+/** Heading changes along a cruise. A corner that touches an assist arc is free. */
+export function cornersAlong(route: Route): CruiseCorner[] {
+	const corners: CruiseCorner[] = [];
+	for (let i = 0; i < route.kinds.length - 1; i++) {
+		const into = route.points[i + 1].subtract(route.points[i]);
+		const out = route.points[i + 2].subtract(route.points[i + 1]);
+		if (into.lengthSquared() < 1e-12 || out.lengthSquared() < 1e-12) {
+			continue;
+		}
+		const dot = Math.min(1, Math.max(-1, Vector3.Dot(into.normalize(), out.normalize())));
+		const turn = Math.acos(dot);
+		if (turn < 1e-4) {
+			continue;
+		}
+		corners.push({
+			at: route.cumulative[i + 1],
+			turn,
+			assist: route.kinds[i] === "assist" || route.kinds[i + 1] === "assist",
+		});
+	}
+	return corners;
+}
+
+/** The coasting cruise for `plan`. A missing speed, or one below the handoff, selects the slow end. */
+export function cruiseProfile(plan: JourneyPlan, coastSpeed = plan.coastSpeed ?? 0): CruiseProfile {
+	const pace = climbPace(plan.climb, plan.departSpeed);
+	// The climb may be sped up or slowed so it still lasts seven seconds. The cruise is priced from
+	// the orbital handoff, which is the speed the ship is already carrying, not that animation pace.
+	const handoff = Math.min(pace.endSpeed, CLIMB_PACE);
+	return planCruise(plan.cruise.total, cornersAlong(plan.cruise), coastSpeed, handoff, JOURNEY_PACE);
+}
 
 /** A craft a ship can dock with. */
 export type Dock = {
@@ -438,13 +494,14 @@ const RING_LIFT = 2;
 const RING_LIFT_MARGIN = 3;
 /** Line width on screen, in CSS pixels. */
 const AHEAD_WIDTH = 3;
-/** An assist costs less, so its stretch of the line is drawn at this share of the width. */
+/** An assist is a free turn, so its stretch of the line is drawn at this share of the width. */
 const ASSIST_WIDTH = 0.5;
 /** Longest piece of the drawn line, in world units. The cockpit looks down it from on board. */
 const AHEAD_STEP = 2;
 
 const AMBER = Color3.FromHexString("#FCD34D");
-const ENERGY = Color3.FromHexString("#F5E6C8");
+/** The coast and a gravity assist. Dimmer than a burn, so the engine-off stretches read as such. */
+const COAST = Color3.FromHexString("#8C6E3A");
 
 /** First chevron sits this far ahead of the ship, so the wide end of the nearest mark is still on the glass. */
 export const MARK_GAP = 8;
@@ -549,13 +606,16 @@ export type Journey = {
 	host: () => string | null;
 	/** Where the ship is and which way it is heading, while a trip is under way or the ship is berthed. */
 	ship: () => { position: Vector3; heading: Vector3 } | null;
-	/** The line being flown and how far along the whole clock the ship is, from 0 to 1. Null once docked. */
-	course: () => { points: readonly Vector3[]; progress: number } | null;
-	/** Seconds of photon cruise just flown. The climb, the drop, and a dock spend none. */
+	/**
+	 * The line being flown, how far along the whole clock the ship is, and the seconds left on it.
+	 * Null once docked.
+	 */
+	course: () => { points: readonly Vector3[]; progress: number; remaining: number; total: number } | null;
+	/** Seconds the main engine was lit. The climb, the coast, the drop, and a dock spend none. */
 	onPhoton: (listener: (seconds: number) => void) => () => void;
 	/** The photon cruise has finished and the ship is on the drop or already docked. */
 	onCruiseDone: (listener: () => void) => () => void;
-	/** Shows course chevrons on the windscreen while a burn is underway. */
+	/** Shows course chevrons on the windscreen and from outside the hull while the cruise is underway. */
 	setPiloting: (on: boolean) => void;
 };
 
@@ -567,8 +627,10 @@ type Flight = {
 	cruiseLength: number;
 	cruiseSeconds: number;
 	departSpeed: number;
-	/** Speed the climb actually exits at. The burn starts here. */
+	/** Speed the climb actually exits at. The cruise burns up from here and back down to it. */
 	handoff: number;
+	/** Burns, coast, and clock for the chosen speed. */
+	profile: CruiseProfile;
 	departDock?: Dock;
 	departBody?: string;
 	schedule: FlightSchedule;
@@ -643,21 +705,23 @@ export function createJourney(
 		if (!flight) {
 			return;
 		}
-		const powered = flight.phase === "transit" && flight.elapsed > flight.climbSeconds;
-		ship.drive(powered ? "photon" : "impulse", powered ? photonBurn(flight) : 0);
+		const cruiseT = flight.elapsed - flight.climbSeconds;
+		const powered = flight.phase === "transit" && flight.profile.thrusting(cruiseT);
+		ship.drive(powered ? "photon" : "impulse", powered ? flight.profile.burn(cruiseT) : 0);
 		ship.place(position, heading, deltaSeconds);
 	};
 
-	const orbitHeading = (relative: Vector3, rate: number) => {
-		const angle = Math.atan2(relative.z, relative.x);
-		const turn = Math.sign(rate) || 1;
-		return new Vector3(-Math.sin(angle) * turn, 0, Math.cos(angle) * turn);
-	};
+	const orbitHeading = orbitHeadingOf;
 
-	/** Photon seconds that fall inside the cruise, ignoring climb time and any frame that runs past the end. */
-	const photonSpan = (before: number, after: number, climb: number, cruise: number) => {
-		const end = climb + cruise;
-		return Math.max(0, Math.min(after, end) - Math.max(before, climb));
+	/** Seconds of a frame that fall inside a burn. The coast, the climb, and the drop add nothing. */
+	const thrustOverlap = (before: number, after: number, climb: number, spans: { start: number; end: number }[]) => {
+		let sum = 0;
+		for (const span of spans) {
+			const start = climb + span.start;
+			const end = climb + span.end;
+			sum += Math.max(0, Math.min(after, end) - Math.max(before, start));
+		}
+		return sum;
 	};
 
 	const notifyPhoton = (seconds: number) => {
@@ -682,6 +746,13 @@ export function createJourney(
 		}
 		const center = centerOf(berthed.bodyId);
 		const outer = harborOf(berthed.bodyId).outer ?? 0;
+		if (berthed.dock.mount === "trail") {
+			const aligned = trailAlignment(berthed.dock.position(), berthed.dock.rate, trailDistance("coupled"), ship.muzzle);
+			berthHeading.copyFrom(aligned.heading);
+			ship.drive("impulse", 0);
+			ship.place(center.add(aligned.point), aligned.heading, deltaSeconds);
+			return;
+		}
 		const relative = berthPoint(berthed.dock, outer, "coupled");
 		const heading = orbitHeading(relative, berthed.dock.rate);
 		berthHeading.copyFrom(heading);
@@ -700,6 +771,20 @@ export function createJourney(
 	};
 
 	const placeCoupled = (current: Flight, center: Vector3, dock: Dock, outer: number, share: number, deltaSeconds: number) => {
+		if (dock.mount === "trail") {
+			const at = dock.position();
+			const coupled = trailAlignment(at, dock.rate, trailDistance("coupled"), ship.muzzle);
+			const hoverPoint = lagOnOrbit(at, dock.rate, trailDistance("hover"));
+			const hoverHeading = orbitHeading(hoverPoint, dock.rate);
+			const t = smoothstep(0, 1, Math.min(1, Math.max(0, share)));
+			const relative = Vector3.Lerp(coupled.point, hoverPoint, t);
+			const blended = Vector3.Lerp(coupled.heading, hoverHeading, t);
+			const heading = blended.lengthSquared() > 1e-8 ? blended.normalize() : coupled.heading;
+			current.heading = heading;
+			current.last = relative;
+			placeShip(center.add(relative), heading, deltaSeconds);
+			return;
+		}
 		const relative = easedPose(dock, outer, share);
 		const heading = orbitHeading(relative, dock.rate);
 		current.heading = heading;
@@ -716,10 +801,7 @@ export function createJourney(
 		current.since = 0;
 		const harbor = harborOf(current.plan.arrive.id);
 		const dock = current.plan.arrive.dock;
-		const arrivalSpeed = legSpeed(
-			current.cruiseSeconds,
-			legProfile(current.cruiseSeconds, current.cruiseLength, current.handoff, CLIMB_PACE)
-		);
+		const arrivalSpeed = Math.min(current.handoff, CLIMB_PACE);
 		current.approach = planApproach(
 			current.last,
 			current.plan.arrive.turn || 1,
@@ -760,10 +842,11 @@ export function createJourney(
 			orbiting = null;
 			clear();
 			const path = stitch(plan);
-			const ahead = buildAhead(scene, path, pixelRatio());
-			glow.addExcludedMesh(ahead);
 			const climbLength = polylineLength(plan.climb);
 			const pace = climbPace(plan.climb, plan.departSpeed);
+			const profile = cruiseProfile(plan);
+			const ahead = buildAhead(scene, path, pixelRatio(), climbLength, profile.spans);
+			glow.addExcludedMesh(ahead);
 			const coupled = plan.departDock != null && plan.departBody != null;
 			const docks = harborOf(plan.arrive.id).docks.length > 0 || plan.arrive.dock != null;
 			flight = {
@@ -772,13 +855,14 @@ export function createJourney(
 				climbLength,
 				climbSeconds: climbDuration(climbLength, plan.departSpeed),
 				cruiseLength: plan.cruise.total,
-				cruiseSeconds: journeySeconds(plan.cruise.total),
+				cruiseSeconds: profile.seconds,
 				departSpeed: plan.departSpeed,
 				handoff: pace.endSpeed,
+				profile,
 				alongClimb: pace.distance,
 				departDock: plan.departDock,
 				departBody: plan.departBody,
-				schedule: flightSchedule(coupled, climbLength, plan.departSpeed, plan.cruise.total, docks),
+				schedule: flightSchedule(coupled, climbLength, plan.departSpeed, profile.seconds, docks),
 				clock: 0,
 				elapsed: 0,
 				phase: coupled ? "undock" : "transit",
@@ -849,8 +933,14 @@ export function createJourney(
 			if (!flight || flight.phase === "docked") {
 				return null;
 			}
-			const total = Math.max(flight.schedule.total, 1e-6);
-			return { points: flight.path.points, progress: Math.min(1, flight.clock / total) };
+			const total = flight.schedule.total;
+			const span = Math.max(total, 1e-6);
+			return {
+				points: flight.path.points,
+				progress: Math.min(1, flight.clock / span),
+				remaining: Math.max(0, total - flight.clock),
+				total,
+			};
 		},
 		update(deltaSeconds, centerOf) {
 			if (!flight) {
@@ -895,7 +985,7 @@ export function createJourney(
 			if (!joinedBurn) {
 				flight.elapsed += deltaSeconds;
 			}
-			notifyPhoton(photonSpan(before, flight.elapsed, flight.climbSeconds, flight.cruiseSeconds));
+			notifyPhoton(thrustOverlap(before, flight.elapsed, flight.climbSeconds, flight.profile.thrust));
 			const distance = distanceAt(flight);
 			if (flight.elapsed >= flight.climbSeconds + flight.cruiseSeconds) {
 				notifyCruise();
@@ -952,10 +1042,7 @@ function distanceAt(flight: Flight): number {
 	if (flight.elapsed <= flight.climbSeconds) {
 		return flight.alongClimb(flight.elapsed);
 	}
-	return (
-		flight.climbLength +
-		cruiseDistance(flight.elapsed - flight.climbSeconds, flight.cruiseLength, flight.cruiseSeconds, flight.handoff)
-	);
+	return flight.climbLength + flight.profile.distanceAt(flight.elapsed - flight.climbSeconds);
 }
 
 /**
@@ -1339,6 +1426,17 @@ function polylineLength(points: Vector3[]): number {
 }
 
 /**
+ * Seconds from leaving the dock to being down on the next one. A faster coast shortens the cruise.
+ * The climb, the drop, and the soft dock stay the same length.
+ */
+export function tripSeconds(plan: JourneyPlan, coastSpeed = plan.coastSpeed ?? 0): number {
+	const cruiseSeconds = cruiseProfile(plan, coastSpeed).seconds;
+	const coupled = plan.departDock != null && plan.departBody != null;
+	const docks = plan.arrive.dock != null;
+	return flightSchedule(coupled, polylineLength(plan.climb), plan.departSpeed, cruiseSeconds, docks).total;
+}
+
+/**
  * Each chevron lies under the course. The opening is just below the point, so the arrow stays in the
  * lower windscreen: wide above the dashboard, with the chain receding toward the horizon.
  */
@@ -1450,12 +1548,20 @@ function markBasis(heading: Vector3, right: Vector3, up: Vector3): void {
 
 /**
  * The way ahead, built from the end backwards: visibility shows a line from its first point, so
- * reversing it shows the part between the ship and the destination.
+ * reversing it shows the part between the ship and the destination. Burns are bright. The coast
+ * and the assist arcs are dull. `climbLength` is where the cruise starts along `route`.
  */
-function buildAhead(scene: Scene, route: Route, pixelRatio: number): GreasedLineBaseMesh {
-	const fine = subdivide(route);
+function buildAhead(
+	scene: Scene,
+	route: Route,
+	pixelRatio: number,
+	climbLength: number,
+	spans: { from: number; to: number }[]
+): GreasedLineBaseMesh {
+	const fine = subdivide(route, climbLength, spans);
 	const points = fine.points.reverse();
 	const kinds = fine.kinds.reverse();
+	const lit = fine.hot.reverse();
 	const widths: number[] = [];
 	const colors: Color3[] = [];
 	for (let i = 0; i < points.length; i++) {
@@ -1464,7 +1570,8 @@ function buildAhead(scene: Scene, route: Route, pixelRatio: number): GreasedLine
 		// Arc ends keep the full width, so a pass narrows over its first step and widens over its last.
 		const width = before === "assist" && after === "assist" ? ASSIST_WIDTH : 1;
 		widths.push(width, width);
-		colors.push((after ?? before) === "assist" ? ENERGY : AMBER);
+		const thrust = lit[i] ?? lit[i - 1];
+		colors.push(thrust ? AMBER : COAST);
 	}
 	const line = CreateGreasedLine(
 		"journey-ahead",
@@ -1489,26 +1596,32 @@ function buildAhead(scene: Scene, route: Route, pixelRatio: number): GreasedLine
  * The course cut into pieces no longer than `AHEAD_STEP`. A screen-width line smears a segment that
  * runs behind the camera into a wedge, and a close chart camera can sit right on the course.
  */
-function subdivide(route: Route): { points: Vector3[]; kinds: RouteKind[] } {
+function subdivide(
+	route: Route,
+	climbLength: number,
+	spans: { from: number; to: number }[]
+): { points: Vector3[]; kinds: RouteKind[]; hot: boolean[] } {
 	const points: Vector3[] = [route.points[0].clone()];
 	const kinds: RouteKind[] = [];
+	const hot: boolean[] = [];
+	let covered = 0;
+	const burning = (distance: number) => {
+		const along = distance - climbLength;
+		return spans.some((span) => along >= span.from - 1e-4 && along <= span.to + 1e-4);
+	};
 	for (let i = 0; i < route.kinds.length; i++) {
 		const from = route.points[i];
 		const to = route.points[i + 1];
-		const pieces = Math.max(1, Math.ceil(Vector3.Distance(from, to) / AHEAD_STEP));
+		const length = Vector3.Distance(from, to);
+		const pieces = Math.max(1, Math.ceil(length / AHEAD_STEP));
+		const step = length / pieces;
 		for (let piece = 1; piece <= pieces; piece++) {
+			const next = covered + step;
 			points.push(Vector3.Lerp(from, to, piece / pieces));
 			kinds.push(route.kinds[i]);
+			hot.push(burning((covered + next) / 2));
+			covered = next;
 		}
 	}
-	return { points, kinds };
-}
-
-/** How hard the main engine is working on a photon burn: quiet at the climb speed, full at the peak. */
-function photonBurn(flight: Flight): number {
-	const t = flight.elapsed - flight.climbSeconds;
-	const profile = legProfile(flight.cruiseSeconds, flight.cruiseLength, flight.handoff, CLIMB_PACE);
-	const speed = legSpeed(t, profile);
-	const peak = Math.max(profile.v0, profile.v1, 1e-6) + Math.max(0, profile.amplitude);
-	return Math.min(1, Math.max(0, speed / peak));
+	return { points, kinds, hot };
 }

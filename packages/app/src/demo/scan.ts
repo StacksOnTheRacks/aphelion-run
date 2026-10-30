@@ -1,9 +1,9 @@
 import type { Faction } from "./bases";
 import { STARTING_DOCK_ID } from "./energy";
-import { JOURNEY_STOPS, PLANETS, bodyTarget, type DemoView } from "./environment";
+import { JOURNEY_STOPS, PLANETS } from "./environment";
 import { PLANET_YIELDS, type Mineral } from "./generators";
 
-/** Seconds between Travel To and the ship starting to move. */
+/** Seconds between setting a course and the ship starting to move. */
 export const DEPARTURE_SECONDS = 5;
 
 export type ScanKind = "star" | "planet" | "moon" | "station" | "home" | "collector" | "generator";
@@ -204,24 +204,9 @@ export function showsCard(target: ScanTarget): boolean {
 }
 
 /**
- * The card's camera action: off to a body's outer orbit, or alongside a craft.
- * On a planet's or the Sun's wide chart, View comes in on that body. Off once that closer framing
- * is already showing, and off on a moon chart, which arrives there.
- */
-export function viewAction(target: ScanTarget, view: DemoView, close = false): { label: string; enabled: boolean } {
-	if (target.id === target.host && bodyTarget(target.id).view === view) {
-		if (view === `${target.id}-outer` && !close) {
-			return { label: "View", enabled: true };
-		}
-		return { label: "In view", enabled: false };
-	}
-	return { label: "View", enabled: true };
-}
-
-/**
- * The card's travel action. A trip leaves only from a dock: it is not re-routed in flight, and a trip
+ * The planner's travel action. A trip leaves only from a dock: it is not re-routed in flight, and a trip
  * within one body's orbit is not a burn. `cost` is the energy the cruise would spend. When the ship
- * does not have it, the trip stays on the card and cannot be set.
+ * does not have it, the trip stays on the planner and cannot be set.
  */
 export function travelAction(
 	target: ScanTarget,
@@ -244,6 +229,25 @@ export function travelAction(
 		return { label: `Travel · ${cost}`, enabled: true };
 	}
 	return { label: "Travel To", enabled: true };
+}
+
+/**
+ * Whether a planned coast can be set. `outbound` is the energy the burns spend. `reserve` is the
+ * cheapest return to home or Sol once those burns are paid. A trip the tank cannot cover reads
+ * Need. A trip that arrives too poor to get back reads Strand Risk and cannot be set.
+ */
+export function routeCommit(
+	energy: number,
+	outbound: number,
+	reserve: number
+): { label: string; enabled: boolean } {
+	if (Math.round(energy) < outbound) {
+		return { label: `Need ${outbound}`, enabled: false };
+	}
+	if (Math.round(energy) - outbound < reserve) {
+		return { label: "Strand Risk", enabled: false };
+	}
+	return { label: `Depart · ${outbound}`, enabled: true };
 }
 
 /** What Recall does from the ship's current berth. A countdown home can still be cancelled. */
@@ -305,3 +309,5 @@ export function recallMove(input: {
 export function secondsLeft(endsAt: number, now: number): number {
 	return Math.max(0, Math.ceil((endsAt - now) / 1000));
 }
+
+export { formatTravelTime } from "../travel-clock";

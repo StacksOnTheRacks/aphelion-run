@@ -10,7 +10,8 @@ import {
 	secondsLeft,
 	targetYields,
 	travelAction,
-	viewAction,
+	formatTravelTime,
+	routeCommit,
 	type ScanTarget,
 } from "./scan";
 
@@ -76,6 +77,13 @@ expect(
 		travelAction(mars, { at: "earth", departing: false, energy: 40 }, 84).label === "Need 84",
 	"a trip the ship cannot cover stays on the card"
 );
+expect(routeCommit(1000, 40, 20).label === "Depart · 40" && routeCommit(1000, 40, 20).enabled, "a coast the ship can return from can be set");
+expect(!routeCommit(30, 40, 10).enabled && routeCommit(30, 40, 10).label === "Need 40", "a coast the tank cannot cover reads Need");
+expect(
+	!routeCommit(50, 40, 20).enabled && routeCommit(50, 40, 20).label === "Strand Risk",
+	"a coast that arrives too poor to get home or to Sol is a strand risk"
+);
+expect(routeCommit(60, 40, 20).enabled, "arriving with exactly the return in hand can still be set");
 
 const homeBase: ScanTarget = { id: STARTING_DOCK_ID, host: "earth", kind: "home", owner: "corporate" };
 expect(scanCard(homeBase).label === "Home base" && scanCard(homeBase).kind === "Home base", "the starting station is the home base");
@@ -122,15 +130,6 @@ expect(showsCard(marsHome) && showsCard(earthStation) && showsCard(collector), "
 expect(showsCard(marsOre) && showsCard(phobosHydrogen), "a generator opens its card");
 expect(travelAction(marsOre, idleAtEarth).enabled, "a ship at Earth can travel to a mine at Mars");
 
-expect(viewAction(mars, "system").enabled, "a body can be viewed from the whole system");
-expect(viewAction(mars, "mars-outer").enabled && viewAction(mars, "mars-outer").label === "View", "a wide planet chart can come in on the planet");
-expect(!viewAction(mars, "mars-outer", true).enabled && viewAction(mars, "mars-outer", true).label === "In view", "a planet already framed close is in view");
-expect(!viewAction(titan, "saturn-titan-outer").enabled, "a moon chart is already the direct view");
-expect(viewAction(mars, "mars-inner").enabled, "from a body's inner orbit, View steps back out to its outer orbit");
-expect(viewAction(collector, "sun-inner").enabled, "a craft can always be ridden alongside");
-expect(viewAction(sun, "sun-outer").enabled, "the Sun's wide chart can come in on the Sun");
-expect(!viewAction(sun, "sun-outer", true).enabled, "the Sun already framed close is in view");
-
 const start = 1_000_000;
 const ends = start + DEPARTURE_SECONDS * 1000;
 expect(DEPARTURE_SECONDS === 5, "the countdown is five seconds");
@@ -139,6 +138,9 @@ expect(secondsLeft(ends, start + 1) === 5, "five holds until a whole second has 
 expect(secondsLeft(ends, start + 4_100) === 1, "the last second reads one");
 expect(secondsLeft(ends, ends) === 0, "the countdown ends at zero");
 expect(secondsLeft(ends, ends + 500) === 0, "a late tick still reads zero");
+expect(formatTravelTime(45) === "0:45", "a trip under a minute still shows the minutes");
+expect(formatTravelTime(84) === "1:24", "a trip reads as minutes and seconds");
+expect(formatTravelTime(3665) === "1:01:05", "a trip of an hour or more keeps the hours");
 
 if (failures.length > 0) {
 	for (const failure of failures) {
@@ -148,5 +150,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-	"scan cards name what was picked, View goes where the camera is not, Travel To leaves only from a dock or Earth, and the countdown runs five seconds"
+	"scan cards name what was picked, Travel To leaves only from a dock or Earth, and the countdown runs five seconds"
 );

@@ -142,6 +142,11 @@ export type ShipModel = {
 	drive: (leg: Drive, burn: number) => void;
 	/** Radius of the beacon in CSS pixels while it is drawn. Null while the hull is showing. */
 	beacon: () => number | null;
+	/**
+	 * Muzzle tip, in world units, along the ship's axes. The nose is +Z, starboard is +X,
+	 * and up is +Y. A docked mine or collector shifts the hull by this so the gun meets the port.
+	 */
+	readonly muzzle: Vector3;
 };
 
 /** Nodes on the hull that a camera can ride. Each looks along its own +Z. */
@@ -588,6 +593,9 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 		beacon() {
 			return hullOn ? null : BEACON_PIXELS / 2;
 		},
+		// The tip is measured in the hull's own units. The dock offset is in world units, the same
+		// space the berth is placed in. Leaving it unscaled parks the ship a hull-model above the port.
+		muzzle: muzzleLocal.scale(Math.abs(ship.scaling.x)),
 		mounts,
 		setPiloted(on) {
 			piloted = on;

@@ -44,9 +44,10 @@ const glass = centerFrame(1024, 420);
 const onTab = (index: number) => centerHit(1024, 420, glass.tabs[index].rect.x + 6, glass.tabs[index].rect.y + 6, "nav");
 expect(onTab(0) === null && onTab(1) === null && onTab(2) === null, "the mode marks are not controls");
 expect(centerPage(false) === "nav" && centerPage(true) === "mining", "drawing switches the glass to mining, and stopping returns it to navigation");
-const home = centerHit(1024, 420, glass.home.x + 8, glass.home.y + 8, "nav");
-expect(home?.kind === "home", "home sits on the navigation page");
-expect(centerHit(1024, 420, glass.home.x + 8, glass.home.y + 8, "mining") === null, "home is not a control on the mining page");
+expect(
+	centerHit(1024, 420, glass.content.x + glass.content.w - 8, glass.content.y + 8, "nav") === null,
+	"navigation has no recall control"
+);
 expect(centerHit(1024, 420, glass.content.x + 8, glass.content.y + 8, "nav") === null, "the chart itself is not a control");
 
 if (failures.length > 0) {

@@ -15,22 +15,23 @@ import {
 import { MINERALS } from "./demo/energy";
 import {
 	DEPARTURE_SECONDS,
-	scanCard,
 	recallMove,
+	routeCommit,
+	scanCard,
 	scanLabel,
 	showsCard,
 	secondsLeft,
 	travelAction,
 	targetYields,
-	viewAction,
 	type ScanTarget,
 } from "./demo/scan";
 import { pilotPlaque, viewPlaque } from "./demo/view-plaque";
 import { PilotCornerDock } from "./dashboard";
-import { centerHit, centerPage, holdStock, paintCenterPanel, type CargoLabel } from "./nav-glass";
+import { centerPage, holdStock, paintCenterPanel, type CargoLabel } from "./nav-glass";
 import { Hud, useHudAnchors } from "./hud";
+import type { TravelClock } from "./travel-clock";
 import { PILOT_VIEWPORT } from "./pilot-viewport";
-import { ScanModal } from "./scan-card";
+import { RoutePlanner } from "./route-planner";
 import { SpaceLabels, type LabelItem } from "./space-labels";
 
 type Mode = "chart" | "pilot";
@@ -71,8 +72,8 @@ function sameBerth(left: ScanTarget | null, right: ScanTarget | null): boolean {
 /**
  * Sol, and the chrome over it. Names follow the framing: a wide planet chart names the planet and its
  * moons, and a chart on one body names that body and what orbits it. A pick on a body goes there.
- * A pick on a home base, a station, or a collector opens a card: View rides alongside it, and Travel
- * To counts down and then flies the ship there from wherever it sits. The cockpit has no names and
+ * A pick on a home base, a station, a mine, or a collector opens the route planner: the description
+ * and the coast. The slider sets the speed, the time, and the burns, then counts down and flies. The cockpit has no names and
  * no picks.
  *
  * The HUD reads the chart on screen, the warehouse, and the ranger. On a chart the plaque names the
@@ -93,13 +94,22 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const [mode, setMode] = useState<Mode>("chart");
 	const [viewpoint, setViewpoint] = useState<PilotViewpoint>("interior");
 	const [found, setFound] = useState<ScanTarget[]>([]);
-	const [scanned, setScanned] = useState<ScanTarget | null>(null);
-	const [departure, setDeparture] = useState<{ target: ScanTarget; endsAt: number; cost: number } | null>(null);
+	const [departure, setDeparture] = useState<{ target: ScanTarget; endsAt: number; cost: number; speed: number } | null>(null);
+	const [planner, setPlanner] = useState<{
+		target: ScanTarget;
+		speed: number;
+		minSpeed: number;
+		maxSpeed: number;
+		reserve: number;
+		cost: number;
+		seconds: number;
+		course: boolean;
+	} | null>(null);
 	const [now, setNow] = useState(() => Date.now());
 	const [flight, setFlight] = useState<ScanTarget | null>(null);
 	const [docked, setDocked] = useState<ScanTarget | null>(() => system.berth());
 	const [hold, setHold] = useState(() => system.hold());
-	const [quote, setQuote] = useState<number | null>(null);
+	const [travel, setTravel] = useState<TravelClock | null>(null);
 	const [close, setClose] = useState(false);
 	const pilotFits = usePilotFits();
 	const piloting = mode === "pilot" && pilotFits;
@@ -118,14 +128,31 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 
 	const pick = useCallback(
 		(target: ScanTarget) => {
-			if (showsCard(target)) {
-				setScanned(target);
+			if (!showsCard(target)) {
+				setPlanner(null);
+				system.visit(target);
 				return;
 			}
-			setScanned(null);
-			system.visit(target);
+			const travel = travelAction(target, {
+				at: flight ? null : (docked?.host ?? "earth"),
+				departing: departure !== null,
+				energy: hold.energy,
+			});
+			const offered = travel.enabled ? system.offer(target) : null;
+			const speed = offered?.minSpeed ?? 0;
+			const preview = offered ? system.preview(target, speed) : null;
+			setPlanner({
+				target,
+				speed,
+				minSpeed: offered?.minSpeed ?? 0,
+				maxSpeed: offered?.maxSpeed ?? 0,
+				reserve: offered?.reserve ?? 0,
+				cost: preview?.cost ?? 0,
+				seconds: preview?.seconds ?? 0,
+				course: preview != null,
+			});
 		},
-		[system]
+		[departure, docked?.host, flight, hold.energy, system]
 	);
 
 	useEffect(() => system.onSelect((target) => go(target.view)), [system, go]);
@@ -135,8 +162,6 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const flightRef = useRef(flight);
 	flightRef.current = flight;
 	const pageRef = useRef(centerPage(false));
-	const homeRef = useRef({ enabled: false, detail: "Home base" });
-	const recallRef = useRef(() => {});
 	useEffect(
 		() =>
 			system.onHold((next) => {
@@ -151,6 +176,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		[system]
 	);
 	useEffect(() => system.setScanning(!piloting), [system, piloting]);
+	useEffect(() => system.onTravel(setTravel), [system]);
 	useEffect(() => system.setPiloting(piloting), [system, piloting]);
 	useEffect(
 		() =>
@@ -169,19 +195,9 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 							Nitrogen: live.cargo.nitrogen,
 							Carbon: live.cargo.carbon,
 						}),
-						{ page: pageRef.current, home: homeRef.current }
+						{ page: pageRef.current }
 					)
 				);
-			}),
-		[system]
-	);
-	useEffect(
-		() =>
-			system.onCenterTap((point) => {
-				const hit = centerHit(point.width, point.height, point.x, point.y, pageRef.current);
-				if (hit?.kind === "home") {
-					recallRef.current();
-				}
 			}),
 		[system]
 	);
@@ -194,14 +210,14 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	useEffect(() => system.setViewpoint(viewpoint), [system, viewpoint]);
 
 	const launch = useCallback(
-		(target: ScanTarget, cost: number) => {
+		(target: ScanTarget, cost: number, speed: number) => {
 			setDeparture(null);
 			setFlight(target);
 			setDocked(null);
 			system.travel(target, () => {
 				setFlight(null);
 				setDocked(system.berth());
-			}, cost);
+			}, cost, speed);
 		},
 		[system]
 	);
@@ -215,7 +231,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 			setNow(time);
 			if (secondsLeft(departure.endsAt, time) === 0) {
 				window.clearInterval(tick);
-				launch(departure.target, departure.cost);
+				launch(departure.target, departure.cost, departure.speed);
 			}
 		}, 100);
 		return () => window.clearInterval(tick);
@@ -226,14 +242,6 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		departing: departure !== null,
 		energy: hold.energy,
 	};
-	useEffect(() => {
-		if (!scanned) {
-			setQuote((last) => (last === null ? last : null));
-			return;
-		}
-		const cost = system.quote(scanned);
-		setQuote((last) => (last === cost ? last : cost));
-	}, [scanned, docked?.id, flight, system]);
 
 	const labels = useMemo<LabelItem[]>(() => {
 		if (piloting) {
@@ -269,7 +277,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 
 	const upRef = useRef<() => void>(() => {});
 	upRef.current = () => {
-		if (scanned) {
+		if (planner) {
 			return;
 		}
 		if (piloting) {
@@ -297,7 +305,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		if (!pilotFits && !piloting) {
 			return;
 		}
-		setScanned(null);
+		setPlanner(null);
 		if (piloting) {
 			setViewpoint("interior");
 		}
@@ -350,17 +358,15 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 			setDocked(system.berth());
 			return;
 		}
-		setDeparture({ target: home, endsAt: Date.now() + DEPARTURE_SECONDS * 1000, cost });
+		setDeparture({ target: home, endsAt: Date.now() + DEPARTURE_SECONDS * 1000, cost, speed: 0 });
 		setNow(Date.now());
 	};
 	const recallState = recallPlan();
-	homeRef.current = { enabled: recallState.plan.enabled, detail: recallState.plan.title };
-	recallRef.current = recall;
 
 	const location = piloting ? pilotPlaque(flight ? null : (docked?.host ?? null)) : viewPlaque(view, close);
 	const reserve =
-		scanned && (scanned.kind === "collector" || scanned.kind === "generator")
-			? `${Math.round(system.charge(scanned.id)).toLocaleString("en-US")} remaining`
+		planner && (planner.target.kind === "collector" || planner.target.kind === "generator")
+			? `${Math.round(system.charge(planner.target.id)).toLocaleString("en-US")} remaining`
 			: null;
 	const holdings: { id: CargoLabel; label: CargoLabel; amount: number }[] = [
 		{ id: "Hydrogen", label: "Hydrogen", amount: hold.base.hydrogen },
@@ -405,23 +411,49 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 							}))
 				}
 				fleet={!piloting}
+				travel={travel}
 			/>
-			{scanned ? (
-				<ScanModal
-					card={scanCard(scanned, docked?.id === scanned.id)}
+			{planner ? (
+				<RoutePlanner
+					card={scanCard(planner.target, docked?.id === planner.target.id)}
 					note={reserve}
-					view={viewAction(scanned, view, close)}
-					travel={travelAction(scanned, ship, quote)}
-					onClose={() => setScanned(null)}
-					onView={() => {
-						system.visit(scanned);
-						setScanned(null);
+					travel={travelAction(planner.target, ship)}
+					course={
+						planner.course
+							? {
+									speed: planner.speed,
+									minSpeed: planner.minSpeed,
+									maxSpeed: planner.maxSpeed,
+									cost: planner.cost,
+									seconds: planner.seconds,
+									reserve: planner.reserve,
+								}
+							: null
+					}
+					energy={hold.energy}
+					onSpeed={(speed) => {
+						const preview = system.preview(planner.target, speed);
+						setPlanner((current) =>
+							current && preview ? { ...current, speed, cost: preview.cost, seconds: preview.seconds } : current
+						);
 					}}
-					onTravel={() => {
-						const cost = quote ?? system.quote(scanned);
-						setDeparture({ target: scanned, endsAt: Date.now() + DEPARTURE_SECONDS * 1000, cost });
+					onClose={() => setPlanner(null)}
+					onCommit={() => {
+						if (!planner.course) {
+							return;
+						}
+						const commit = routeCommit(hold.energy, planner.cost, planner.reserve);
+						if (!commit.enabled) {
+							return;
+						}
+						setDeparture({
+							target: planner.target,
+							endsAt: Date.now() + DEPARTURE_SECONDS * 1000,
+							cost: planner.cost,
+							speed: planner.speed,
+						});
+						setPlanner(null);
 						setNow(Date.now());
-						setScanned(null);
 					}}
 				/>
 			) : null}

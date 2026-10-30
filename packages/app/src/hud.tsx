@@ -4,6 +4,7 @@ import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type
 import { Inter } from "next/font/google";
 
 import { ENERGY_CAPACITY } from "./demo/energy";
+import { formatTravelTime, travelShare, type TravelClock } from "./travel-clock";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "600", "700"] });
 
@@ -340,7 +341,8 @@ export function useHudAnchors(): { anchors: HudAnchors; keepOut: RefObject<HTMLE
  * The play chrome over the scene. A full-width header sits on the top edge. The place is a plaque fixed
  * to that edge, a little taller than the header row, so its bottom drops below the row. Holdings sit in
  * the row on a desktop and just under the plaque on a phone. The active ship
- * sits flush on the lower left, open along the bottom edge, with pilot, locate, and recall on its row. That bar opens into the fleet; choosing
+ * sits flush on the lower left, open along the bottom edge, with pilot, locate, and recall on its row. While the
+ * ship is traveling, the time left and its ring sit on that ship's portrait. The bar opens into the fleet; choosing
  * a ship makes it active and closes the list. The chart's step back sits at the lower right, in the
  * chamfered control. `leading` and `corner` can take that corner over.
  * One ship is listed: the ranger.
@@ -357,6 +359,7 @@ export function Hud({
 	leading,
 	corner,
 	fleet = true,
+	travel = null,
 }: {
 	anchors: HudAnchors;
 	location: { title: string; detail: string | null };
@@ -375,6 +378,8 @@ export function Hud({
 	corner?: ReactNode;
 	/** The active ship and its list. Off in the cockpit, where the console takes the bottom edge. */
 	fleet?: boolean;
+	/** Time left on the trip underway. Hidden when the ship is down. */
+	travel?: TravelClock | null;
 }) {
 	const [shipsOpen, setShipsOpen] = useState(false);
 	const [activeShipId, setActiveShipId] = useState<ShipId>("ranger");
@@ -479,7 +484,7 @@ export function Hud({
 												}}
 												className={`relative flex w-full items-center justify-start gap-2.5 p-2 text-left focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none min-[900px]:px-2 min-[900px]:py-1.5 ${active ? "bg-gradient-to-r from-[#C8641E]/25 via-[#2A1F08]/80 to-transparent before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-gradient-to-b before:from-[#FFD73D] before:to-[#C8641E] before:content-['']" : "hover:bg-[#FFD73D]/5"}`}
 											>
-												<ShipPortrait ship={ship} listed />
+												<ShipPortrait ship={ship} listed travel={active ? travel : null} />
 												<ShipName ship={ship} energy={energy} listed />
 											</button>
 										</li>
@@ -490,7 +495,7 @@ export function Hud({
 					) : (
 						<div role="group" aria-label={`${activeShip.name}, active ship`} className="pointer-events-auto relative isolate flex h-[58px] w-full items-center gap-2 p-2 min-[900px]:h-[52px] min-[900px]:py-1.5 min-[900px]:pr-2.5 min-[900px]:pl-2">
 							<Housing cut={{ tr: 14 }} highlight="top" border="except-bottom" />
-							<ShipPortrait ship={activeShip} />
+							<ShipPortrait ship={activeShip} travel={travel} />
 							<ShipName ship={activeShip} energy={energy} />
 							<ShipAction label="Pilot" action={pilot} icon="/hud/pilot.svg" />
 							<ShipAction label="Locate" action={locate} icon="/hud/locate.svg" />
@@ -531,20 +536,61 @@ export function Hud({
 	);
 }
 
-function ShipPortrait({ ship, listed = false }: { ship: (typeof SHIPS)[number]; listed?: boolean }) {
+function ShipPortrait({
+	ship,
+	listed = false,
+	travel = null,
+}: {
+	ship: (typeof SHIPS)[number];
+	listed?: boolean;
+	/** Time left, drawn over the portrait. Null when this ship is down. */
+	travel?: TravelClock | null;
+}) {
+	const label = travel ? formatTravelTime(travel.remaining) : "";
+	const share = travel ? travelShare(travel.remaining, travel.total) : 0;
+	const radius = 15.5;
+	const turn = 2 * Math.PI * radius;
 	return (
-		<span
-			className={`shrink-0 bg-gradient-to-br from-[#FFD73D] via-[#E9A92A]/60 to-[#C8641E] p-px ${listed ? "size-9" : "size-10"}`}
-			style={{ clipPath: chamfer(listed ? 6 : 8, "tr-bl") }}
-		>
-			<img
-				src={ship.portrait}
-				alt=""
-				width={40}
-				height={40}
-				className="size-full bg-[#0B0A07] object-cover"
-				style={{ clipPath: chamfer(listed ? 5.5 : 7.5, "tr-bl") }}
-			/>
+		<span className={`relative shrink-0 ${listed ? "size-9" : "size-10"}`}>
+			<span
+				className="absolute inset-0 bg-gradient-to-br from-[#FFD73D] via-[#E9A92A]/60 to-[#C8641E] p-px"
+				style={{ clipPath: chamfer(listed ? 6 : 8, "tr-bl") }}
+			>
+				<img
+					src={ship.portrait}
+					alt=""
+					width={40}
+					height={40}
+					className="size-full bg-[#0B0A07] object-cover"
+					style={{ clipPath: chamfer(listed ? 5.5 : 7.5, "tr-bl") }}
+				/>
+			</span>
+			{travel ? (
+				<span role="timer" aria-label={`${label} remaining`} className="pointer-events-none absolute inset-0">
+					<svg viewBox="0 0 36 36" className="h-full w-full -rotate-90" aria-hidden>
+						<circle cx="18" cy="18" r={radius} fill="none" stroke="rgba(7,8,10,0.45)" strokeWidth="2.25" />
+						<circle cx="18" cy="18" r={radius} fill="none" stroke="rgba(255,215,61,0.28)" strokeWidth="1.25" />
+						{share > 0 ? (
+							<circle
+								cx="18"
+								cy="18"
+								r={radius}
+								fill="none"
+								stroke="#FFD73D"
+								strokeWidth="1.25"
+								strokeLinecap={share > 0.985 ? "butt" : "round"}
+								strokeDasharray={`${turn * share} ${turn}`}
+							/>
+						) : null}
+					</svg>
+					<span
+						aria-hidden
+						className={`absolute inset-0 flex items-center justify-center font-bold text-[#ffd73d] tabular-nums drop-shadow-[0_1px_1px_rgba(0,0,0,0.95)] ${label.length > 5 ? "text-[6px]" : "text-[8px]"}`}
+					>
+						{label}
+					</span>
+				</span>
+			) : null}
 		</span>
 	);
 }
