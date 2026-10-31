@@ -23,7 +23,7 @@ export default function StylePage() {
 					className="border-b border-white/10 px-6 py-12 sm:px-10"
 					aria-labelledby={`${chapter.id}-title`}
 				>
-					<p className="text-xs tracking-[0.22em] text-amber-300/90 uppercase">{chapter.kicker}</p>
+					<p className="text-xs tracking-[0.22em] text-[#FFD73D]/90 uppercase">{chapter.kicker}</p>
 					<h2 id={`${chapter.id}-title`} className="mt-3 max-w-2xl text-2xl font-medium tracking-tight sm:text-3xl">
 						{chapter.title}
 					</h2>
@@ -36,7 +36,7 @@ export default function StylePage() {
 			))}
 
 			<section className="border-b border-white/10 px-6 py-12 sm:px-10" aria-labelledby="never">
-				<h2 id="never" className="text-xs tracking-[0.22em] text-amber-300/90 uppercase">
+				<h2 id="never" className="text-xs tracking-[0.22em] text-[#FFD73D]/90 uppercase">
 					Leave these off
 				</h2>
 				<ul className="mt-8 max-w-2xl space-y-3">
@@ -49,33 +49,41 @@ export default function StylePage() {
 			</section>
 
 			<section className="border-b border-white/10 px-6 py-12 sm:px-10" aria-labelledby="palette">
-				<h2 id="palette" className="text-xs tracking-[0.22em] text-amber-300/90 uppercase">
+				<h2 id="palette" className="text-xs tracking-[0.22em] text-[#FFD73D]/90 uppercase">
 					Palette
 				</h2>
 				<p className="mt-4 max-w-2xl text-sm leading-relaxed text-white/75">
-					On the map, a mark has to be read from the outer orbit. Class silhouettes are not designed yet. The objects
-					themselves stay quiet.
+					Gold is the energy, from a flare down to an ember. Bronze is that gold as metal, which is what a collector is.
+					Ion, copper, and nitrogen are the other reads, and they are not suns. Carbon stays bone, so it does not wear the
+					gold. On the map, a mark has to be read from the outer orbit.
 				</p>
-				<ul className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-					{PALETTE.map((swatch) => (
-						<li key={swatch.name} className="rounded-2xl border border-white/10 p-4">
-							<div
-								className="h-16 rounded-xl border border-white/10"
-								style={{ background: swatch.hex }}
-								aria-hidden
-							/>
-							<div className="mt-3 flex items-baseline justify-between gap-3">
-								<p className="text-sm">{swatch.name}</p>
-								<p className="font-mono text-xs text-white/40">{swatch.hex}</p>
-							</div>
-							<p className="mt-2 text-sm leading-relaxed text-white/60">{swatch.role}</p>
-						</li>
+				<div className="mt-8 space-y-10">
+					{(["Field", "Energy", "Reads"] as const).map((group) => (
+						<div key={group}>
+							<h3 className="text-xs tracking-[0.22em] text-white/45 uppercase">{group}</h3>
+							<ul className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+								{PALETTE.filter((swatch) => swatch.group === group).map((swatch) => (
+									<li key={swatch.name} className="rounded-2xl border border-white/10 p-4">
+										<div
+											className="h-16 rounded-xl border border-white/10"
+											style={{ background: swatch.hex }}
+											aria-hidden
+										/>
+										<div className="mt-3 flex items-baseline justify-between gap-3">
+											<p className="text-sm">{swatch.name}</p>
+											<p className="font-mono text-xs text-white/40">{swatch.hex}</p>
+										</div>
+										<p className="mt-2 text-sm leading-relaxed text-white/60">{swatch.role}</p>
+									</li>
+								))}
+							</ul>
+						</div>
 					))}
-				</ul>
+				</div>
 			</section>
 
 			<section className="border-b border-white/10 px-6 py-12 sm:px-10" aria-labelledby="yields">
-				<h2 id="yields" className="text-xs tracking-[0.22em] text-amber-300/90 uppercase">
+				<h2 id="yields" className="text-xs tracking-[0.22em] text-[#FFD73D]/90 uppercase">
 					Yields
 				</h2>
 				<p className="mt-4 max-w-2xl text-sm leading-relaxed text-white/75">
@@ -92,7 +100,7 @@ export default function StylePage() {
 			</section>
 
 			<section className="px-6 py-12 sm:px-10" aria-labelledby="read">
-				<h2 id="read" className="text-xs tracking-[0.22em] text-amber-300/90 uppercase">
+				<h2 id="read" className="text-xs tracking-[0.22em] text-[#FFD73D]/90 uppercase">
 					What the player must read
 				</h2>
 				<ol className="mt-8 grid gap-4 lg:grid-cols-2">
@@ -104,16 +112,16 @@ export default function StylePage() {
 					))}
 				</ol>
 				<div className="mt-10 flex flex-wrap gap-x-6 gap-y-3 text-sm">
-					<Link href="/" className="text-amber-300 hover:text-amber-200">
+					<Link href="/" className="text-[#FFD73D] hover:text-[#FFE7A3]">
 						The solar system
 					</Link>
-					<Link href="/story" className="text-amber-300 hover:text-amber-200">
+					<Link href="/story" className="text-[#FFD73D] hover:text-[#FFE7A3]">
 						The story
 					</Link>
-					<Link href="/rules" className="text-amber-300 hover:text-amber-200">
+					<Link href="/rules" className="text-[#FFD73D] hover:text-[#FFE7A3]">
 						Rules / play mechanics
 					</Link>
-					<Link href="/glossary" className="text-amber-300 hover:text-amber-200">
+					<Link href="/glossary" className="text-[#FFD73D] hover:text-[#FFE7A3]">
 						Glossary
 					</Link>
 				</div>

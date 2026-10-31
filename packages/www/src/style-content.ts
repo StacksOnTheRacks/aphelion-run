@@ -6,6 +6,7 @@ export type StyleChapter = {
 };
 
 export type StyleSwatch = {
+	group: "Field" | "Energy" | "Reads";
 	name: string;
 	hex: string;
 	role: string;
@@ -31,7 +32,7 @@ export const STYLE: StyleChapter[] = [
 		title: "Black space, and the planets",
 		paragraphs: [
 			"Space is black. The planets already carry the scenery. A ship, a warehouse, and a station sit in that field as volumes. If a shape has to be dressed up before it holds, the shape is wrong.",
-			"Type is bone-colored. Amber shows up on a kicker, a link, a cursor. Hulls stay quiet.",
+			"Type is bone-colored. Gold is the energy: a kicker, a link, a cursor, the burn. A collector is bronze, that same gold held as a body, not a separate orange. Hulls that are not collecting stay quiet.",
 		],
 	},
 	{
@@ -72,6 +73,7 @@ export const STYLE: StyleChapter[] = [
 ];
 
 export const NEVER = [
+	"A second warm color beside the gold. A collector is bronze, not orange.",
 	"Carnival lighting, and lens flare used as decoration.",
 	"Skulls, neon, or a pirate flag on a hull.",
 	"Jewel-cut icons for the yields.",
@@ -80,10 +82,19 @@ export const NEVER = [
 ];
 
 export const PALETTE: StyleSwatch[] = [
-	{ name: "Field", hex: "#000000", role: "The board. It stays empty." },
-	{ name: "Bone", hex: "#E8E4D9", role: "Type, edges, a quiet hull." },
-	{ name: "Amber", hex: "#FCD34D", role: "Kickers, links, a cursor." },
-	{ name: "Energy", hex: "#F5E6C8", role: "Held light. The haul and the burn." },
+	{ group: "Field", name: "Field", hex: "#000000", role: "The board. It stays empty." },
+	{ group: "Field", name: "Void", hex: "#07080A", role: "Panels, and the floor of the cockpit." },
+	{ group: "Field", name: "Bone", hex: "#E8E4D9", role: "Type, edges, a quiet hull. A carbon mine wears this, not gold." },
+	{ group: "Field", name: "Sand", hex: "#A89060", role: "A label that is not a signal." },
+	{ group: "Field", name: "Ash", hex: "#9AA3B2", role: "Inactive metal." },
+	{ group: "Energy", name: "Flare", hex: "#FFF3C4", role: "The hottest point of a burn." },
+	{ group: "Energy", name: "Gold", hex: "#FFD73D", role: "Energy. Bars, links, a cursor, the haul and the burn." },
+	{ group: "Energy", name: "Amber", hex: "#E8B23A", role: "The shade under gold." },
+	{ group: "Energy", name: "Bronze", hex: "#C48A2E", role: "A collector's body. The gold, held as metal." },
+	{ group: "Energy", name: "Ember", hex: "#A67C20", role: "Engaged. The deep end of the gold." },
+	{ group: "Reads", name: "Ion", hex: "#7ED4F0", role: "Hydrogen. The one cool color." },
+	{ group: "Reads", name: "Copper", hex: "#C46A3A", role: "Ore. Dug metal, not a collector." },
+	{ group: "Reads", name: "Nitrogen", hex: "#7C89D6", role: "Nitrogen. Dusty, so it does not lamp." },
 ];
 
 export const YIELDS: StyleYield[] = [

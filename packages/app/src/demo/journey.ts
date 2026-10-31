@@ -16,6 +16,7 @@ import type { GreasedLineBaseMesh } from "@babylonjs/core/Meshes/GreasedLine/gre
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
 
+import { palette } from "../palette";
 import { MINE_SIZE, SPEED_SCALE, SYSTEM_SCALE } from "./bases";
 import type { RingBody } from "./camera-path";
 import { CHART_LAYER, PILOT_LAYER } from "./cockpit";
@@ -500,9 +501,9 @@ const ASSIST_WIDTH = 0.5;
 /** Longest piece of the drawn line, in world units. The cockpit looks down it from on board. */
 const AHEAD_STEP = 2;
 
-const AMBER = Color3.FromHexString("#FCD34D");
+const AMBER = Color3.FromHexString(palette.gold);
 /** The coast and a gravity assist. Dimmer than a burn, so the engine-off stretches read as such. */
-const COAST = Color3.FromHexString("#8C6E3A");
+const COAST = Color3.FromHexString(palette.umber);
 
 /** The lane starts this far ahead of the ship, so its near end is still on the glass. */
 export const LANE_GAP = 8;
@@ -1453,7 +1454,7 @@ const LANE_FILL = 0.14;
 const PULSE_BOW = 0.45;
 /** Pulse stroke, as a multiple of the rail at the same distance. */
 const PULSE_STROKE = 2.2;
-const PULSE_COLOR = Color3.FromHexString("#FFE7A3");
+const PULSE_COLOR = Color3.FromHexString(palette.pulse);
 
 /** The windscreen's course. Unlit amber, see-through, and kept off the chart and the aft views. */
 function buildLane(scene: Scene): Mesh {

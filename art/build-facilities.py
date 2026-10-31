@@ -1,8 +1,11 @@
 """Mines and collectors for Aphelion Run.
 
 Built in the open ranger file, beside the ship, at the same relative size the
-game uses. The cuff is a copy of the ranger engine collar. The bore faces -X.
-The access ports face +Y and -Y. Up is +Z.
+game uses. The cuff is a copy of the ranger engine collar. Every aperture — the
+mine's bore and both access ports — is the same iris, set into the hull the way
+a camera hides its blades: the leaves sit inside the sphere, and the cuff fills
+the curve between the hull and those flat plates. The bore faces -X. The access
+ports face +Y and -Y. Up is +Z.
 
 Run inside Blender. Exports unit-scale glbs (sphere radius 1) next to this file's
 destination paths printed at the end.
@@ -31,14 +34,27 @@ PREVIEW_RADIUS = (MINE_DIAMETER_WORLD / HULL_WORLD) * HULL_BLENDER / 2
 
 BORE_INNER = 0.40
 PORT_INNER = 0.31
-# The hull mouth is smaller than the collar. A seat of the collar's own metal fills that
-# gap so the ring and the shutter read as one piece.
-PORT_MOUTH = 0.84
+# The hull opening is smaller than the collar, on the bore and the ports alike.
+# The cuff's lip covers the cut edge, so the ring and the shutter read as one piece.
+MOUTH = 0.84
+# The cuff's outer face. A little proud of the hull.
 FACE_PROUD = 1.075
-IRIS_DISTANCE = 1.045
-# Just behind the leaves and in front of the hull, so the hole reads as an opening.
-DISC_INSET = 0.036
+# The collector's sun-facing empty. It has no iris; the panel is aimed from here.
+PANEL_DISTANCE = 1.045
 BLADE_COUNT = 6
+# One leaf, in units of the cuff lip. The hinge sits just outside the lip, under
+# the cuff. The sweep is the side positive Z swings outward. Shut, the tip crosses
+# the center so six leaves seal the hole. The tuck is how far the rim hides
+# behind the cuff.
+LEAF_HINGE = 1.12
+LEAF_SWEEP = 60.0
+LEAF_PAST = 0.12
+LEAF_TUCK = 0.06
+# The leaves are stacked, so a shut iris with edges that only meet shows the
+# panel through the seam once the view is off the axis. This overlap closes it.
+LEAF_OVERLAP = 25.0
+BLADE_THICKNESS = 0.006
+BLADE_STACK = 0.0045
 
 created_meshes = []
 
@@ -53,12 +69,12 @@ def purge():
 		if isinstance(data, bpy.types.Mesh) and data.users == 0:
 			bpy.data.meshes.remove(data)
 	bpy.data.collections.remove(col)
-	for image in list(bpy.data.images):
-		if image.name.startswith("Facility ") and image.users == 0:
-			bpy.data.images.remove(image)
 	for mat in list(bpy.data.materials):
 		if mat.name.startswith("Facility ") and mat.users == 0:
 			bpy.data.materials.remove(mat)
+	for image in list(bpy.data.images):
+		if image.name.startswith("Facility ") and image.users == 0:
+			bpy.data.images.remove(image)
 
 
 def collection():
@@ -101,8 +117,7 @@ def principled(name, color, metallic, roughness, emission=0.0):
 	return mat
 
 
-def image_material(name, image, metallic, roughness, emission=0.0, uv_scale=1.0):
-	mat = principled(name, (1, 1, 1), metallic, roughness, emission)
+def _image_nodes(mat, image, uv_scale):
 	tree = mat.node_tree
 	bsdf = next(node for node in tree.nodes if node.type == "BSDF_PRINCIPLED")
 	tex = tree.nodes.new("ShaderNodeTexImage")
@@ -116,6 +131,24 @@ def image_material(name, image, metallic, roughness, emission=0.0, uv_scale=1.0)
 	tree.links.new(coord.outputs["UV"], mapping.inputs["Vector"])
 	tree.links.new(mapping.outputs["Vector"], tex.inputs["Vector"])
 	tree.links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
+	return bsdf, tex
+
+
+def image_material(name, image, metallic, roughness, emission=0.0, uv_scale=1.0):
+	mat = principled(name, (1, 1, 1), metallic, roughness, emission)
+	_image_nodes(mat, image, uv_scale)
+	return mat
+
+
+def circuit_material(name, image):
+	"""The board glows from its own traces. The cuff leaves this panel in shadow."""
+	mat = principled(name, (1, 1, 1), 0.35, 0.4, emission=2.4)
+	bsdf, tex = _image_nodes(mat, image, 1.0)
+	# The panel is larger than the artwork. Clamp so the margin stays the board edge.
+	tex.extension = "EXTEND"
+	emit = bsdf.inputs.get("Emission Color") or bsdf.inputs.get("Emission")
+	if emit is not None:
+		mat.node_tree.links.new(tex.outputs["Color"], emit)
 	return mat
 
 
@@ -176,9 +209,10 @@ def carbon_pixels(size):
 	return pixels
 
 
-def orange_pixels(size):
+def bronze_pixels(size):
+	"""Collector hull. The same gold as the energy theme, held as metal. Not cadmium orange."""
 	pixels = []
-	base = (0.93, 0.40, 0.09)
+	base = (0.93, 0.67, 0.24)
 	for y in range(size):
 		for x in range(size):
 			u = x / size
@@ -194,6 +228,121 @@ def orange_pixels(size):
 			if seam(u, 7) or seam(v, 5):
 				value *= 0.35
 			pixels.extend((base[0] * value, base[1] * value, base[2] * value, 1.0))
+	return pixels
+
+
+def circuit_pixels(size):
+	"""Board behind an iris. Chips, right-angle traces, and pads. Gold, with a cool net.
+
+	The disc maps this image onto the opening, so the busy part sits in the middle,
+	where the open aperture shows it.
+	"""
+	board = (0.035, 0.040, 0.050)
+	mask = (0.055, 0.062, 0.075)
+	gold = (1.0, 0.84, 0.24)
+	ion = (0.49, 0.83, 0.94)
+	pack = (0.09, 0.10, 0.12)
+	buf = [board[0], board[1], board[2]] * (size * size)
+	unit = size / 512.0
+
+	def put(x, y, color):
+		xi = int(x)
+		yi = int(y)
+		if xi < 0 or yi < 0 or xi >= size or yi >= size:
+			return
+		i = (yi * size + xi) * 3
+		buf[i] = color[0]
+		buf[i + 1] = color[1]
+		buf[i + 2] = color[2]
+
+	def fill(x0, y0, x1, y1, color):
+		for y in range(int(y0), int(y1)):
+			for x in range(int(x0), int(x1)):
+				put(x, y, color)
+
+	def stamp(cx, cy, radius, color):
+		reach = int(radius) + 1
+		limit = radius * radius
+		for y in range(int(cy) - reach, int(cy) + reach + 1):
+			for x in range(int(cx) - reach, int(cx) + reach + 1):
+				if (x - cx) * (x - cx) + (y - cy) * (y - cy) <= limit:
+					put(x, y, color)
+
+	def stroke(x0, y0, x1, y1, width, color):
+		span = max(abs(x1 - x0), abs(y1 - y0), 1.0)
+		steps = max(1, int(span / max(width * 0.45, 0.6)))
+		for i in range(steps + 1):
+			t = i / steps
+			stamp(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, width, color)
+
+	def route(x0, y0, x1, y1, width, color):
+		"""One right-angle trace, with a via on the corner."""
+		stroke(x0, y0, x1, y0, width, color)
+		stroke(x1, y0, x1, y1, width, color)
+		stamp(x0, y0, width * 1.7, color)
+		stamp(x1, y0, width * 1.7, color)
+		stamp(x1, y1, width * 1.7, color)
+
+	def chip(x, y, w, h, pins):
+		fill(x, y, x + w, y + h, pack)
+		stroke(x, y, x + w, y, unit * 1.2, gold)
+		stroke(x, y + h, x + w, y + h, unit * 1.2, gold)
+		stroke(x, y, x, y + h, unit * 1.2, gold)
+		stroke(x + w, y, x + w, y + h, unit * 1.2, gold)
+		for i in range(pins):
+			t = (i + 1) / (pins + 1)
+			stroke(x, y + h * t, x - unit * 7, y + h * t, unit * 1.1, gold)
+			stroke(x + w, y + h * t, x + w + unit * 7, y + h * t, unit * 1.1, gold)
+			stamp(x - unit * 7, y + h * t, unit * 2.2, gold)
+			stamp(x + w + unit * 7, y + h * t, unit * 2.2, gold)
+
+	# A few darker mask panels, so the board is not one unbroken fill.
+	cell = size // 6
+	for gy in range(6):
+		for gx in range(6):
+			if hash2(gx + 3, gy + 5) < 0.4:
+				continue
+			fill(gx * cell + 4, gy * cell + 4, (gx + 1) * cell - 4, (gy + 1) * cell - 4, mask)
+
+	# Packages. The largest sits on the middle of the opening.
+	packages = (
+		(0.34, 0.36, 0.32, 0.22, 5),
+		(0.12, 0.16, 0.16, 0.12, 3),
+		(0.70, 0.18, 0.14, 0.16, 4),
+		(0.16, 0.62, 0.18, 0.14, 3),
+		(0.68, 0.58, 0.18, 0.20, 4),
+		(0.42, 0.74, 0.16, 0.10, 3),
+	)
+	placed = []
+	for u, v, w, h, _pins in packages:
+		x = u * size
+		y = v * size
+		placed.append((x + w * size * 0.5, y + h * size * 0.5, x, y, w * size, h * size))
+
+	# Buses first, then the packages cover the lines where they meet a chip.
+	width = 2.0 * unit
+	fine = 1.3 * unit
+	links = (
+		(0, 1, False),
+		(0, 2, True),
+		(0, 3, False),
+		(0, 4, True),
+		(0, 5, False),
+		(1, 3, True),
+		(2, 4, False),
+		(3, 5, True),
+		(4, 5, False),
+	)
+	for a, b, cool in links:
+		x0, y0 = placed[a][0], placed[a][1]
+		x1, y1 = placed[b][0], placed[b][1]
+		route(x0, y0, x1, y1, fine if cool else width, ion if cool else gold)
+	for u, v, w, h, pins in packages:
+		chip(u * size, v * size, w * size, h * size, pins)
+
+	pixels = []
+	for i in range(0, len(buf), 3):
+		pixels.extend((buf[i], buf[i + 1], buf[i + 2], 1.0))
 	return pixels
 
 
@@ -275,9 +424,11 @@ def collar_source():
 	radii = [math.hypot(v.co.x, v.co.z) for v in mesh.vertices]
 	inner = min(radii)
 	outer = max(radii)
-	half = -min(v.co.y for v in mesh.vertices)
-	print(f"collar inner={inner:.4f} outer={outer:.4f} half={half:.4f}")
-	return mesh, inner, outer, half
+	ys = [v.co.y for v in mesh.vertices]
+	half = -min(ys)
+	depth = max(ys) - min(ys)
+	print(f"collar inner={inner:.4f} outer={outer:.4f} half={half:.4f} depth={depth:.4f}")
+	return mesh, inner, outer, half, depth
 
 
 def map_rotation(from_dir, to_dir):
@@ -307,7 +458,14 @@ def tighten_opening(mesh, inner, new_inner):
 	mesh.update()
 
 
-def place_collar(col, name, mesh, parent, outward, inner_target, unscaled_inner, unscaled_half, material, cover):
+def place_collar(col, name, mesh, parent, outward, inner_target, unscaled_inner, material, cover, back):
+	"""Seat the cuff on the hull, lip at `cover`, inner face at distance `back`.
+
+	The collar is stretched along its axis only when the blades sit deeper than
+	the collar is thick, so the ring still fills the recess down to the leaves.
+	The outer face stays at FACE_PROUD. Returns the cuff and the distance of its
+	inner face.
+	"""
 	# Each cuff needs its own mesh. A shared datablock exports as one glTF mesh, and the
 	# game then keeps only the first collar — the bore — and drops the access panels.
 	mesh = mesh.copy()
@@ -318,18 +476,33 @@ def place_collar(col, name, mesh, parent, outward, inner_target, unscaled_inner,
 	scale = inner_target / unscaled_inner
 	# Overlap the shutter, and bring the outer rim in with it so the band stays narrow.
 	tighten_opening(mesh, unscaled_inner, cover * 0.94 / scale)
+	y_front = min(vert.co.y for vert in mesh.vertices)
+	y_back = max(vert.co.y for vert in mesh.vertices)
+	natural = (y_back - y_front) * scale
+	desired = max(natural, FACE_PROUD - back)
+	factor = desired / natural if natural > 1e-6 else 1.0
+	if factor > 1.001:
+		for vert in mesh.vertices:
+			vert.co.y = y_front + (vert.co.y - y_front) * factor
+		try:
+			mesh.free_normals_split()
+		except (AttributeError, RuntimeError):
+			pass
+		mesh.update()
 	obj = new_object(col, name, mesh, parent)
 	obj.scale = (scale, scale, scale)
-	half = unscaled_half * scale
+	# -Y is the outer face. Stretching about that face leaves it where it is.
+	half = -y_front * scale
 	outward = outward.normalized()
 	obj.rotation_euler = map_rotation(Vector((0, -1, 0)), outward).to_euler()
 	obj.location = outward * (FACE_PROUD - half)
-	return obj, scale, half
+	return obj, FACE_PROUD - desired
 
 
-def disc(col, name, parent, radius, z, material):
+def disc(col, name, parent, radius, z, material, uv_span=None):
 	mesh = bpy.data.meshes.new(name)
 	segs = 48
+	span = radius if uv_span is None else uv_span
 	verts = [(0.0, 0.0, z)]
 	for i in range(segs):
 		a = math.tau * i / segs
@@ -337,97 +510,97 @@ def disc(col, name, parent, radius, z, material):
 	faces = [(0, 1 + i, 1 + (i + 1) % segs) for i in range(segs)]
 	mesh.from_pydata(verts, [], faces)
 	mesh.update()
+	mesh.uv_layers.new(name="UVMap")
+	layer = mesh.uv_layers["UVMap"].data
 	for poly in mesh.polygons:
 		poly.use_smooth = True
+		for li in poly.loop_indices:
+			vert = mesh.vertices[mesh.loops[li].vertex_index]
+			layer[li].uv = ((vert.co.x / span + 1.0) * 0.5, (vert.co.y / span + 1.0) * 0.5)
 	obj = new_object(col, name, mesh, parent)
 	obj.data.materials.append(material)
 	return obj
 
 
-# Hinge sits just inside the circular opening. The leaf never starts outside that circle.
-# Small enough that the leaves stay inside the round opening, open or shut.
-HINGE_FRACTION = 0.78
+def _wind(poly):
+	area = 0.0
+	for i, (x1, y1) in enumerate(poly):
+		x2, y2 = poly[(i + 1) % len(poly)]
+		area += x1 * y2 - x2 * y1
+	if area < 0:
+		poly.reverse()
+	return poly
 
 
-def _bezier(p0, p1, p2, count):
-	pts = []
-	for i in range(count):
-		t = i / (count - 1)
-		u = 1 - t
-		pts.append((u * u * p0[0] + 2 * u * t * p1[0] + t * t * p2[0], u * u * p0[1] + 2 * u * t * p1[1] + t * t * p2[1]))
-	return pts
+def _hull(points):
+	pts = sorted({(round(x, 6), round(y, 6)) for x, y in points})
+	if len(pts) <= 2:
+		return pts
+
+	def cross(o, a, b):
+		return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+	lower = []
+	for point in pts:
+		while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0:
+			lower.pop()
+		lower.append(point)
+	upper = []
+	for point in reversed(pts):
+		while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0:
+			upper.pop()
+		upper.append(point)
+	return lower[:-1] + upper[:-1]
 
 
-def blade_outline(opening):
-	"""One shutter leaf inside the round opening.
+def iris_leaf(lip):
+	"""One shutter leaf. The hinge is the origin and +Y points at the aperture center.
 
-	The hinge is the origin and +Y points at the aperture center. The plate rides
-	inside the hole, overlapping the next leaf, the way a camera iris sits inside
-	the lens ring. Positive Z opens it.
+	The plate lies on the side of the hinge that positive Z swings outward, so the
+	edges slide behind the cuff instead of climbing out of it. Shut, the tip crosses
+	the center and the six leaves cover the opening. The rim of the leaf sits just
+	past the lip, under the cuff.
 	"""
-	rim = HINGE_FRACTION
-	span = math.radians(150)
-	outer = []
-	steps = 15
+	hinge_r = lip * LEAF_HINGE
+	outer = lip * (1.0 + LEAF_TUCK)
+	past = lip * LEAF_PAST
+	start = math.radians(-90.0)
+	sweep = math.radians(LEAF_SWEEP)
+	steps = 24
+	arc = []
 	for i in range(steps):
-		angle = -span * i / (steps - 1)
-		outer.append((rim * math.cos(angle), rim * math.sin(angle)))
-	hinge = outer[0]
-	far = outer[-1]
-	# Tip reaches past the middle so six leaves cover the hole when shut.
-	tip = (-0.14, 0.05)
-	lead_ctrl = ((hinge[0] + tip[0]) * 0.5, (hinge[1] + tip[1]) * 0.5 - 0.10)
-	trail_ctrl = ((tip[0] + far[0]) * 0.5 - 0.04, (tip[1] + far[1]) * 0.5 - 0.05)
-	lead = _bezier(hinge, lead_ctrl, tip, 14)
-	trail = _bezier(tip, trail_ctrl, far, 8)
-	world = lead[:-1] + trail[1:-1] + list(reversed(outer[1:-1]))
-	local = [(y, rim - x) for x, y in world]
-	area = 0.0
-	for i, (x1, y1) in enumerate(local):
-		x2, y2 = local[(i + 1) % len(local)]
-		area += x1 * y2 - x2 * y1
-	if area < 0:
-		local.reverse()
-	return [(x * opening, y * opening) for x, y in local]
-
-
-def port_leaf(reach):
-	"""Side-port leaf that stays inside the round hole.
-
-	The hinge is the origin and the aperture center is at (0, reach). The outer
-	edge follows the hole so the leaf fills the port from behind the hull. The
-	leaf is mirrored so positive Z swings the tip out, the same way the bore opens.
-	"""
-	hole = reach * 0.88 / 0.94
-	center = (0.0, reach)
-
-	def on_hole(deg):
-		angle = math.radians(deg)
-		return (center[0] + hole * math.sin(angle), center[1] - hole * math.cos(angle))
-
-	outer = [on_hole(deg) for deg in range(-78, 72, 6)]
-	tip = (reach * 0.22, reach * 1.06)
-	lead = _bezier(outer[-1], (reach * 0.72, reach * 0.55), tip, 14)
-	trail = _bezier(tip, (-reach * 0.22, reach * 0.38), outer[0], 14)
-	pts = outer[:-1] + lead[:-1] + trail[1:-1]
-	# Mirror so positive Z swings the tip away from the center, matching the bore.
-	pts = [(-x, y) for x, y in pts]
-	area = 0.0
-	for i, (x1, y1) in enumerate(pts):
-		x2, y2 = pts[(i + 1) % len(pts)]
-		area += x1 * y2 - x2 * y1
-	if area < 0:
-		pts.reverse()
-	return pts
+		theta = start - sweep * i / (steps - 1)
+		arc.append((outer * math.cos(theta), hinge_r + outer * math.sin(theta)))
+	# Past the center, on the same side the leaf swings out, so the shut iris has no hole.
+	bias = math.radians(12.0)
+	tip = (past * math.cos(start - bias + math.pi), hinge_r + past * math.sin(start - bias + math.pi))
+	tip2 = (
+		past * 0.85 * math.cos(start - sweep * 0.42 + math.pi),
+		hinge_r + past * 0.85 * math.sin(start - sweep * 0.42 + math.pi),
+	)
+	foot = [(-lip * 0.05, lip * 0.04), (0.0, 0.0)]
+	poly = foot + arc + [tip2, tip]
+	clean = []
+	for point in poly:
+		if not clean or math.hypot(point[0] - clean[-1][0], point[1] - clean[-1][1]) > 1e-6:
+			clean.append(point)
+	# A second copy, turned about the hinge, then the hull of both. One plate,
+	# wide enough that the seam stays covered when the leaves are stacked.
+	turn = math.radians(LEAF_OVERLAP)
+	ca, sa = math.cos(turn), math.sin(turn)
+	widened = list(clean)
+	widened.extend((x * ca - y * sa, x * sa + y * ca) for x, y in clean)
+	return hinge_r, _wind(_hull(widened))
 
 
 def solid_blade(col, name, parent, outline, thickness, material):
+	"""A flat plate. Z = 0 faces out; the thickness steps inward, into the hull."""
 	mesh = bpy.data.meshes.new(name)
 	n = len(outline)
 	verts = []
 	for x, y in outline:
-		verts.append((x, y, thickness))
 		verts.append((x, y, 0.0))
+		verts.append((x, y, -thickness))
 	faces = []
 	top = []
 	bot = []
@@ -448,72 +621,6 @@ def solid_blade(col, name, parent, outline, thickness, material):
 	return obj
 
 
-def add_aperture(col, model, prefix, outward, inner, collar_mesh, collar_inner, collar_half, mats, with_iris, inside=False):
-	outward = outward.normalized()
-	# Side ports: cover the hull hole. Bore: cover the outer tips of the shutter.
-	cover = inner * PORT_MOUTH if inside else inner * HINGE_FRACTION
-	cuff, scale, half = place_collar(
-		col, f"{prefix}Cuff", collar_mesh, model, outward, inner, collar_inner, collar_half, mats["cuff"], cover
-	)
-	outer = max(math.hypot(v.co.x, v.co.z) for v in cuff.data.vertices) * scale
-	rot = map_rotation(Vector((0, 0, 1)), outward)
-	# Side ports sit behind the hull, in the hole. The bore stays where it already reads well.
-	if inside:
-		mouth = math.sqrt(max(0.0, 1.0 - inner * inner))
-		distance = mouth - 0.055
-		# Hinge sits on the rim of the hole so the leaves fill the port, under the cuff.
-		fit = inner * 0.96 / HINGE_FRACTION
-		stack = 0.016
-		thickness = 0.008
-	else:
-		distance = IRIS_DISTANCE
-		fit = inner
-		stack = 0.0022
-		thickness = 0.0035
-	pivot = empty(col, f"{prefix}Pivot", model, outward * distance, rot)
-	pivot["open_radians"] = 0.0
-	disc(col, f"{prefix}Throat", pivot, inner * 0.96, -0.04 if inside else -DISC_INSET, mats["throat"])
-	if with_iris:
-		if inside:
-			reach = inner * 0.94
-			outline = port_leaf(reach)
-		else:
-			reach = fit * HINGE_FRACTION
-			outline = blade_outline(fit)
-		blades = []
-		for index in range(BLADE_COUNT):
-			ang = math.tau * index / BLADE_COUNT
-			# Each leaf sits on the one before it, enough to read as a separate plate.
-			hinge = Vector((
-				math.cos(ang) * reach,
-				math.sin(ang) * reach,
-				(index - (BLADE_COUNT - 1) / 2) * stack,
-			))
-			inward = Vector((-hinge.x, -hinge.y))
-			phi = math.atan2(-inward.x, inward.y)
-			blade = solid_blade(col, f"{prefix}Iris.{index:03d}", pivot, outline, thickness, mats["iris"])
-			blade.location = hinge
-			blade.rotation_euler = (0.0, 0.0, phi)
-			blades.append((hinge.xy, phi, outline))
-		hole = hole_radius(blades, 0.0)
-		# Inside the sphere the leaves can pass the hole; the hull hides whatever sits behind it.
-		limit = 0.40 if inside else inner * 1.2
-		target = inner * (0.30 if inside else 0.34 * HINGE_FRACTION)
-		ceiling = math.radians(12 if inside else 40)
-		opened = 0.0
-		for step in range(1, 90):
-			angle = step * math.radians(1)
-			if angle > ceiling or blade_reach(blades, angle) > limit:
-				break
-			opened = angle
-			if hole_radius(blades, angle) >= target:
-				break
-		pivot["open_radians"] = opened
-		print(f"{prefix} closed hole={hole:.3f} open={math.degrees(opened):.1f}deg inside={inside} cuffOuter={outer:.3f}")
-	# Colored shoulder on the mine bore only. Ports stay bare metal.
-	return cuff, outer, half
-
-
 def _placed(blades, angle):
 	for hinge, phi, outline in blades:
 		a = phi + angle
@@ -523,12 +630,119 @@ def _placed(blades, angle):
 			yield hinge[0] + x * ca - y * sa, hinge[1] + x * sa + y * ca
 
 
-def hole_radius(blades, angle):
-	return min(math.hypot(x, y) for x, y in _placed(blades, angle))
+def _polys(blades, angle):
+	groups = []
+	for hinge, phi, outline in blades:
+		a = phi + angle
+		ca = math.cos(a)
+		sa = math.sin(a)
+		groups.append([(hinge[0] + x * ca - y * sa, hinge[1] + x * sa + y * ca) for x, y in outline])
+	return groups
+
+
+def _inside(x, y, poly):
+	inside = False
+	j = len(poly) - 1
+	for i in range(len(poly)):
+		xi, yi = poly[i]
+		xj, yj = poly[j]
+		if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi + 1e-15) + xi):
+			inside = not inside
+		j = i
+	return inside
+
+
+def _covers(polys, x, y):
+	return any(_inside(x, y, poly) for poly in polys)
+
+
+def _disk(blades, angle, radius, filled):
+	"""Whether the disc of `radius` is entirely covered, or entirely clear."""
+	polys = _polys(blades, angle)
+	if _covers(polys, 0.0, 0.0) != filled:
+		return False
+	rings = 7
+	samples = 48
+	for ring in range(1, rings + 1):
+		distance = radius * ring / rings
+		for i in range(samples):
+			angle_i = math.tau * i / samples
+			if _covers(polys, math.cos(angle_i) * distance, math.sin(angle_i) * distance) != filled:
+				return False
+	return True
 
 
 def blade_reach(blades, angle):
 	return max(math.hypot(x, y) for x, y in _placed(blades, angle))
+
+
+def open_travel(blades, lip):
+	"""Shut must seal the lip. Open is the first turn that clears it. Also the furthest reach."""
+	if not _disk(blades, 0.0, lip, True):
+		raise RuntimeError("The iris does not seal when it is shut.")
+	furthest = blade_reach(blades, 0.0)
+	# Clear past the lip, not just to it. Otherwise the blade edges sit on the
+	# ring and still read as protruding when the aperture is open.
+	for step in range(1, 86):
+		angle = math.radians(step)
+		furthest = max(furthest, blade_reach(blades, angle))
+		if _disk(blades, angle, lip * 1.06, False):
+			return angle, furthest
+	raise RuntimeError("The iris does not clear the opening when it is open.")
+
+
+def add_aperture(col, model, prefix, outward, inner, collar_mesh, collar_inner, collar_depth, mats):
+	"""One aperture, the same on the bore and the access ports.
+
+	The leaves are recessed inside the sphere. The cuff runs from the proud face
+	back to that plane, so it fills the gap between the curved hull and the flat
+	blades. Shut, the leaves cover the hole. Open, they have swung behind the cuff.
+	"""
+	outward = outward.normalized()
+	hole = inner * MOUTH
+	# The lip tighten_opening leaves, in the same units as the sphere.
+	lip = hole * 0.94
+	hinge_r, outline = iris_leaf(lip)
+	planned = []
+	for index in range(BLADE_COUNT):
+		ang = math.tau * index / BLADE_COUNT
+		hinge = (math.cos(ang) * hinge_r, math.sin(ang) * hinge_r)
+		phi = math.atan2(hinge[0], -hinge[1])
+		planned.append((hinge, phi, outline))
+	opened, furthest = open_travel(planned, lip)
+	# Far enough in that the open leaves stay inside the shell.
+	limit = math.sqrt(max(0.0, 1.0 - (furthest + 0.03) ** 2))
+	scale = inner / collar_inner
+	natural_back = FACE_PROUD - collar_depth * scale
+	blade_z = min(natural_back - 0.012, limit)
+	cuff, cuff_back = place_collar(
+		col, f"{prefix}Cuff", collar_mesh, model, outward, inner, collar_inner, mats["cuff"], hole, blade_z + 0.006
+	)
+	# The returned face is where the ring actually ends. Sit the leaves just behind it.
+	blade_z = cuff_back - 0.008
+	if furthest * furthest + blade_z * blade_z > 0.99:
+		raise RuntimeError(f"{prefix} iris would poke through the hull when open.")
+	mouth = math.sqrt(max(0.0, 1.0 - hole * hole))
+	rot = map_rotation(Vector((0, 0, 1)), outward)
+	# The pivot is the mouth. The beam and the ship's laser aim here; the leaves sit further in.
+	pivot = empty(col, f"{prefix}Pivot", model, outward * mouth, rot)
+	pivot["open_radians"] = opened
+	recess = blade_z - mouth
+	# The panel sits behind the leaves. A disc only as wide as the hole shows a
+	# dark gap once the view is off the axis, so it fills the shell at that depth.
+	disc_z = recess - BLADE_COUNT * BLADE_STACK - 0.03
+	plane = mouth + disc_z
+	room = math.sqrt(max(0.0, 1.0 - plane * plane))
+	disc(col, f"{prefix}Throat", pivot, room * 0.97, disc_z, mats["throat"], uv_span=hole * 1.02)
+	for index, (hinge, phi, shape) in enumerate(planned):
+		blade = solid_blade(col, f"{prefix}Iris.{index:03d}", pivot, shape, BLADE_THICKNESS, mats["iris"])
+		blade.location = Vector((hinge[0], hinge[1], recess - index * BLADE_STACK))
+		blade.rotation_euler = (0.0, 0.0, phi)
+	print(
+		f"{prefix} lip={lip:.3f} shut sealed open={math.degrees(opened):.0f}deg "
+		f"reach={furthest:.3f} bladeZ={blade_z:.3f} cuffBack={cuff_back:.3f}"
+	)
+	return pivot
 
 
 def accent_ring(col, model, outward, radius, distance, material):
@@ -696,7 +910,7 @@ def solar_cap(col, parent, material, bezel_mat):
 		poly.use_smooth = True
 	obj = new_object(col, "CollectorSolar", mesh, parent)
 	obj.data.materials.append(material)
-	# A dark rim where the panels meet the orange hull.
+	# A dark rim where the panels meet the bronze hull.
 	bezel = bpy.data.meshes.new("Facility Solar Bezel")
 	major = math.sin(ang) * 1.012
 	minor = 0.02
@@ -733,18 +947,19 @@ def build():
 	purge()
 	col = collection()
 	carbon = save_image("Facility Carbon", 512, 512, carbon_pixels(512))
-	orange = save_image("Facility Orange", 512, 512, orange_pixels(512))
+	bronze = save_image("Facility Bronze", 512, 512, bronze_pixels(512))
 	solar = save_image("Facility Solar", 512, 512, solar_pixels(512))
+	circuit = save_image("Facility Circuit", 1024, 1024, circuit_pixels(1024))
 	mats = {
 		"carbon": image_material("Facility Carbon", carbon, 0.25, 0.42, emission=0.04, uv_scale=1.15),
-		"orange": image_material("Facility Orange", orange, 0.08, 0.48, emission=0.12, uv_scale=1.0),
+		"bronze": image_material("Facility Bronze", bronze, 0.08, 0.48, emission=0.12, uv_scale=1.0),
 		"solar": image_material("Facility Solar", solar, 0.55, 0.28, emission=0.04, uv_scale=1),
 		"cuff": principled("Facility Cuff", (0.034, 0.040, 0.050), 0.45, 0.36, emission=0.02),
 		"iris": principled("Facility Iris", (0.045, 0.048, 0.052), 0.35, 0.55, emission=0.0),
-		"throat": principled("Facility Throat", (0.012, 0.013, 0.015), 0.2, 0.7, emission=0.0),
+		"throat": circuit_material("Facility Throat", circuit),
 		"accent": principled("Mine Accent", (0.78, 0.42, 0.22), 0.55, 0.32, emission=0.4),
 	}
-	collar_mesh, collar_inner, collar_outer, collar_half = collar_source()
+	collar_mesh, collar_inner, _collar_outer, _collar_half, collar_depth = collar_source()
 	# The copied mesh keeps the ranger material slot. Object assignment overrides it.
 	if len(collar_mesh.materials) == 0:
 		collar_mesh.materials.append(mats["cuff"])
@@ -762,21 +977,28 @@ def build():
 	bore = Vector((-1, 0, 0))
 	port = Vector((0, 1, 0))
 	starboard = Vector((0, -1, 0))
-	# Side mouths are open through the hull. The shutter lives behind them.
-	sphere(col, "MineBody", mine, mats["carbon"], ((port, PORT_INNER * PORT_MOUTH), (starboard, PORT_INNER * PORT_MOUTH)))
-	add_aperture(col, mine, "MineBore", bore, BORE_INNER, collar_mesh, collar_inner, collar_half, mats, True)
-	add_aperture(col, mine, "MinePort", port, PORT_INNER, collar_mesh, collar_inner, collar_half, mats, True, inside=True)
-	add_aperture(col, mine, "MineStarboard", starboard, PORT_INNER, collar_mesh, collar_inner, collar_half, mats, True, inside=True)
+	# Every mouth is open through the hull. The shutter sits inside it, behind the cuff.
+	sphere(col, "MineBody", mine, mats["carbon"], (
+		(bore, BORE_INNER * MOUTH),
+		(port, PORT_INNER * MOUTH),
+		(starboard, PORT_INNER * MOUTH),
+	))
+	add_aperture(col, mine, "MineBore", bore, BORE_INNER, collar_mesh, collar_inner, collar_depth, mats)
+	add_aperture(col, mine, "MinePort", port, PORT_INNER, collar_mesh, collar_inner, collar_depth, mats)
+	add_aperture(col, mine, "MineStarboard", starboard, PORT_INNER, collar_mesh, collar_inner, collar_depth, mats)
 	# The accent sits on the hull side of the bore cuff, a band of the mined color.
 	accent_ring(col, mine, bore, BORE_INNER + 0.16, FACE_PROUD - 0.12, mats["accent"])
 
 	collector_root, collector = facility("Collector", Vector((24, 0, 0)))
-	sphere(col, "CollectorBody", collector, mats["orange"], ((port, PORT_INNER * PORT_MOUTH), (starboard, PORT_INNER * PORT_MOUTH)))
+	sphere(col, "CollectorBody", collector, mats["bronze"], (
+		(port, PORT_INNER * MOUTH),
+		(starboard, PORT_INNER * MOUTH),
+	))
 	solar_cap(col, collector, mats["solar"], mats["cuff"])
-	# Same facing empty as a mine so the game aims the panel at the sun.
-	empty(col, "CollectorBorePivot", collector, bore * IRIS_DISTANCE, map_rotation(Vector((0, 0, 1)), bore))
-	add_aperture(col, collector, "CollectorPort", port, PORT_INNER, collar_mesh, collar_inner, collar_half, mats, True, inside=True)
-	add_aperture(col, collector, "CollectorStarboard", starboard, PORT_INNER, collar_mesh, collar_inner, collar_half, mats, True, inside=True)
+	# Same facing empty as a mine so the game aims the panel at the sun. No iris here.
+	empty(col, "CollectorBorePivot", collector, bore * PANEL_DISTANCE, map_rotation(Vector((0, 0, 1)), bore))
+	add_aperture(col, collector, "CollectorPort", port, PORT_INNER, collar_mesh, collar_inner, collar_depth, mats)
+	add_aperture(col, collector, "CollectorStarboard", starboard, PORT_INNER, collar_mesh, collar_inner, collar_depth, mats)
 
 	bpy.context.view_layer.update()
 	print(f"preview radius {PREVIEW_RADIUS:.3f}")

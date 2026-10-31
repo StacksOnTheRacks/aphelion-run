@@ -73,7 +73,7 @@ export function RoutePlanner({
 			>
 				<div className="flex items-start justify-between gap-3">
 					<div>
-						<p className="text-[11px] tracking-[0.22em] text-amber-300 uppercase">
+						<p className="text-[11px] tracking-[0.22em] text-[#FFD73D] uppercase">
 							{card.kind}
 							{card.owner ? <span className="text-white/45"> · {card.owner}</span> : null}
 						</p>
@@ -86,7 +86,7 @@ export function RoutePlanner({
 						type="button"
 						aria-label="Close"
 						onClick={onClose}
-						className="touch-manipulation flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[#E8E4D9]/70 transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+						className="touch-manipulation flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[#E8E4D9]/70 transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-[#FFD73D]/70 focus-visible:outline-none"
 					>
 						<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
 							<path d="M3.5 3.5 12.5 12.5M12.5 3.5 3.5 12.5" strokeLinecap="round" />
@@ -94,11 +94,11 @@ export function RoutePlanner({
 					</button>
 				</div>
 				<p className="mt-3 text-sm leading-relaxed text-white/70">{card.text}</p>
-				{note ? <p className="mt-3 text-sm tracking-wide text-amber-200">{note}</p> : null}
+				{note ? <p className="mt-3 text-sm tracking-wide text-[#FFE7A3]">{note}</p> : null}
 				{course ? (
 					<>
 						<label className="mt-4 block text-[11px] tracking-[0.22em] text-white/55 uppercase" htmlFor="cruise-speed">
-							Cruise speed <span className="text-amber-200">{course.speed.toFixed(1)}</span>
+							Cruise speed <span className="text-[#FFE7A3]">{course.speed.toFixed(1)}</span>
 						</label>
 						<input
 							id="cruise-speed"
@@ -109,10 +109,10 @@ export function RoutePlanner({
 							value={course.speed}
 							disabled={fixed}
 							onChange={(event) => onSpeed(Number(event.target.value))}
-							className="mt-2 w-full accent-amber-300 disabled:opacity-50"
+							className="mt-2 w-full accent-[#FFD73D] disabled:opacity-50"
 						/>
 						<p className="mt-4 text-sm tracking-wide text-white/70">Time · {formatTravelTime(course.seconds)}</p>
-						<p className="mt-1 text-sm tracking-wide text-amber-200">Burns · {course.cost.toLocaleString("en-US")}</p>
+						<p className="mt-1 text-sm tracking-wide text-[#FFE7A3]">Burns · {course.cost.toLocaleString("en-US")}</p>
 						<p className="mt-1 text-sm tracking-wide text-white/70">On arrival · {left.toLocaleString("en-US")}</p>
 						{commit.label === "Strand Risk" ? (
 							<p className="mt-2 text-sm leading-relaxed text-white/70">
@@ -127,7 +127,7 @@ export function RoutePlanner({
 						type="button"
 						onClick={onCommit}
 						disabled={!commit.enabled}
-						className="touch-manipulation flex-1 rounded-xl bg-amber-300 px-4 py-2.5 text-[11px] tracking-[0.22em] text-black uppercase transition-colors hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/45 disabled:hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+						className="touch-manipulation flex-1 rounded-xl bg-[#FFD73D] px-4 py-2.5 text-[11px] tracking-[0.22em] text-black uppercase transition-colors hover:bg-[#FFE7A3] disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/45 disabled:hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-[#FFD73D]/70 focus-visible:outline-none"
 					>
 						{commit.label}
 					</button>

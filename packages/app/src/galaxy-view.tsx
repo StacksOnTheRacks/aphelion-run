@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { NEIGHBORS, SOL_ID, systemCard, systemCardAction, type GalaxyDemo, type StarClass, type SystemCard } from "./demo/galaxy";
+import { palette } from "./palette";
 import { Hud, useHudAnchors, type WarehouseHolding } from "./hud";
 import { SpaceLabels, type LabelItem } from "./space-labels";
 
@@ -106,7 +107,7 @@ function SystemModal({ card, onClose, onEnter }: { card: SystemCard; onClose: ()
 				</div>
 				<div className="mt-4 flex items-start justify-between gap-3">
 					<div>
-						<p className="text-[11px] tracking-[0.22em] text-amber-300 uppercase">
+						<p className="text-[11px] tracking-[0.22em] text-[#FFD73D] uppercase">
 							{card.charted ? "Charted" : "Uncharted"}
 						</p>
 						<h2 id={titleId} className="mt-1 text-lg tracking-wide text-[#E8E4D9]">
@@ -118,7 +119,7 @@ function SystemModal({ card, onClose, onEnter }: { card: SystemCard; onClose: ()
 						type="button"
 						aria-label="Close"
 						onClick={onClose}
-						className="touch-manipulation flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[#E8E4D9]/70 transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+						className="touch-manipulation flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[#E8E4D9]/70 transition-colors hover:bg-white/10 hover:text-[#E8E4D9] focus-visible:ring-1 focus-visible:ring-[#FFD73D]/70 focus-visible:outline-none"
 					>
 						<svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
 							<path d="M3.5 3.5 12.5 12.5M12.5 3.5 3.5 12.5" strokeLinecap="round" />
@@ -131,7 +132,7 @@ function SystemModal({ card, onClose, onEnter }: { card: SystemCard; onClose: ()
 					type="button"
 					onClick={onEnter}
 					disabled={!action.enabled}
-					className="touch-manipulation mt-5 w-full rounded-xl bg-amber-300 px-4 py-2.5 text-[11px] tracking-[0.22em] text-black uppercase transition-colors hover:bg-amber-200 disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/45 disabled:hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-amber-300/70 focus-visible:outline-none"
+					className="touch-manipulation mt-5 w-full rounded-xl bg-[#FFD73D] px-4 py-2.5 text-[11px] tracking-[0.22em] text-black uppercase transition-colors hover:bg-[#FFE7A3] disabled:cursor-not-allowed disabled:bg-white/10 disabled:text-white/45 disabled:hover:bg-white/10 focus-visible:ring-1 focus-visible:ring-[#FFD73D]/70 focus-visible:outline-none"
 				>
 					{action.label}
 				</button>
@@ -142,7 +143,7 @@ function SystemModal({ card, onClose, onEnter }: { card: SystemCard; onClose: ()
 
 /** Stand-in portrait until a system has its own image. Charted Sol shows its orbits; the rest show a star. */
 function SurveyPlate({ charted, star }: { charted: boolean; star?: StarClass }) {
-	const color = charted ? "#FDE68A" : star ? STAR_COLOR[star] : "#E8E4D9";
+	const color = charted ? palette.pulse : star ? STAR_COLOR[star] : palette.bone;
 	return (
 		<svg viewBox="0 0 320 180" className="h-full w-full" aria-hidden>
 			<rect width="320" height="180" fill="#07080f" />

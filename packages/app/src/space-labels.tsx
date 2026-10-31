@@ -4,7 +4,8 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } f
 import { Inter } from "next/font/google";
 
 import { placeLabels, type LabelSource, type Rect } from "./demo/labels";
-import { RESOURCE_ICON } from "./hud";
+import { ResourceMark } from "./hud";
+import { elementColor, type ElementId } from "./palette";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "600", "700"] });
 
@@ -197,7 +198,7 @@ export function SpaceLabels({
 							>
 								<LabelPlate />
 								{item.current ? (
-									<span aria-hidden className="size-[5px] shrink-0 rotate-45 bg-gradient-to-br from-[#FFD73D] to-[#C8641E] shadow-[0_0_6px_rgba(232,140,40,0.8)]" />
+									<span aria-hidden className="size-[5px] shrink-0 rotate-45 bg-gradient-to-br from-[#FFD73D] to-[#A67C20] shadow-[0_0_6px_rgba(196,138,46,0.8)]" />
 								) : null}
 								{item.label}
 								<Yields resources={item.resources} />
@@ -219,7 +220,7 @@ export function SpaceLabels({
 
 /** The marks for what a ship can take here, set off from the name by a short gold rule. */
 function Yields({ resources }: { resources?: readonly string[] }) {
-	const shown = (resources ?? []).filter((id) => RESOURCE_ICON[id]);
+	const shown = (resources ?? []).filter((id): id is ElementId => id in elementColor);
 	if (shown.length === 0) {
 		return null;
 	}
@@ -228,7 +229,7 @@ function Yields({ resources }: { resources?: readonly string[] }) {
 			<span aria-hidden className="ml-0.5 h-2.5 w-px shrink-0 bg-gradient-to-b from-transparent via-[#FFD73D]/45 to-transparent" />
 			<span aria-hidden className="flex items-center gap-1">
 				{shown.map((id) => (
-					<img key={id} src={RESOURCE_ICON[id]} alt="" width={10} height={10} className="size-2.5 shrink-0 drop-shadow-[0_0_2px_rgba(233,169,42,0.6)]" />
+					<ResourceMark key={id} id={id} className="size-2.5 shrink-0" />
 				))}
 			</span>
 			<span className="sr-only">, yields {shown.join(", ")}</span>
@@ -287,7 +288,7 @@ function LabelPlate() {
 						</linearGradient>
 						<linearGradient id={`${gradientId}-spine`} x1="0" y1="0" x2="0" y2={size.h} gradientUnits="userSpaceOnUse">
 							<stop offset="0" stopColor="#FFD73D" />
-							<stop offset="1" stopColor="#C8641E" />
+							<stop offset="1" stopColor="#A67C20" />
 						</linearGradient>
 					</defs>
 				</>

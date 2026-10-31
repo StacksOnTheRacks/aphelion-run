@@ -1,9 +1,10 @@
 import { CARGO_CAPACITY, ENERGY_CAPACITY } from "./demo/energy";
+import { palette } from "./palette";
 import { LOCAL_REACH, bearing, bodyLabel, localBody, localPoint, systemPoint, type NavBody, type NavFix } from "./demo/nav";
 import { formatTravelTime, travelShare } from "./travel-clock";
 
-const AMBER = "#FCD34D";
-const BONE = "#E8E4D9";
+const AMBER = palette.gold;
+const BONE = palette.bone;
 /** CSS pixels across each round map on the flat console. The center glass scales this drawing up. */
 export const MAP_SIZE = 148;
 /** One turn of the sweep across the system map, in seconds. */
@@ -603,8 +604,8 @@ function paintNav(context: CanvasRenderingContext2D, frame: CenterFrame, fix: Na
 	context.fillStyle = "rgba(255,215,61,0.12)";
 	context.fillRect(textX, y, readW, bar);
 	const fill = context.createLinearGradient(textX, y, textX + readW, y);
-	fill.addColorStop(0, "#C8641E");
-	fill.addColorStop(1, "#FFD73D");
+	fill.addColorStop(0, palette.ember);
+	fill.addColorStop(1, palette.gold);
 	context.fillStyle = fill;
 	context.fillRect(textX, y, readW * ((progress ?? 0) / 100), bar);
 
@@ -634,9 +635,9 @@ function paintMeter(
 	context.fillRect(area.x, barY, area.w, barH);
 	if (share > 0) {
 		const fill = context.createLinearGradient(area.x, barY, area.x + area.w, barY);
-		fill.addColorStop(0, "#C8641E");
-		fill.addColorStop(0.7, "#E9A92A");
-		fill.addColorStop(1, "#FFD73D");
+		fill.addColorStop(0, palette.ember);
+		fill.addColorStop(0.7, palette.amber);
+		fill.addColorStop(1, palette.gold);
 		context.fillStyle = fill;
 		context.fillRect(area.x, barY, Math.max(2, area.w * share), barH);
 	}
@@ -686,8 +687,8 @@ function paintBattle(context: CanvasRenderingContext2D, area: Rect): void {
 }
 
 function paintTab(context: CanvasRenderingContext2D, rect: Rect, label: string, selected: boolean): void {
-	const fill = selected ? vertical(context, rect, "#FFF0A8", "#C8941A") : vertical(context, rect, "#221C10", "#0C0B08");
-	plate(context, rect, fill, selected ? "rgba(255,240,168,0.95)" : "rgba(255,215,61,0.32)", 8);
+	const fill = selected ? vertical(context, rect, palette.flare, palette.bronze) : vertical(context, rect, "#221C10", "#0C0B08");
+	plate(context, rect, fill, selected ? "rgba(255,243,196,0.95)" : "rgba(255,215,61,0.32)", 8);
 	const size = Math.max(12, Math.round(rect.h * 0.38));
 	const ink = selected ? "#1A1200" : AMBER;
 	write(context, label.toUpperCase(), size, ink, "center", rect.x + rect.w / 2, rect.y + (rect.h - size) / 2, 700);

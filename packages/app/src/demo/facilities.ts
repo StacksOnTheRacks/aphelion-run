@@ -13,6 +13,7 @@ import type { Scene } from "@babylonjs/core/scene";
 
 import "@babylonjs/loaders/glTF";
 
+import { CARBON, palette } from "../palette";
 import { MINE_SIZE } from "./bases";
 import type { Mineral } from "./generators";
 
@@ -30,14 +31,14 @@ const FACE_INWARD = Math.PI;
 const IRIS_EASE = 8;
 
 /**
- * A band of the mineral's color on an otherwise carbon hull.
- * Carbon itself is amber, so it still reads against the gray weave.
+ * A band of the mineral's color on an otherwise gray hull.
+ * Carbon wears bone, so the band is pale and does not read as energy.
  */
 const ACCENT: Record<Mineral, Color3> = {
-	hydrogen: Color3.FromHexString("#7ED4F0"),
-	ore: Color3.FromHexString("#C46A3A"),
-	nitrogen: Color3.FromHexString("#6C7CFF"),
-	carbon: Color3.FromHexString("#E2B15A"),
+	hydrogen: Color3.FromHexString(palette.ion),
+	ore: Color3.FromHexString(palette.copper),
+	nitrogen: Color3.FromHexString(palette.nitrogen),
+	carbon: Color3.FromHexString(CARBON),
 };
 
 type Aperture = {
@@ -197,8 +198,9 @@ function replicate(source: Node, parent: TransformNode | null, id: string): Tran
 }
 
 /**
- * The collector's orange is a bright texture. Next to the Sun that clips to white, so the hull is
- * held down and given an orange glow, and the solar cap keeps a little blue of its own.
+ * The collector's body is bronze, the same gold as a solid. Next to the Sun a full-bright map
+ * clips to white, so the hull is held down and given a bronze glow. The solar cap keeps a little
+ * blue of its own. Older exports still name the material Orange.
  */
 function dressCollector(root: Node): void {
 	for (const mesh of childMeshes(root)) {
@@ -206,9 +208,9 @@ function dressCollector(root: Node): void {
 		if (!(material instanceof PBRMaterial)) {
 			continue;
 		}
-		if (material.name.includes("Orange")) {
-			material.albedoColor.set(0.42, 0.42, 0.42);
-			material.emissiveColor.set(0.28, 0.09, 0.015);
+		if (material.name.includes("Bronze") || material.name.includes("Orange")) {
+			material.albedoColor.set(0.5, 0.5, 0.5);
+			material.emissiveColor.set(0.4, 0.29, 0.1);
 			material.emissiveIntensity = 0.45;
 		} else if (material.name.includes("Solar")) {
 			material.emissiveColor.set(0.02, 0.05, 0.12);

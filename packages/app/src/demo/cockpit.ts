@@ -16,6 +16,7 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 
+import { palette } from "../palette";
 import { SYSTEM_SCALE } from "./bases";
 import { COCKPIT_LAYER, HULL_LENGTH, SHIP_LAYER, type ShipMounts } from "./ranger";
 
@@ -247,7 +248,7 @@ function feed(scene: Scene, each: Rig, meshName: string): void {
 	mesh.material = glass;
 }
 
-const LABEL_AMBER = "#FCD34D";
+const LABEL_AMBER = palette.gold;
 const LABEL_FACE = "ui-sans-serif, system-ui, sans-serif";
 
 /**

@@ -213,7 +213,7 @@ function LoadingScreen({ label, progress, visible }: { label: string; progress: 
 			<p className="text-sm font-medium tracking-[0.32em] text-[#E8E4D9] uppercase">Aphelion Run</p>
 			<div className="h-px w-48 overflow-hidden bg-white/15">
 				<div
-					className="h-full bg-amber-300 transition-[width] duration-300"
+					className="h-full bg-[#FFD73D] transition-[width] duration-300"
 					style={{ width: `${Math.round(Math.max(0.06, progress) * 100)}%` }}
 				/>
 			</div>

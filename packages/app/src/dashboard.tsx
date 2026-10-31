@@ -389,7 +389,7 @@ function MapPane({ label, canvasRef }: { label: string; canvasRef: RefObject<HTM
 			style={{ width: MAP_SIZE, height: MAP_SIZE }}
 		>
 			<canvas ref={canvasRef} aria-hidden width={MAP_SIZE} height={MAP_SIZE} className="h-full w-full" />
-			<span className="absolute inset-x-0 bottom-[19px] text-center text-[10px] font-semibold tracking-[1.6px] text-[#fcd34d] uppercase">
+			<span className="absolute inset-x-0 bottom-[19px] text-center text-[10px] font-semibold tracking-[1.6px] text-[#FFD73D] uppercase">
 				{label}
 			</span>
 		</div>
@@ -404,7 +404,7 @@ function HoldPane({ stock }: { stock: HoldStock }) {
 	];
 	return (
 		<section aria-label="Hold" className="flex shrink-0 flex-col justify-center gap-1.5" style={{ width: MAP_SIZE, height: MAP_SIZE }}>
-			<p className="text-[10px] font-semibold tracking-[1.6px] text-[#fcd34d] uppercase">Hold</p>
+			<p className="text-[10px] font-semibold tracking-[1.6px] text-[#FFD73D] uppercase">Hold</p>
 			<ul className="flex flex-col gap-1.5">
 				{meters.map((line) => {
 					const amount = Math.round(line.amount);
@@ -414,7 +414,7 @@ function HoldPane({ stock }: { stock: HoldStock }) {
 						<li key={line.label}>
 							<p className="flex items-baseline justify-between gap-2 text-[10px] tracking-[1.2px] uppercase">
 								<span className="text-[#E8E4D9]/45">{line.label}</span>
-								<span className={line.label === "Energy" ? "text-[#fcd34d]" : "text-[#e8e4d9]"}>
+								<span className={line.label === "Energy" ? "text-[#FFD73D]" : "text-[#e8e4d9]"}>
 									{amount.toLocaleString("en-US")}
 								</span>
 							</p>

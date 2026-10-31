@@ -1,3 +1,4 @@
+import { palette } from "../palette";
 import { Constants } from "@babylonjs/core/Engines/constants";
 import { ShaderMaterial } from "@babylonjs/core/Materials/shaderMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
@@ -22,9 +23,9 @@ const LIT = 0.04;
 /** The shaders' clock wraps this often, in seconds, so it keeps its precision on the GPU. */
 const CLOCK_WRAP = 600;
 
-const WHITE_HOT = Color3.FromHexString("#FFF8EC");
-const GOLD = Color3.FromHexString("#E9C993");
-const EMBER = Color3.FromHexString("#E07A2E");
+const WHITE_HOT = Color3.FromHexString(palette.whiteHot);
+const GOLD = Color3.FromHexString(palette.beam);
+const EMBER = Color3.FromHexString(palette.bronze);
 
 /**
  * Everything is drawn in view space, so it holds up in the mirrored aft views and when the world is

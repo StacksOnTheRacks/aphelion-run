@@ -4,6 +4,7 @@ import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type
 import { Inter } from "next/font/google";
 
 import { ENERGY_CAPACITY } from "./demo/energy";
+import { elementColor, type ElementId, palette } from "./palette";
 import { formatTravelTime, travelShare, type TravelClock } from "./travel-clock";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "600", "700"] });
@@ -126,12 +127,12 @@ export function Housing({
 	);
 }
 
-/** The HUD keeps to these. Gold carries every signal; amber only shades it; ember marks what is engaged. */
+/** The HUD keeps to these. Gold carries every signal; amber only shades it; ember marks what is engaged. All three are the same gold. */
 export const HUD = {
-	gold: "#FFD73D",
-	amber: "#E9A92A",
-	ember: "#C8641E",
-	sand: "#A89060",
+	gold: palette.gold,
+	amber: palette.amber,
+	ember: palette.ember,
+	sand: palette.sand,
 } as const;
 
 /** A cut, carried 3px inside the plate for the inner rule. */
@@ -148,14 +149,14 @@ function chamfer(px: number, corners: "all" | "tr-bl" = "all"): string {
 }
 
 /** The text treatment for a gold title: a light top falling into amber. */
-const GOLD_TEXT = "bg-gradient-to-b from-[#FFF0A8] via-[#FFD73D] to-[#E9A92A] bg-clip-text text-transparent";
+const GOLD_TEXT = "bg-gradient-to-b from-[#FFF3C4] via-[#FFD73D] to-[#E8B23A] bg-clip-text text-transparent";
 
 /** A diamond ornament set between gold rules. */
 function Diamond({ className = "", lit = false }: { className?: string; lit?: boolean }) {
 	return (
 		<span
 			aria-hidden
-			className={`inline-block size-[5px] shrink-0 rotate-45 ${lit ? "bg-gradient-to-br from-[#FFD73D] to-[#C8641E] shadow-[0_0_6px_rgba(232,140,40,0.7)]" : "bg-[#FFD73D]/55"} ${className}`}
+			className={`inline-block size-[5px] shrink-0 rotate-45 ${lit ? "bg-gradient-to-br from-[#FFD73D] to-[#A67C20] shadow-[0_0_6px_rgba(196,138,46,0.7)]" : "bg-[#FFD73D]/55"} ${className}`}
 		/>
 	);
 }
@@ -170,13 +171,34 @@ function shortCount(value: number): string {
 }
 
 /** Resource marks, by lowercase resource name. The warehouse strip and the scene tags share them. */
-export const RESOURCE_ICON: Record<string, string> = {
+export const RESOURCE_ICON: Record<ElementId, string> = {
 	hydrogen: "/hud/helium-3.svg",
 	ore: "/hud/rare-ore.svg",
 	nitrogen: "/hud/oxygen.svg",
 	carbon: "/hud/plasma.svg",
 	energy: "/hud/sun.svg",
 };
+
+function elementGlow(hex: string): string {
+	const n = Number.parseInt(hex.slice(1), 16);
+	const red = (n >> 16) & 255;
+	const green = (n >> 8) & 255;
+	const blue = n & 255;
+	return `drop-shadow(0 0 2px rgba(${red},${green},${blue},0.7))`;
+}
+
+/** A yield's mark, in that element's color. The file carries the stroke; the glow follows it. */
+export function ResourceMark({ id, className = "" }: { id: string; className?: string }) {
+	const key = id.toLowerCase();
+	if (!isElement(key)) {
+		return null;
+	}
+	return <img src={RESOURCE_ICON[key]} alt="" draggable={false} className={className} style={{ filter: elementGlow(elementColor[key]) }} />;
+}
+
+function isElement(id: string): id is ElementId {
+	return id in elementColor;
+}
 
 /**
  * A chamfered corner control: a mark in a diamond medallion over its label, with a lit rule along the foot.
@@ -426,15 +448,13 @@ export function Hud({
 						<ul aria-label="Warehouse" className="flex items-center">
 							{holdings.map((item, index) => {
 								const amount = Math.round(item.amount).toLocaleString("en-US");
-								const icon = RESOURCE_ICON[item.label.toLowerCase()];
 								return (
 									<li key={item.id} title={item.label} className="group flex items-center" aria-label={`${item.label}, ${amount}`}>
 										{index > 0 ? <span aria-hidden className="mx-1.5 h-2.5 w-px bg-gradient-to-b from-transparent via-[#FFD73D]/35 to-transparent" /> : null}
 										<span aria-hidden className="relative mr-1 flex size-4 shrink-0 items-center justify-center">
 											<span className="absolute inset-[3px] rotate-45 bg-gradient-to-br from-[#3A2E12] to-[#0B0A07] ring-1 ring-[#FFD73D]/30 transition-shadow group-hover:ring-[#FFD73D]/70" />
-											{icon ? (
-												<img src={icon} alt="" width={10} height={10} className="relative drop-shadow-[0_0_3px_rgba(233,169,42,0.6)]" />
-											) : (
+											<ResourceMark id={item.label} className="relative size-2.5" />
+											{isElement(item.label.toLowerCase()) ? null : (
 												<span className="relative text-[8px] font-bold text-[#a89060]">{item.label.charAt(0)}</span>
 											)}
 										</span>
@@ -482,7 +502,7 @@ export function Hud({
 													setActiveShipId(ship.id);
 													setShipsOpen(false);
 												}}
-												className={`relative flex w-full items-center justify-start gap-2.5 p-2 text-left focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none min-[900px]:px-2 min-[900px]:py-1.5 ${active ? "bg-gradient-to-r from-[#C8641E]/25 via-[#2A1F08]/80 to-transparent before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-gradient-to-b before:from-[#FFD73D] before:to-[#C8641E] before:content-['']" : "hover:bg-[#FFD73D]/5"}`}
+												className={`relative flex w-full items-center justify-start gap-2.5 p-2 text-left focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none min-[900px]:px-2 min-[900px]:py-1.5 ${active ? "bg-gradient-to-r from-[#A67C20]/25 via-[#2A1F08]/80 to-transparent before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-gradient-to-b before:from-[#FFD73D] before:to-[#A67C20] before:content-['']" : "hover:bg-[#FFD73D]/5"}`}
 											>
 												<ShipPortrait ship={ship} listed travel={active ? travel : null} />
 												<ShipName ship={ship} energy={energy} listed />
@@ -553,7 +573,7 @@ function ShipPortrait({
 	return (
 		<span className={`relative shrink-0 ${listed ? "size-9" : "size-10"}`}>
 			<span
-				className="absolute inset-0 bg-gradient-to-br from-[#FFD73D] via-[#E9A92A]/60 to-[#C8641E] p-px"
+				className="absolute inset-0 bg-gradient-to-br from-[#FFD73D] via-[#E8B23A]/60 to-[#A67C20] p-px"
 				style={{ clipPath: chamfer(listed ? 6 : 8, "tr-bl") }}
 			>
 				<img
@@ -607,7 +627,7 @@ function ShipName({ ship, energy }: { ship: (typeof SHIPS)[number]; energy: numb
 				<span className="truncate">{ship.role}</span>
 				<span aria-hidden className="h-[3px] min-w-6 flex-1 overflow-hidden bg-[#FFD73D]/[0.12]" style={{ clipPath: chamfer(1.5) }}>
 					<span
-						className="block h-full bg-gradient-to-r from-[#C8641E] via-[#E9A92A] to-[#FFD73D] transition-[width] duration-500 motion-reduce:transition-none"
+						className="block h-full bg-gradient-to-r from-[#A67C20] via-[#E8B23A] to-[#FFD73D] transition-[width] duration-500 motion-reduce:transition-none"
 						style={{ width: `${fill * 100}%` }}
 					/>
 				</span>
@@ -631,7 +651,7 @@ function ShipAction({ label, action, icon }: { label: string; action: HudAction;
 			disabled={action.disabled}
 			onClick={action.onClick}
 			style={{ clipPath: chamfer(6, "tr-bl") }}
-			className={`flex size-[34px] shrink-0 items-center justify-center transition-[filter,transform] duration-150 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none motion-reduce:transition-none min-[900px]:size-8 ${engaged ? "bg-gradient-to-b from-[#E9A92A] to-[#C8641E] shadow-[inset_0_2px_4px_rgba(0,0,0,0.35)]" : "bg-gradient-to-b from-[#FFF0A8] via-[#FFD73D] to-[#C8941A] shadow-[inset_0_1px_0_rgba(255,255,255,0.55),inset_0_-2px_0_rgba(120,70,10,0.45)]"} ${action.disabled ? "cursor-not-allowed opacity-40 saturate-50" : "hover:brightness-110 active:translate-y-px"}`}
+			className={`flex size-[34px] shrink-0 items-center justify-center transition-[filter,transform] duration-150 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none motion-reduce:transition-none min-[900px]:size-8 ${engaged ? "bg-gradient-to-b from-[#E8B23A] to-[#A67C20] shadow-[inset_0_2px_4px_rgba(0,0,0,0.35)]" : "bg-gradient-to-b from-[#FFF3C4] via-[#FFD73D] to-[#C48A2E] shadow-[inset_0_1px_0_rgba(255,255,255,0.55),inset_0_-2px_0_rgba(120,84,16,0.45)]"} ${action.disabled ? "cursor-not-allowed opacity-40 saturate-50" : "hover:brightness-110 active:translate-y-px"}`}
 		>
 			<img src={icon} alt="" width={16} height={16} />
 		</button>

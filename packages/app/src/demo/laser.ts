@@ -1,3 +1,4 @@
+import { palette } from "../palette";
 import { Constants } from "@babylonjs/core/Engines/constants";
 import { Light } from "@babylonjs/core/Lights/light";
 import { PointLight } from "@babylonjs/core/Lights/pointLight";
@@ -12,7 +13,7 @@ import type { Scene } from "@babylonjs/core/scene";
 
 /**
  * The mining laser, in the same light as the engine plumes: white at the muzzle, gold through the
- * body, ember where it meets the target. A wide cone washes forward and a thin beam pulses down
+ * body, bronze where it meets the target. A wide cone washes forward and a thin beam pulses down
  * its middle. The moving marks run back from the target into the muzzle, and a flare sits at each end.
  *
  * The meshes are on the world layer, not the hull's. The windscreen does not draw the ship, and the
@@ -40,7 +41,7 @@ export type BeamShape = {
 export const IMPACT_RANGE = 0.2;
 export const IMPACT_LIFT = 0.04;
 export const IMPACT_INTENSITY = 2.2;
-export const IMPACT_COLOR = Color3.FromHexString("#F0C48A");
+export const IMPACT_COLOR = Color3.FromHexString(palette.beam);
 
 /** How often a mine's own laser repeats, and how long each burst lasts. */
 export const MINE_FIRE_PERIOD = 5;
@@ -97,9 +98,9 @@ const LIT = 0.04;
 /** The shaders' clock wraps this often, in seconds, so it keeps its precision on the GPU. */
 const CLOCK_WRAP = 600;
 
-const WHITE_HOT = Color3.FromHexString("#FFF8EC");
-const GOLD = Color3.FromHexString("#E9C993");
-const EMBER = Color3.FromHexString("#E07A2E");
+const WHITE_HOT = Color3.FromHexString(palette.whiteHot);
+const GOLD = Color3.FromHexString(palette.beam);
+const EMBER = Color3.FromHexString(palette.bronze);
 
 /**
  * Where the beam stops. `forward` points from the ship toward the block, and the face sits `inset`
