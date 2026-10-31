@@ -31,6 +31,9 @@ PREVIEW_RADIUS = (MINE_DIAMETER_WORLD / HULL_WORLD) * HULL_BLENDER / 2
 
 BORE_INNER = 0.40
 PORT_INNER = 0.31
+# The hull mouth is smaller than the collar. A seat of the collar's own metal fills that
+# gap so the ring and the shutter read as one piece.
+PORT_MOUTH = 0.84
 FACE_PROUD = 1.075
 IRIS_DISTANCE = 1.045
 # Just behind the leaves and in front of the hull, so the hole reads as an opening.
@@ -281,19 +284,41 @@ def map_rotation(from_dir, to_dir):
 	return from_dir.normalized().rotation_difference(to_dir.normalized())
 
 
-def place_collar(col, name, mesh, parent, outward, inner_target, unscaled_inner, unscaled_half, material):
-	obj = new_object(col, name, mesh, parent)
-	obj.material_slots[0].link = "OBJECT" if obj.material_slots else None
-	if obj.material_slots:
-		obj.material_slots[0].material = material
-	else:
-		obj.data.materials.append(material)
-	# Shared mesh: assign on the object so the ranger slot is not rewritten.
-	if len(obj.material_slots) == 0:
-		obj.data.materials.append(material)
-	else:
-		obj.material_slots[0].material = material
+def tighten_opening(mesh, inner, new_inner):
+	"""Shift the whole ring inward so the lip covers the shutter.
+
+	Every vertex moves by the same amount. The band stays as wide as the
+	original collar, and the outer rim comes in with the lip.
+	"""
+	shift = inner - new_inner
+	if shift <= 1e-5:
+		return
+	for vert in mesh.vertices:
+		radial = math.hypot(vert.co.x, vert.co.z)
+		if radial <= shift + 1e-4:
+			continue
+		factor = (radial - shift) / radial
+		vert.co.x *= factor
+		vert.co.z *= factor
+	try:
+		mesh.free_normals_split()
+	except (AttributeError, RuntimeError):
+		pass
+	mesh.update()
+
+
+def place_collar(col, name, mesh, parent, outward, inner_target, unscaled_inner, unscaled_half, material, cover):
+	# Each cuff needs its own mesh. A shared datablock exports as one glTF mesh, and the
+	# game then keeps only the first collar — the bore — and drops the access panels.
+	mesh = mesh.copy()
+	mesh.name = name
+	created_meshes.append(mesh)
+	mesh.materials.clear()
+	mesh.materials.append(material)
 	scale = inner_target / unscaled_inner
+	# Overlap the shutter, and bring the outer rim in with it so the band stays narrow.
+	tighten_opening(mesh, unscaled_inner, cover * 0.94 / scale)
+	obj = new_object(col, name, mesh, parent)
 	obj.scale = (scale, scale, scale)
 	half = unscaled_half * scale
 	outward = outward.normalized()
@@ -425,10 +450,12 @@ def solid_blade(col, name, parent, outline, thickness, material):
 
 def add_aperture(col, model, prefix, outward, inner, collar_mesh, collar_inner, collar_half, mats, with_iris, inside=False):
 	outward = outward.normalized()
+	# Side ports: cover the hull hole. Bore: cover the outer tips of the shutter.
+	cover = inner * PORT_MOUTH if inside else inner * HINGE_FRACTION
 	cuff, scale, half = place_collar(
-		col, f"{prefix}Cuff", collar_mesh, model, outward, inner, collar_inner, collar_half, mats["cuff"]
+		col, f"{prefix}Cuff", collar_mesh, model, outward, inner, collar_inner, collar_half, mats["cuff"], cover
 	)
-	outer = max(math.hypot(v.co.x, v.co.z) for v in collar_mesh.vertices) * scale
+	outer = max(math.hypot(v.co.x, v.co.z) for v in cuff.data.vertices) * scale
 	rot = map_rotation(Vector((0, 0, 1)), outward)
 	# Side ports sit behind the hull, in the hole. The bore stays where it already reads well.
 	if inside:
@@ -736,7 +763,7 @@ def build():
 	port = Vector((0, 1, 0))
 	starboard = Vector((0, -1, 0))
 	# Side mouths are open through the hull. The shutter lives behind them.
-	sphere(col, "MineBody", mine, mats["carbon"], ((port, PORT_INNER * 0.84), (starboard, PORT_INNER * 0.84)))
+	sphere(col, "MineBody", mine, mats["carbon"], ((port, PORT_INNER * PORT_MOUTH), (starboard, PORT_INNER * PORT_MOUTH)))
 	add_aperture(col, mine, "MineBore", bore, BORE_INNER, collar_mesh, collar_inner, collar_half, mats, True)
 	add_aperture(col, mine, "MinePort", port, PORT_INNER, collar_mesh, collar_inner, collar_half, mats, True, inside=True)
 	add_aperture(col, mine, "MineStarboard", starboard, PORT_INNER, collar_mesh, collar_inner, collar_half, mats, True, inside=True)
@@ -744,7 +771,7 @@ def build():
 	accent_ring(col, mine, bore, BORE_INNER + 0.16, FACE_PROUD - 0.12, mats["accent"])
 
 	collector_root, collector = facility("Collector", Vector((24, 0, 0)))
-	sphere(col, "CollectorBody", collector, mats["orange"], ((port, PORT_INNER * 0.84), (starboard, PORT_INNER * 0.84)))
+	sphere(col, "CollectorBody", collector, mats["orange"], ((port, PORT_INNER * PORT_MOUTH), (starboard, PORT_INNER * PORT_MOUTH)))
 	solar_cap(col, collector, mats["solar"], mats["cuff"])
 	# Same facing empty as a mine so the game aims the panel at the sun.
 	empty(col, "CollectorBorePivot", collector, bore * IRIS_DISTANCE, map_rotation(Vector((0, 0, 1)), bore))

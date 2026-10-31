@@ -16,7 +16,7 @@ import type { GreasedLineBaseMesh } from "@babylonjs/core/Meshes/GreasedLine/gre
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
 
-import { MINE_SIZE } from "./bases";
+import { MINE_SIZE, SPEED_SCALE, SYSTEM_SCALE } from "./bases";
 import type { RingBody } from "./camera-path";
 import { CHART_LAYER, PILOT_LAYER } from "./cockpit";
 import { planCruise, type CruiseCorner, type CruiseProfile } from "./cruise";
@@ -32,22 +32,23 @@ import { MAX_YAW, headingAt, pointAt, type Route, type RouteKind } from "./route
  * each take the same time on every body; speed eases so the handoff into the cruise does not jump.
  * The line ahead is bright where the engine is lit and dull on the coast. It shortens as the ship
  * goes. It is drawn at a fixed width on screen, so the route reads from the whole-system view and
- * from beside a planet alike. From the cockpit, and from outside the hull, the course is a run of
- * chevrons that fade with distance. The climb out to the outer orbit, and the drop in to dock, stay
- * clear of them. Nothing here moves the camera.
+ * from beside a planet alike. From the cockpit, and from outside the hull, the course is a lane of
+ * two rails under the ship, with pulses sweeping in toward the ship. The climb out to the
+ * outer orbit, and the drop in to dock, stay clear of it. Nothing here moves the camera.
  *
  * The clock does not depend on the camera. Soft undock, the climb, the drop, and soft dock each last
  * a fixed time. The cruise lasts as long as the chosen speed takes to cover it. The path is fixed
  * when the trip starts. A server can sample the same schedule without a viewport.
  */
 
-/** Fastest coast the drive will build, in world units per second. */
-export const JOURNEY_PACE = 14;
+/** Fastest coast the drive will build, in world units per second. Grows with heliocentric distance. */
+export const JOURNEY_PACE = 14 * SYSTEM_SCALE * SPEED_SCALE;
 /**
  * Speed at the outer orbit, where a climb meets the burn and a drop leaves it, in world units per
- * second. A long spiral is faster in the middle and comes back to this at the rim.
+ * second. A long spiral is faster in the middle and comes back to this at the rim. Grows with the
+ * system so the seven-second climb still reaches the rim. The doubled coast sits above this.
  */
-export const CLIMB_PACE = 3;
+export const CLIMB_PACE = 3 * SYSTEM_SCALE;
 /** The climb out to the outer orbit, and the drop back in, each take this long. */
 export const ORBIT_LEG_SECONDS = 7;
 /** Soft undock and soft dock: the ease between the coupled pose and a hover. */
@@ -503,86 +504,81 @@ const AMBER = Color3.FromHexString("#FCD34D");
 /** The coast and a gravity assist. Dimmer than a burn, so the engine-off stretches read as such. */
 const COAST = Color3.FromHexString("#8C6E3A");
 
-/** First chevron sits this far ahead of the ship, so the wide end of the nearest mark is still on the glass. */
-export const MARK_GAP = 8;
+/** The lane starts this far ahead of the ship, so its near end is still on the glass. */
+export const LANE_GAP = 8;
 /**
- * Chevrons are this far apart along the course. A gap between marks keeps each one a separate arrow,
- * and the chain is dense enough that a fast burn does not strobe.
+ * The lane shows this many seconds of the course at the chosen coast. Measured in time, not distance,
+ * so a fast coast stretches the lane toward the horizon instead of streaming it past the glass.
  */
-export const MARK_SPACING = 10;
-/** How long each chevron is, along the course. Short enough to read as one arrow, not a ribbon. */
-export const MARK_LENGTH = 5.5;
-/** A chevron this far ahead of the ship has faded out. */
-export const MARK_REACH = 100;
-/** Alpha of a mark at the ship. The first mark, a gap ahead, is a little under this. */
-export const MARK_NEAR_ALPHA = 0.7;
+export const LANE_SECONDS = 2.5;
+/** The shortest lane, for a slow coast. */
+export const LANE_MIN_REACH = 100;
+/** Alpha of the lane at the ship. It fades to nothing at the reach. */
+export const LANE_NEAR_ALPHA = 0.75;
+/** One pulse leaves the ship this often and sweeps down the lane. */
+export const PULSE_PERIOD = 0.4;
 
-/** One chevron on the course ahead of the ship. */
-export type CourseMark = {
-	/** The near end still in front of the ship. The rest of the mark may already be behind it. */
-	point: Vector3;
-	/** Unit direction of travel there. The point of the chevron faces this way. */
-	heading: Vector3;
-	/** Translucency at `point`: nearly solid up close, zero at `MARK_REACH`. */
-	alpha: number;
-	/** Along the course, where the opening was planted. The arms are full width here. */
-	opening: number;
-	/** Along the course, where the visible part starts. Never behind the cockpit gap. */
+/** The lane ahead of the ship, and the pulses sweeping down it. */
+export type CourseLane = {
+	/** Along the course, where the lane starts. Never inside the cockpit gap. */
 	from: number;
-	/** Along the course, where the point is. */
-	tip: number;
+	/** Along the course, where the lane ends: the reach or the end of the course. */
+	to: number;
+	/** World units from the ship to where the lane has faded out. */
+	reach: number;
+	pulses: { along: number; alpha: number }[];
 };
 
-/** Alpha of a chevron `ahead` world units in front of the ship. Zero at `MARK_REACH`. */
-export function markAlpha(ahead: number): number {
-	if (ahead >= MARK_REACH || ahead < 0) {
+/** World units of lane for a coast at `speed`. */
+export function laneReach(speed: number): number {
+	return Math.max(LANE_MIN_REACH, Math.max(0, speed) * LANE_SECONDS);
+}
+
+/** Alpha of the lane `ahead` world units in front of the ship. Zero at `reach`. */
+export function laneAlpha(ahead: number, reach: number): number {
+	if (ahead < 0 || ahead >= reach) {
 		return 0;
 	}
-	return MARK_NEAR_ALPHA * (1 - ahead / MARK_REACH);
+	return LANE_NEAR_ALPHA * Math.pow(1 - ahead / reach, 1.5);
 }
 
 /**
- * Chevrons on `route` ahead of a ship `distance` along it. They start a gap in front, so the nearest
- * is not inside the cockpit, and stop at the end of the course or at `MARK_REACH`, whichever is closer.
- * Marks are planted on the course, so the ship flies through them instead of dragging them along.
+ * The lane on `route` ahead of a ship `distance` along it, at coast `speed`, `now` seconds into the
+ * animation. Each pulse appears at the far end and reaches the ship in `LANE_SECONDS`, whatever the
+ * speed, so the road comes at the cockpit the same way on a slow coast and a fast one.
  */
-export function courseMarks(route: Route, distance: number): CourseMark[] {
+export function courseLane(route: Route, distance: number, speed: number, now: number): CourseLane | null {
 	if (route.total <= 0) {
-		return [];
+		return null;
 	}
 	const along = Math.min(route.total, Math.max(0, distance));
-	const gapAt = along + MARK_GAP;
-	const reachAt = Math.min(route.total, along + MARK_REACH);
-	if (gapAt >= reachAt) {
-		return [];
+	const reach = laneReach(speed);
+	const from = along + LANE_GAP;
+	const to = Math.min(route.total, along + reach);
+	if (from >= to - 1e-4) {
+		return null;
 	}
-	// A mark stays up until the ship passes its point, so a long chevron slides under the seat
-	// instead of vanishing the moment its opening does.
-	let opening = Math.floor((gapAt - MARK_LENGTH) / MARK_SPACING) * MARK_SPACING;
-	while (opening + MARK_LENGTH <= gapAt) {
-		opening += MARK_SPACING;
-	}
-	const marks: CourseMark[] = [];
-	for (; opening < reachAt - 1e-4 && opening < route.total; opening += MARK_SPACING) {
-		const tip = Math.min(route.total, opening + MARK_LENGTH);
-		const from = Math.max(opening, gapAt);
-		if (from >= tip - 1e-4) {
+	const count = Math.ceil(LANE_SECONDS / PULSE_PERIOD);
+	const phase = (((now / PULSE_PERIOD) % 1) + 1) % 1;
+	const span = to - from;
+	const perSecond = span / LANE_SECONDS;
+	const pulses: CourseLane["pulses"] = [];
+	// Youngest first, out at the horizon, so a nearer pulse is drawn over the one beyond it.
+	for (let index = 0; index < count; index++) {
+		const age = (index + phase) * PULSE_PERIOD;
+		const at = to - age * perSecond;
+		if (at < from || at >= to) {
 			continue;
 		}
-		const alpha = markAlpha(from - along);
-		if (alpha <= 0) {
-			break;
+		const ahead = at - along;
+		const arriving = Math.min(1, age / PULSE_PERIOD);
+		const leaving = Math.min(1, (at - from) / Math.max(perSecond * PULSE_PERIOD, 1e-4));
+		const alpha = laneAlpha(ahead, reach) * arriving * leaving;
+		if (alpha > 1e-3) {
+			pulses.push({ along: at, alpha });
 		}
-		marks.push({
-			point: pointAt(route, from),
-			heading: headingAt(route, from),
-			alpha,
-			opening,
-			from,
-			tip,
-		});
 	}
-	return marks;
+	return { from, to, reach, pulses };
 }
 
 export type Journey = {
@@ -615,7 +611,7 @@ export type Journey = {
 	onPhoton: (listener: (seconds: number) => void) => () => void;
 	/** The photon cruise has finished and the ship is on the drop or already docked. */
 	onCruiseDone: (listener: () => void) => () => void;
-	/** Shows course chevrons on the windscreen and from outside the hull while the cruise is underway. */
+	/** Shows the course lane on the windscreen and from outside the hull while the cruise is underway. */
 	setPiloting: (on: boolean) => void;
 };
 
@@ -670,30 +666,33 @@ export function createJourney(
 	const photonListeners = new Set<(seconds: number) => void>();
 	const cruiseListeners = new Set<() => void>();
 	let piloting = false;
-	const chevrons = buildChevrons(scene);
-	glow.addExcludedMesh(chevrons);
+	const lane = buildLane(scene);
+	glow.addExcludedMesh(lane);
+	/** Seconds the lane has been animating. Only the pulses read it. */
+	let laneClock = 0;
 
 	const pixelRatio = () => 1 / engine.getHardwareScalingLevel();
 
-	const hideChevrons = () => {
-		chevrons.setEnabled(false);
+	const hideLane = () => {
+		lane.setEnabled(false);
 	};
 
-	const showChevrons = (route: Route, distance: number) => {
+	const showLane = (route: Route, distance: number, speed: number, deltaSeconds: number) => {
 		if (!piloting) {
-			hideChevrons();
+			hideLane();
 			return;
 		}
-		const marks = courseMarks(route, distance);
-		if (marks.length === 0 || !writeChevrons(chevrons, route, distance, marks)) {
-			hideChevrons();
+		laneClock += deltaSeconds;
+		const ahead = courseLane(route, distance, speed, laneClock);
+		if (!ahead || !writeLane(lane, route, distance, ahead)) {
+			hideLane();
 			return;
 		}
-		chevrons.setEnabled(true);
+		lane.setEnabled(true);
 	};
 
 	const clear = () => {
-		hideChevrons();
+		hideLane();
 		if (!flight) {
 			return;
 		}
@@ -799,7 +798,7 @@ export function createJourney(
 	const arrive = (current: Flight, center: Vector3) => {
 		const end = current.path.points[current.path.points.length - 1];
 		current.ahead.setEnabled(false);
-		hideChevrons();
+		hideLane();
 		current.last = end.subtract(center);
 		current.heading = headingAt(current.path, current.path.total);
 		current.since = 0;
@@ -970,7 +969,7 @@ export function createJourney(
 				current.since = 0;
 			}
 			if (flight.phase !== "transit") {
-				hideChevrons();
+				hideLane();
 				const current = flight;
 				settle(current, deltaSeconds, centerOf(current.plan.arrive.id));
 				if (current.phase === "approach" && current.approach && current.since >= current.approach.seconds) {
@@ -1014,11 +1013,11 @@ export function createJourney(
 			flight.heading = headingAt(flight.path, along);
 			placeShip(pointAt(flight.path, along), flight.heading, deltaSeconds);
 			// The climb leaves an orbit for the outer orbit, and docking is the drop after the burn.
-			// Chevrons are the road on the burn itself.
+			// The lane is the road on the burn itself.
 			if (flight.elapsed <= flight.climbSeconds) {
-				hideChevrons();
+				hideLane();
 			} else {
-				showChevrons(flight.path, along);
+				showLane(flight.path, along, flight.profile.speed, deltaSeconds);
 			}
 		},
 		onPhoton(listener) {
@@ -1036,7 +1035,7 @@ export function createJourney(
 		setPiloting(on) {
 			piloting = on;
 			if (!on) {
-				hideChevrons();
+				hideLane();
 			}
 		},
 	};
@@ -1440,23 +1439,26 @@ export function tripSeconds(plan: JourneyPlan, coastSpeed = plan.coastSpeed ?? 0
 	return flightSchedule(coupled, polylineLength(plan.climb), plan.departSpeed, cruiseSeconds, docks).total;
 }
 
-/**
- * Each chevron lies under the course. The opening is just below the point, so the arrow stays in the
- * lower windscreen: wide above the dashboard, with the chain receding toward the horizon.
- */
-const MARK_NEAR_DROP = 1.35;
-const MARK_FAR_DROP = 0.85;
-/** Width of one arm's outer edge at the opening. The two arms make a wide forward point. */
-const MARK_HALF_WIDTH = 3;
-/** Thickness of an arm at the opening. The arms meet at the point. */
-const MARK_STROKE = 1;
-/** Samples along one chevron. Enough that a bend does not cut the corner. */
-const MARK_STEPS = 8;
+/** The lane lies this far under the course, so it reads as a road in the lower windscreen. */
+const LANE_DROP = 1.3;
+/** Half the lane's width at the near end. It widens slowly with distance and still converges on the horizon. */
+const LANE_HALF_WIDTH = 2.2;
+/** Rail width at the near end. It grows with distance, so a far rail stays a line and does not shimmer. */
+const LANE_STROKE = 0.08;
+/** Samples down the lane, packed toward the ship where a bend shows most. */
+const LANE_SAMPLES = 48;
+/** The fill between the rails, as a share of the rail alpha. */
+const LANE_FILL = 0.14;
+/** A pulse is a flat arrow across the lane. Its point leads by this share of the half width. */
+const PULSE_BOW = 0.45;
+/** Pulse stroke, as a multiple of the rail at the same distance. */
+const PULSE_STROKE = 2.2;
+const PULSE_COLOR = Color3.FromHexString("#FFE7A3");
 
 /** The windscreen's course. Unlit amber, see-through, and kept off the chart and the aft views. */
-function buildChevrons(scene: Scene): Mesh {
-	const mesh = new Mesh("journey-chevrons", scene);
-	const material = new StandardMaterial("journey-chevrons", scene);
+function buildLane(scene: Scene): Mesh {
+	const mesh = new Mesh("journey-lane", scene);
+	const material = new StandardMaterial("journey-lane", scene);
 	material.disableLighting = true;
 	material.diffuseColor = Color3.Black();
 	material.ambientColor = Color3.Black();
@@ -1475,64 +1477,97 @@ function buildChevrons(scene: Scene): Mesh {
 	return mesh;
 }
 
-/** Far marks are written first, so a nearer chevron blends over the one beyond it. */
-function writeChevrons(mesh: Mesh, route: Route, distance: number, marks: CourseMark[]): boolean {
+/** Half width of the lane `ahead` of the ship. */
+function laneHalfWidth(ahead: number): number {
+	return LANE_HALF_WIDTH * Math.sqrt(Math.max(1, ahead / LANE_GAP));
+}
+
+/** Rail width `ahead` of the ship. About the same on screen near and far, and never wider than a third of the lane. */
+function laneStroke(ahead: number): number {
+	return Math.min(LANE_STROKE * Math.max(1, ahead / LANE_GAP), laneHalfWidth(ahead) * 0.3);
+}
+
+/**
+ * Two rails with a faint fill between them, then the pulses on top. The fill and rails run the length
+ * of the lane. Far pulses are written first, so a nearer one blends over the one beyond it.
+ */
+function writeLane(mesh: Mesh, route: Route, distance: number, lane: CourseLane): boolean {
 	const right = new Vector3();
 	const up = new Vector3();
 	const positions: number[] = [];
 	const colors: number[] = [];
-	const indices: number[] = [];
-	for (let markIndex = marks.length - 1; markIndex >= 0; markIndex--) {
-		const mark = marks[markIndex];
-		const span = mark.tip - mark.from;
-		if (span < 1e-4) {
+	const fill: number[] = [];
+	const rails: number[] = [];
+	const pulses: number[] = [];
+	const place = (along: number, lateral: number, color: Color3, alpha: number) => {
+		const center = pointAt(route, along);
+		markBasis(headingAt(route, along), right, up);
+		positions.push(
+			center.x + right.x * lateral - up.x * LANE_DROP,
+			center.y + right.y * lateral - up.y * LANE_DROP,
+			center.z + right.z * lateral - up.z * LANE_DROP
+		);
+		colors.push(color.r, color.g, color.b, alpha);
+		return positions.length / 3 - 1;
+	};
+	const quad = (into: number[], a: number, b: number, c: number, d: number) => {
+		into.push(a, c, d, a, d, b);
+	};
+
+	// Six vertices per sample: right rail outer and inner, left rail inner and outer, then the fill's two edges.
+	let previous: number | null = null;
+	for (let step = 0; step <= LANE_SAMPLES; step++) {
+		const share = step / LANE_SAMPLES;
+		const along = lane.from + (lane.to - lane.from) * share * share;
+		const ahead = along - distance;
+		const alpha = laneAlpha(ahead, lane.reach);
+		const half = laneHalfWidth(ahead);
+		const stroke = laneStroke(ahead);
+		const first = place(along, half, AMBER, alpha);
+		place(along, half - stroke, AMBER, alpha);
+		place(along, -(half - stroke), AMBER, alpha);
+		place(along, -half, AMBER, alpha);
+		place(along, half - stroke, AMBER, alpha * LANE_FILL);
+		place(along, -(half - stroke), AMBER, alpha * LANE_FILL);
+		if (previous !== null) {
+			quad(rails, previous, previous + 1, first, first + 1);
+			quad(rails, previous + 2, previous + 3, first + 2, first + 3);
+			quad(fill, previous + 4, previous + 5, first + 4, first + 5);
+		}
+		previous = first;
+	}
+
+	for (const pulse of lane.pulses) {
+		const ahead = pulse.along - distance;
+		const half = laneHalfWidth(ahead) * 0.82;
+		const stroke = laneStroke(ahead) * PULSE_STROKE;
+		const bow = laneHalfWidth(ahead) * PULSE_BOW;
+		// The point leads toward the ship. The arms trail behind it, further along the course.
+		const point = pulse.along;
+		const trail = Math.min(lane.to, point + bow);
+		if (trail - point < 1e-3) {
 			continue;
 		}
-		const base = positions.length / 3;
-		const samples = MARK_STEPS + 1;
-		for (let step = 0; step < samples; step++) {
-			// The tip is first, so the nearer quads are drawn over it.
-			const along = mark.tip - (span * step) / MARK_STEPS;
-			const share = (along - mark.opening) / MARK_LENGTH;
-			const outer = MARK_HALF_WIDTH * (1 - share);
-			const inner = Math.max(0, outer - MARK_STROKE * (1 - share));
-			const drop = MARK_NEAR_DROP + (MARK_FAR_DROP - MARK_NEAR_DROP) * share;
-			const center = pointAt(route, along);
-			markBasis(headingAt(route, along), right, up);
-			const alpha = markAlpha(along - distance);
-			for (const side of [1, -1]) {
-				for (const lateral of [outer, inner]) {
-					const x = side * lateral;
-					positions.push(
-						center.x + right.x * x - up.x * drop,
-						center.y + right.y * x - up.y * drop,
-						center.z + right.z * x - up.z * drop
-					);
-					colors.push(AMBER.r, AMBER.g, AMBER.b, alpha);
-				}
-			}
-		}
-		// Four corners per sample: right outer, right inner, left outer, left inner.
-		for (let step = 0; step < MARK_STEPS; step++) {
-			for (const arm of [0, 2]) {
-				const a = base + step * 4 + arm;
-				const b = a + 1;
-				const c = a + 4;
-				const d = b + 4;
-				indices.push(a, c, d, a, d, b);
-			}
+		const thick = Math.min(stroke, trail - point);
+		for (const side of [1, -1]) {
+			const pointNear = place(point, 0, PULSE_COLOR, pulse.alpha);
+			const pointFar = place(point + thick, 0, PULSE_COLOR, pulse.alpha);
+			const armNear = place(trail, side * half, PULSE_COLOR, pulse.alpha);
+			const armFar = place(Math.min(lane.to, trail + thick), side * half, PULSE_COLOR, pulse.alpha);
+			quad(pulses, pointNear, pointFar, armNear, armFar);
 		}
 	}
+
 	if (positions.length === 0) {
 		return false;
 	}
 	mesh.setVerticesData(VertexBuffer.PositionKind, positions, true, 3);
 	mesh.setVerticesData(VertexBuffer.ColorKind, colors, true, 4);
-	mesh.setIndices(indices);
+	mesh.setIndices([...fill, ...rails, ...pulses]);
 	return true;
 }
 
-/** `right` and `up` for a chevron whose point faces `heading`. World up stays up, unless the course is vertical. */
+/** `right` and `up` across the lane where it runs along `heading`. World up stays up, unless the course is vertical. */
 function markBasis(heading: Vector3, right: Vector3, up: Vector3): void {
 	const steep = Math.abs(heading.y) > 0.95;
 	const ax = steep ? 1 : 0;

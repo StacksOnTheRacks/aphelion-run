@@ -1,8 +1,10 @@
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 
 import {
+	BODY_SCALE,
 	EARTH_STATION_RADIUS,
 	SATURN_RING_INNER_SCALE,
+	SYSTEM_SCALE,
 	DOCK_SIZE,
 	MINE_SIZE,
 	moonBases,
@@ -27,6 +29,7 @@ import { HULL_LENGTH } from "./ranger";
 import {
 	APPROACH_MIN_SWEEP,
 	CLIMB_PACE,
+	HULL_CLEARANCE,
 	JOURNEY_PACE,
 	ORBIT_LEG_SECONDS,
 	SOFT_DOCK_SECONDS,
@@ -676,19 +679,26 @@ function assistCandidates(layout: JourneyLayout, fromId: string, toId: string): 
 
 {
 	expect(journeySeconds(0) === 0, "a zero-length course takes no time at cruise pace");
-	expect(Math.abs(journeySeconds(1120) - 80) < 1e-6, "at maximum coast, Neptune to the Sun is 80 seconds of pace");
+	expect(
+		Math.abs(journeySeconds(1120 * SYSTEM_SCALE) - 40) < 1e-6,
+		"at maximum coast, Neptune to the Sun is 40 seconds of pace"
+	);
 	expect(journeySeconds(1e6) === 1e6 / JOURNEY_PACE, "a long course is not capped");
 }
 
 {
-	const length = 40;
 	const departSpeed = 0.4;
+	// Long enough that the ends stay at dock speed and climb pace, and the middle makes up the rest.
+	const length = (departSpeed + CLIMB_PACE) * ORBIT_LEG_SECONDS;
 	const duration = climbDuration(length, departSpeed);
 	expect(duration === ORBIT_LEG_SECONDS, "a climb takes seven seconds");
 	expect(SOFT_DOCK_SECONDS === 3, "soft dock and undock take three seconds");
 	expect(Math.abs(climbDistance(duration, length, departSpeed) - length) < 1e-3, "a climb covers its length");
 	const dt = 0.02;
-	expect(Math.abs(climbDistance(dt, length, departSpeed) / dt - departSpeed) < 0.08, "a climb starts at dock speed");
+	expect(
+		Math.abs(climbDistance(dt, length, departSpeed) / dt - departSpeed) < 0.08 * SYSTEM_SCALE,
+		"a climb starts at dock speed"
+	);
 	const endSpeed = (length - climbDistance(duration - dt, length, departSpeed)) / dt;
 	expect(Math.abs(endSpeed - CLIMB_PACE) < 0.2, "a climb is at burn speed when the burn starts");
 	let previous = departSpeed;
@@ -697,7 +707,10 @@ function assistCandidates(layout: JourneyLayout, fromId: string, toId: string): 
 		const speed =
 			(climbDistance(t, length, departSpeed) - climbDistance(((i - 1) / 16) * duration, length, departSpeed)) /
 			(duration / 16);
-		expect(Math.abs(speed - previous) < 3, `climb speed does not jump (${speed.toFixed(2)} after ${previous.toFixed(2)})`);
+		expect(
+			Math.abs(speed - previous) < CLIMB_PACE,
+			`climb speed does not jump (${speed.toFixed(2)} after ${previous.toFixed(2)})`
+		);
 		previous = speed;
 	}
 }
@@ -755,8 +768,8 @@ function assistCandidates(layout: JourneyLayout, fromId: string, toId: string): 
 }
 
 {
-	const outer = 31;
-	const dockRadius = 11;
+	const outer = 31 * SYSTEM_SCALE;
+	const dockRadius = 11 * SYSTEM_SCALE;
 	const dockRate = 0.03;
 	const clock = { now: 0 };
 	const from = new Vector3(outer, 0, 0);
@@ -772,9 +785,15 @@ function assistCandidates(layout: JourneyLayout, fromId: string, toId: string): 
 		const next = Math.min(path.length - 1, index + Math.max(1, Math.round((path.length - 1) / samples)));
 		const speed = path[next].subtract(path[index]).length() / (((next - index) * approach.seconds) / (path.length - 1));
 		if (i === 0) {
-			expect(Math.abs(speed - CLIMB_PACE) < 0.9, `a drop leaves at climb speed (${speed.toFixed(2)})`);
+			expect(
+				Math.abs(speed - CLIMB_PACE) < 0.9 * SYSTEM_SCALE,
+				`a drop leaves at climb speed (${speed.toFixed(2)})`
+			);
 		} else {
-			expect(Math.abs(speed - previous) < 8, `a drop does not jump (${speed.toFixed(2)} after ${previous.toFixed(2)})`);
+			expect(
+				Math.abs(speed - previous) < 8 * SYSTEM_SCALE,
+				`a drop does not jump (${speed.toFixed(2)} after ${previous.toFixed(2)})`
+			);
 		}
 		previous = speed;
 	}
@@ -853,7 +872,10 @@ function maxYaw(plan: Parameters<typeof legPose>[0], seconds: number): number {
 	const hover = poseRise(deimos.halo, deimos.outer, "hover");
 	const coupled = poseRise(deimos.halo, deimos.outer, "coupled");
 	expect(coupled <= hover + 1e-9, "the hover sits at least as high as the coupled pose");
-	expect(hover < 0.1, `a small moon's hover is a hull clearance (${hover.toFixed(3)})`);
+	expect(
+		Math.abs(hover - HULL_CLEARANCE * 2) < 1e-9,
+		`a small moon's hover is a full hull clearance (${hover.toFixed(3)})`
+	);
 	expect(hover <= (deimos.outer - deimos.halo) * 0.15 + 1e-6, "the rise is capped by the gap to the outer orbit");
 	for (const point of plan.climb) {
 		const flat = flatDistance(point, deimos.center);
@@ -861,7 +883,10 @@ function maxYaw(plan: Parameters<typeof legPose>[0], seconds: number): number {
 		const off = Math.abs(point.y - deimos.center.y);
 		expect(off < 0.2, `a Deimos climb stays on the moon's plane (off by ${off.toFixed(3)})`);
 	}
-	expect(maxYaw(plan, ORBIT_LEG_SECONDS) < MAX_YAW * 1.35, "a small-moon climb stays under the yaw cap");
+	{
+		const yaw = maxYaw(plan, ORBIT_LEG_SECONDS);
+		expect(yaw < MAX_YAW * 1.35, `a small-moon climb stays under the yaw cap (${yaw.toFixed(3)} vs ${(MAX_YAW * 1.35).toFixed(3)})`);
+	}
 }
 
 // The clock is fixed, and sampling it twice lands on the same pose. The burn ends on the outer orbit.
@@ -1012,7 +1037,7 @@ function maxYaw(plan: Parameters<typeof legPose>[0], seconds: number): number {
 	const saturn = layout.bodies.find((body) => body.id === "saturn")!;
 	const ring = saturnRing(saturn.center);
 	const inside = saturn.center.add(new Vector3(ring.inner * 0.85, 0, 0));
-	const outside = saturn.center.add(new Vector3(ring.outer + 6, 0, 0));
+	const outside = saturn.center.add(new Vector3(ring.outer + 6 * BODY_SCALE, 0, 0));
 	for (const turn of [1, -1]) {
 		const lifted = departureSpiral(saturn.center, inside, outside, turn, [ring]);
 		const plain = departureSpiral(saturn.center, inside, outside, turn, []);

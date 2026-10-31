@@ -4,10 +4,11 @@
  * A faster coast costs more because the burns that reach it and leave it are larger.
  */
 
+import { SPEED_SCALE, SYSTEM_SCALE } from "./bases";
 import { cruiseCost } from "./energy";
 
-/** World units per second squared. Orbit speed 3 to coast speed 14 is a burn of a few seconds. */
-export const CRUISE_ACCEL = 2.5;
+/** World units per second squared. Grows with the system and the drive, so the burn up to pace takes the same time. */
+export const CRUISE_ACCEL = 2.5 * SYSTEM_SCALE * SPEED_SCALE;
 /** How far above the handoff speed the slowest offered coast sits. */
 export const COAST_ABOVE_ORBIT = 1;
 /** A heading change smaller than this is still a straight line. */

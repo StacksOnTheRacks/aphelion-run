@@ -82,7 +82,8 @@ function sameBerth(left: ScanTarget | null, right: ScanTarget | null): boolean {
  * when the ship is in open space.
  * Pilot enters the cockpit on a desktop or a large tablet. The ship list then leaves. The dash is geometry in the scene, and it turns with the head. Exit and the view switch sit at the lower right, in the chart step's corner, and the view switch is that step's size. Exit stays the smaller plate. The ship list stays hidden out there too. A phone stays on the
  * chart, and shrinking the window below that leaves the cockpit. Locate opens the planetary chart where the ship is docked.
- * Recall returns the ship to its home base. A countdown that is already headed there can be cancelled.
+ * Recall opens the course planner for the cruise home, so the coast speed can be chosen. A hop
+ * on the same body still moves straight onto the home dock. A countdown already headed there can be cancelled.
  * The lower right, on a chart, is one step back: System from a planet or Sol, Planet from a moon
  * or from an inner orbit, and Galaxy from the system. While piloting that corner is Exit and the view switch. Escape takes the
  * first chart step, Home on the system chart and otherwise that lower-right step, and leaves the
@@ -126,6 +127,25 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		[system]
 	);
 
+	const courseFor = useCallback(
+		(target: ScanTarget) => {
+			const offered = system.offer(target);
+			const speed = offered?.minSpeed ?? 0;
+			const preview = offered ? system.preview(target, speed) : null;
+			return {
+				target,
+				speed,
+				minSpeed: offered?.minSpeed ?? 0,
+				maxSpeed: offered?.maxSpeed ?? 0,
+				reserve: offered?.reserve ?? 0,
+				cost: preview?.cost ?? 0,
+				seconds: preview?.seconds ?? 0,
+				course: preview != null,
+			};
+		},
+		[system]
+	);
+
 	const pick = useCallback(
 		(target: ScanTarget) => {
 			if (!showsCard(target)) {
@@ -138,21 +158,13 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 				departing: departure !== null,
 				energy: hold.energy,
 			});
-			const offered = travel.enabled ? system.offer(target) : null;
-			const speed = offered?.minSpeed ?? 0;
-			const preview = offered ? system.preview(target, speed) : null;
-			setPlanner({
-				target,
-				speed,
-				minSpeed: offered?.minSpeed ?? 0,
-				maxSpeed: offered?.maxSpeed ?? 0,
-				reserve: offered?.reserve ?? 0,
-				cost: preview?.cost ?? 0,
-				seconds: preview?.seconds ?? 0,
-				course: preview != null,
-			});
+			setPlanner(
+				travel.enabled
+					? courseFor(target)
+					: { target, speed: 0, minSpeed: 0, maxSpeed: 0, reserve: 0, cost: 0, seconds: 0, course: false }
+			);
 		},
-		[departure, docked?.host, flight, hold.energy, system]
+		[courseFor, departure, docked?.host, flight, hold.energy, system]
 	);
 
 	useEffect(() => system.onSelect((target) => go(target.view)), [system, go]);
@@ -339,6 +351,13 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 			setDeparture(null);
 			return;
 		}
+		if (plan.move === "depart" || plan.move === "abort-depart") {
+			const course = courseFor(home);
+			if (course.course) {
+				setPlanner(course);
+				return;
+			}
+		}
 		if (plan.move === "abort" || plan.move === "abort-depart" || plan.move === "abort-hop") {
 			system.land();
 			setFlight(null);
@@ -350,7 +369,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 			setDocked(system.berth());
 			return;
 		}
-		if (plan.move === "abort") {
+		if (plan.move === "abort" || plan.move === "abort-depart") {
 			return;
 		}
 		const cost = system.quote(home);
@@ -445,6 +464,11 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 						const commit = routeCommit(hold.energy, planner.cost, planner.reserve);
 						if (!commit.enabled) {
 							return;
+						}
+						if (flight) {
+							system.land();
+							setFlight(null);
+							setDocked(system.berth());
 						}
 						setDeparture({
 							target: planner.target,

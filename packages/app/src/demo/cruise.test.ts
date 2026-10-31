@@ -42,13 +42,14 @@ const straight: CruiseCorner[] = [];
 }
 
 {
-	const limits = coastLimits(10, straight, orbit, shipMax);
+	const tooShort = (shipMax * shipMax - orbit * orbit) / (2 * CRUISE_ACCEL);
+	const limits = coastLimits(tooShort, straight, orbit, shipMax);
 	expect(limits.max < shipMax, "a short path cannot be flown at the ship maximum");
 	expect(limits.min <= limits.max, "the slider still has a low end");
 	expect(limits.min < orbit + COAST_ABOVE_ORBIT + 1e-6, "the floor does not sit above a speed the path can reach");
-	const flown = planCruise(10, straight, shipMax, orbit, shipMax);
+	const flown = planCruise(tooShort, straight, shipMax, orbit, shipMax);
 	expect(flown.speed === limits.max, "asking for the maximum flies the fastest coast that fits");
-	expect(Math.abs(flown.distanceAt(flown.seconds) - 10) < 1e-3, "the cruise still covers the short path");
+	expect(Math.abs(flown.distanceAt(flown.seconds) - tooShort) < 1e-3, "the cruise still covers the short path");
 }
 
 {

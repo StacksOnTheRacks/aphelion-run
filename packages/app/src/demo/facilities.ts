@@ -4,7 +4,8 @@ import { PBRMaterial } from "@babylonjs/core/Materials/PBR/pbrMaterial";
 import type { Material } from "@babylonjs/core/Materials/material";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
-import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
+import { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
+import { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Node } from "@babylonjs/core/node";
@@ -117,6 +118,43 @@ function childMeshes(root: Node): Mesh[] {
 	return found;
 }
 
+/**
+ * The swarm join only accepts Mesh. A shared collar is an instance of the first ring,
+ * so bake a mesh that wears the instance's transform and leave it out of the template.
+ */
+function meshesForJoin(root: Node): Mesh[] {
+	const found: Mesh[] = [];
+	const visit = (node: Node) => {
+		if (node instanceof InstancedMesh) {
+			const baked = node.sourceMesh.clone(`${node.name}.baked`, node.parent, true);
+			if (baked instanceof Mesh) {
+				copyTransform(node, baked);
+				baked.isVisible = false;
+				baked.isPickable = false;
+				found.push(baked);
+			}
+		} else if (node instanceof Mesh && node.getTotalVertices() > 0) {
+			found.push(node);
+		}
+		for (const child of [...node.getChildren()]) {
+			visit(child);
+		}
+	};
+	visit(root);
+	return found;
+}
+
+function copyTransform(from: TransformNode, to: TransformNode): void {
+	to.position.copyFrom(from.position);
+	to.scaling.copyFrom(from.scaling);
+	if (from.rotationQuaternion) {
+		to.rotationQuaternion = from.rotationQuaternion.clone();
+	} else {
+		to.rotationQuaternion = null;
+		to.rotation.copyFrom(from.rotation);
+	}
+}
+
 function findNamed(root: Node, suffix: string): TransformNode | null {
 	if (root instanceof TransformNode && root.name.endsWith(suffix)) {
 		return root;
@@ -133,7 +171,14 @@ function findNamed(root: Node, suffix: string): TransformNode | null {
 function replicate(source: Node, parent: TransformNode | null, id: string): TransformNode {
 	const name = `${id}.${source.name}`;
 	let copy: TransformNode;
-	if (source instanceof Mesh && source.getTotalVertices() > 0) {
+	// A repeated collar is an InstancedMesh of the first one. It still has to be copied,
+	// or the access panels lose the ring the bore keeps.
+	if (source instanceof InstancedMesh) {
+		const inst = source.sourceMesh.createInstance(name);
+		inst.isPickable = false;
+		inst.alwaysSelectAsActiveMesh = true;
+		copy = inst;
+	} else if (source instanceof Mesh && source.getTotalVertices() > 0) {
 		const inst = source.createInstance(name);
 		inst.isPickable = false;
 		inst.alwaysSelectAsActiveMesh = true;
@@ -143,13 +188,7 @@ function replicate(source: Node, parent: TransformNode | null, id: string): Tran
 	}
 	copy.parent = parent;
 	if (source instanceof TransformNode) {
-		copy.position.copyFrom(source.position);
-		copy.scaling.copyFrom(source.scaling);
-		if (source.rotationQuaternion) {
-			copy.rotationQuaternion = source.rotationQuaternion.clone();
-		} else {
-			copy.rotation.copyFrom(source.rotation);
-		}
+		copyTransform(source, copy);
 	}
 	for (const child of source.getChildren()) {
 		replicate(child, copy, id);
@@ -179,7 +218,7 @@ function dressCollector(root: Node): void {
 }
 
 function hideTemplate(root: Node): void {
-	if (root instanceof Mesh) {
+	if (root instanceof AbstractMesh) {
 		root.isVisible = false;
 		root.isPickable = false;
 	}
@@ -372,7 +411,7 @@ export async function loadFacilities(scene: Scene): Promise<FacilityKit> {
 			if (swarmMesh) {
 				return swarmMesh;
 			}
-			const meshes = childMeshes(collector).filter((mesh) => mesh.getTotalVertices() > 0);
+			const meshes = meshesForJoin(collector);
 			// The hull and the solar cap carry a texture. The collar and the irises do not, and a
 			// join refuses mismatched attributes. A blank channel leaves those surfaces untextured.
 			for (const mesh of meshes) {
@@ -381,6 +420,12 @@ export async function loadFacilities(scene: Scene): Promise<FacilityKit> {
 				}
 			}
 			const merged = Mesh.MergeMeshes(meshes, false, true, undefined, false, true);
+			for (const mesh of meshes) {
+				if (mesh.name.endsWith(".baked")) {
+					mesh.parent = null;
+					mesh.setEnabled(false);
+				}
+			}
 			if (!merged) {
 				throw new Error("The collector could not be joined for the swarm.");
 			}

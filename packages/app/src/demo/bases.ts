@@ -44,16 +44,31 @@ export type PlanetBaseInput = {
 export const PLANET_BASES_PER_FACTION = 4;
 /** One base per faction on a moon. */
 export const MOON_BASES_PER_FACTION = 1;
+/**
+ * Bodies, moon orbits, and local shells, relative to ships, docks, and mines.
+ * The hull stays a fixed length, so a craft reads small on a moon.
+ */
+export const BODY_SCALE = 4;
+/**
+ * Heliocentric orbits. Larger than the body scale so neighboring moon systems still miss when both
+ * sit on the near side. Cruise pace includes this factor; `SPEED_SCALE` shortens the coast further.
+ */
+export const SYSTEM_SCALE = 6;
+/**
+ * Extra pace on top of the system scale. Coasts across the enlarged system were still long,
+ * so the drive runs twice as fast. The 3s dock and 7s climb clocks do not use this.
+ */
+export const SPEED_SCALE = 2;
 /** Mercury and Venus: halo radius as a multiple of the planet radius. */
 export const NO_MOON_HALO_SCALE = 1.8;
 /** Saturn's rings, in planet radii. Matches the ring mesh. */
 export const SATURN_RING_INNER_SCALE = 1.24;
 export const SATURN_RING_OUTER_SCALE = 2.27;
 /** Clearance past Earth's station ring, so the Moon's homes sit outside the approach. */
-export const EARTH_WAREHOUSE_RADIUS = 16;
-export const EARTH_STATION_RADIUS = 11;
+export const EARTH_WAREHOUSE_RADIUS = 16 * BODY_SCALE;
+export const EARTH_STATION_RADIUS = 11 * BODY_SCALE;
 /** The Sun's outer orbit. Ships arrive here; the collectors sit further in. */
-export const SUN_OUTER_ORBIT = 44;
+export const SUN_OUTER_ORBIT = 44 * BODY_SCALE;
 /** A moon's outer orbit, in moon radii. Wide enough to clear its bases, narrow enough that neighbors stay apart. */
 export const MOON_OUTER_ORBIT_SCALE = 3;
 /** A ship this many outer-orbit radii from a body or closer is at that body. */
@@ -61,7 +76,7 @@ export const LOCAL_REACH = 1.6;
 /** Mercury and Venus: outer orbit as a multiple of the planet radius. */
 export const NO_MOON_OUTER_SCALE = 2.5;
 /** A pass stays this far outside Saturn's rings. */
-export const SATURN_FLYBY_MARGIN = 3;
+export const SATURN_FLYBY_MARGIN = 3 * BODY_SCALE;
 /**
  * The inner orbit is this far inside the battle honeycomb, as a fraction of the outer radius.
  * On the shell the ship and the grid are the same surface.
@@ -88,6 +103,24 @@ export const MINE_SIZE: BoxSize = {
 /** Outer orbit of a moon: three moon radii, clear of the bases on its surface. */
 export function moonOuterOrbitRadius(diameter: number): number {
 	return (diameter / 2) * MOON_OUTER_ORBIT_SCALE;
+}
+
+/**
+ * Pushes each moon out from the one inside it until the open gap between their honeycombs is at
+ * least as wide as the two shells together. The innermost moon stays on its body-scaled orbit.
+ * `moons` are already in order, nearest the planet first, with diameters and baseline orbits scaled.
+ */
+export function spacedMoonOrbits(moons: { orbit: number; diameter: number }[]): number[] {
+	const orbits = moons.map((moon) => moon.orbit);
+	for (let index = 1; index < orbits.length; index++) {
+		const shells =
+			moonOuterOrbitRadius(moons[index - 1].diameter) + moonOuterOrbitRadius(moons[index].diameter);
+		const apart = orbits[index - 1] + 2 * shells;
+		if (orbits[index] < apart) {
+			orbits[index] = apart;
+		}
+	}
+	return orbits;
 }
 
 /** Inner orbit: just inside the battle honeycomb on `outer`. */

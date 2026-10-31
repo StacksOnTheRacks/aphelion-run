@@ -21,13 +21,14 @@ import type { Scene } from "@babylonjs/core/scene";
 
 import "@babylonjs/loaders/glTF";
 
+import { SYSTEM_SCALE } from "./bases";
 import { beamEnd, createSiphonBeam } from "./laser";
 import { createPlume, type Plume } from "./plume";
 import { plumesFor, type Drive, type Plumes } from "./thrust";
 
 /**
- * Length of the ranger, in world units. About a twelfth of the smallest moon, and a little
- * shorter than a dock, so the hull reads as a craft sitting on the pad. The cockpit cameras are sized
+ * Length of the ranger, in world units. Fixed, so the hull stays a small craft on an enlarged moon,
+ * and a little shorter than a dock, so it reads as sitting on the pad. The cockpit cameras are sized
  * in hull lengths, so the pilot's view keeps the same framing.
  */
 export const HULL_LENGTH = 0.04;
@@ -89,11 +90,11 @@ export function canopyGlassAlpha(facing: number): number {
 /** One face of the sky cube. Taken once, so this cost is paid a single time. */
 const SKY_REFLECTION_SIZE = 256;
 /**
- * The starfield sits thousands of units out. The aft cameras that draw the hull clip at one unit,
- * and a capture taken with that clip is an empty cube.
+ * The starfield sits at the system sky. The aft cameras that draw the hull clip at one unit,
+ * and a capture taken with that clip is an empty cube. The far plane matches the system chart.
  */
 const SKY_REFLECTION_NEAR = 0.1;
-const SKY_REFLECTION_FAR = 9000;
+const SKY_REFLECTION_FAR = 9000 * SYSTEM_SCALE;
 /** Turns of the main fan each second at full burn. Slow enough that the blades still read. */
 const FAN_TURNS = 1.5;
 

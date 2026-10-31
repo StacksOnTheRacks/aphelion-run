@@ -16,6 +16,7 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 
+import { SYSTEM_SCALE } from "./bases";
 import { COCKPIT_LAYER, HULL_LENGTH, SHIP_LAYER, type ShipMounts } from "./ranger";
 
 /** A rectangle on screen as shares of the canvas, from its top left. */
@@ -34,11 +35,11 @@ export const AFT_VIEWS: Record<"port" | "starboard", ScreenRect> = {
 const WORLD_LAYER = 0x0fffffff;
 /**
  * Drawn on the chart and not on the windscreen. A screen-width line from under the seat reads as a
- * streak across the glass, so the pilot sees chevrons on `PILOT_LAYER` instead. Orbit lines use this
- * layer too.
+ * streak across the glass, so the pilot sees the course lane on `PILOT_LAYER` instead. Orbit lines use
+ * this layer too.
  */
 export const CHART_LAYER = 0x40000000;
-/** Course chevrons in front of the pilot. The windscreen and the exterior camera draw them. The chart and the aft views do not. */
+/** The course lane in front of the pilot. The windscreen and the exterior camera draw them. The chart and the aft views do not. */
 export const PILOT_LAYER = 0x20000000;
 
 /** Vertical field of view out the windscreen, wider than the chart's so the dash reads under the view. */
@@ -52,7 +53,7 @@ const FEED_WIDTH = 512;
  * Anything nearer is part of the ship, which the aft views draw after it with a near plane that fits the hull.
  */
 const WORLD_NEAR = 0.02;
-const WORLD_FAR = 9000;
+const WORLD_FAR = 9000 * SYSTEM_SCALE;
 const SHIP_NEAR = 0.0004;
 const SHIP_FAR = 1;
 /**
@@ -379,7 +380,7 @@ export type Cockpit = {
 	/** Draws the cockpit instead of `chart`, or hands the screen back to it. */
 	setActive: (on: boolean) => void;
 	/**
-	 * Interior is the windscreen and the aft views. Exterior orbits the hull and draws the course chevrons.
+	 * Interior is the windscreen and the aft views. Exterior orbits the hull and draws the course lane.
 	 * Aft views leave the course out.
 	 */
 	setViewpoint: (viewpoint: PilotViewpoint) => void;
@@ -440,7 +441,7 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 	// The dash sits centimeters from the eye, inside the near plane that clips the world.
 	// This camera is second, so it clears depth only and the panel lands on the world already drawn.
 	windscreen.cameras.push(camera("cockpit-dash", COCKPIT_LAYER, WINDSCREEN_FOV, SHIP_NEAR, SHIP_FAR, null));
-	// The world, the hull, and the course chevrons. Orbit lines stay on the chart.
+	// The world, the hull, and the course lane. Orbit lines stay on the chart.
 	const exterior = camera("cockpit-exterior", WORLD_LAYER | SHIP_LAYER | PILOT_LAYER, EXTERIOR_FOV, WORLD_NEAR, WORLD_FAR, null);
 	const aftPort = rig("cockpit-aft-port", mounts.port, AFT_FOV, null, true);
 	const aftStarboard = rig("cockpit-aft-starboard", mounts.starboard, AFT_FOV, null, true);

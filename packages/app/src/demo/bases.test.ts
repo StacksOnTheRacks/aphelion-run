@@ -1,4 +1,5 @@
 import {
+	BODY_SCALE,
 	EARTH_STATION_RADIUS,
 	EARTH_WAREHOUSE_RADIUS,
 	MOON_OUTER_ORBIT_SCALE,
@@ -9,6 +10,7 @@ import {
 	SATURN_RING_OUTER_SCALE,
 	INNER_ORBIT_INSET,
 	SUN_OUTER_ORBIT,
+	SYSTEM_SCALE,
 	DOCK_SIZE,
 	innerOrbitRadius,
 	moonBaseRadius,
@@ -19,6 +21,7 @@ import {
 	outerOrbitRadius,
 	planetBases,
 	radialReach,
+	spacedMoonOrbits,
 	warehouseRadius,
 } from "./bases";
 import { moonGeneratorSlots, planetGeneratorSlots } from "./generators";
@@ -43,16 +46,16 @@ type PlanetFixture = {
 	ringInnerScale?: number;
 };
 
-/** Diameters and moon orbits from the environment demo. */
-const PLANETS: PlanetFixture[] = [
+/** Design sizes from the environment demo, before the body and system scales. */
+const DESIGN: PlanetFixture[] = [
 	{ name: "mercury", orbit: 124, diameter: 8, moons: [] },
 	{ name: "venus", orbit: 192, diameter: 12, moons: [] },
 	{
 		name: "earth",
 		orbit: 272,
 		diameter: 14,
-		warehouseRadius: EARTH_WAREHOUSE_RADIUS,
-		stationRadius: EARTH_STATION_RADIUS,
+		warehouseRadius: 16,
+		stationRadius: 11,
 		moons: [{ name: "moon", orbit: 52, diameter: 3.8 }],
 	},
 	{
@@ -113,6 +116,26 @@ const PLANETS: PlanetFixture[] = [
 		],
 	},
 ];
+
+/** The same growth the scene applies: body scale locally, system scale from the Sun, then moon gaps. */
+function scaleFixture(planet: PlanetFixture): PlanetFixture {
+	const moons = planet.moons.map((moon) => ({
+		...moon,
+		diameter: moon.diameter * BODY_SCALE,
+		orbit: moon.orbit * BODY_SCALE,
+	}));
+	const orbits = spacedMoonOrbits(moons);
+	return {
+		...planet,
+		orbit: planet.orbit * SYSTEM_SCALE,
+		diameter: planet.diameter * BODY_SCALE,
+		warehouseRadius: planet.warehouseRadius == null ? undefined : planet.warehouseRadius * BODY_SCALE,
+		stationRadius: planet.stationRadius == null ? undefined : planet.stationRadius * BODY_SCALE,
+		moons: moons.map((moon, index) => ({ ...moon, orbit: orbits[index] })),
+	};
+}
+
+const PLANETS: PlanetFixture[] = DESIGN.map(scaleFixture);
 
 function span(radius: number, width: number): { inner: number; outer: number } {
 	const reach = width / 2;
@@ -180,8 +203,9 @@ if (!earthInput) {
 	expect(earth.stations[0].faction !== earth.stations[1].faction, "Earth stations are one per faction");
 	expect(earth.stations[0].radius === EARTH_STATION_RADIUS, "Earth stations use the inner ring");
 	const station = span(earth.stations[0].radius, earth.stations[0].size.width);
-	expect(station.inner > 7, "Earth stations clear the surface");
-	expect(station.outer < 52 - 3.8 / 2, "Earth stations clear the Moon");
+	const moon = earthInput.moons[0];
+	expect(station.inner > earthInput.diameter / 2, "Earth stations clear the surface");
+	expect(moon != null && station.outer < moon.orbit - moon.diameter / 2, "Earth stations clear the Moon");
 }
 
 // Every outer orbit clears that body's own bases and rings, and no two zones meet.
@@ -233,6 +257,14 @@ if (!earthInput) {
 				expect(gap > moons[i].zone + moons[j].zone, `${moons[i].name} and ${moons[j].name} zones stay apart`);
 			}
 		}
+		for (let i = 1; i < moons.length; i++) {
+			const gap = moons[i].orbit - moons[i - 1].orbit;
+			const shells = moons[i - 1].zone + moons[i].zone;
+			expect(
+				gap + 1e-6 >= 2 * shells,
+				`${moons[i - 1].name} and ${moons[i].name} leave a gap as wide as both shells`
+			);
+		}
 		zones.push({ name: planet.name, orbit: planet.orbit, zone });
 	}
 	const bySun = [...zones].sort((a, b) => a.orbit - b.orbit);
@@ -242,6 +274,20 @@ if (!earthInput) {
 			gap > bySun[i].zone + bySun[i + 1].zone,
 			`${bySun[i].name} and ${bySun[i + 1].name} zones stay apart at their closest`
 		);
+	}
+	const byPlanet = [...PLANETS].sort((a, b) => a.orbit - b.orbit);
+	const reach = (planet: PlanetFixture): number => {
+		let far = outerOrbitRadius(planet);
+		for (const moon of planet.moons) {
+			far = Math.max(far, moon.orbit + moonOuterOrbitRadius(moon.diameter));
+		}
+		return far;
+	};
+	for (let i = 0; i < byPlanet.length - 1; i++) {
+		const inner = byPlanet[i];
+		const outer = byPlanet[i + 1];
+		const gap = outer.orbit - reach(outer) - (inner.orbit + reach(inner));
+		expect(gap > 0, `${inner.name} and ${outer.name} moon systems stay apart at conjunction`);
 	}
 }
 

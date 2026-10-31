@@ -1,5 +1,7 @@
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 
+import { BODY_SCALE } from "./bases";
+
 /**
  * A camera move is a polyline in world space. Where the straight line would enter a planet, a moon,
  * the Sun, or Saturn's rings, the line is replaced by an arc that stays outside the body.
@@ -144,7 +146,7 @@ function swingAroundRing(from: Vector3, to: Vector3, ring: RingBody): Vector3[] 
 	}
 
 	const basis = ringBasis(ring);
-	const radius = ring.outer + Math.max(0.8, ring.halfHeight);
+	const radius = ring.outer + Math.max(0.8 * BODY_SCALE, ring.halfHeight);
 	const fromAngle = planarAngle(from, ring.center, basis);
 	const toAngle = planarAngle(to, ring.center, basis);
 	const clear = ring.halfHeight * 2;

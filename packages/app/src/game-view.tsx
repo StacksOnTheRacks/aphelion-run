@@ -85,7 +85,7 @@ export function GameView() {
 		previous?.dispose();
 
 		// Sol is drawn around the camera. The ship is a few thousandths of a unit across and flies
-		// hundreds of units out, where single-precision world positions lose the gaps between hull panels.
+		// thousands of units out, where single-precision world positions lose the gaps between hull panels.
 		const scene = new Scene(engine, { useFloatingOrigin: place !== "galaxy" });
 		let next: Loaded;
 		try {

@@ -1,5 +1,6 @@
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 
+import { BODY_SCALE, SPEED_SCALE, SYSTEM_SCALE } from "./bases";
 import { routeAroundBodies, segmentHitsRing, segmentHitsSphere, type RingBody, type SphereBody } from "./camera-path";
 
 /**
@@ -61,11 +62,11 @@ export const MAX_TURN = (75 * Math.PI) / 180;
 const ARC_STEP = (3 * Math.PI) / 180;
 /**
  * About a third of a radian per second. A handoff at this rate still reads as one turn from the cockpit.
- * `HANDOFF_SPEED` matches the climb's exit in journey.ts, and `BURN_SPEED` the fast-burn pace.
+ * `HANDOFF_SPEED` matches `CLIMB_PACE` in journey.ts, and `BURN_SPEED` matches `JOURNEY_PACE`.
  */
 export const MAX_YAW = Math.PI / 9;
-const HANDOFF_SPEED = 3;
-const BURN_SPEED = 14;
+const HANDOFF_SPEED = 3 * SYSTEM_SCALE;
+const BURN_SPEED = 14 * SYSTEM_SCALE * SPEED_SCALE;
 
 type Circle = { center: Vector3; radius: number; turn: number };
 
@@ -396,8 +397,8 @@ function ease(u: number): number {
 
 /** One ring thickness off the plane: two half-heights. The burn, the climb, and the drop share this. */
 const RING_CLEARANCE = 2;
-/** How far outside a ring's edge the climb starts to rise, in world units. */
-const RING_FADE = 3;
+/** How far outside a ring's edge the climb starts to rise, in world units. Grows with the ring. */
+const RING_FADE = 3 * BODY_SCALE;
 
 function liftSpiral(points: Vector3[], rings: RingBody[]): Vector3[] {
 	let lifted = points;
@@ -465,7 +466,10 @@ const GENTLE_GAP = (5 * Math.PI) / 180;
  */
 export function turnRadius(speed: number, zone: number): number {
 	const fromSpeed = Math.max(speed, 0.05) / MAX_YAW;
-	const fit = Math.max(zone * 0.35, 0.02);
+	// Pace grew with the system and the shell with the body, so the turn needs the same
+	// fraction of the zone it had before those two scales diverged. The coast is faster
+	// than this handoff; burn fillets ask for that speed and this clamp still limits them.
+	const fit = Math.max(zone * 0.35 * (SYSTEM_SCALE / BODY_SCALE), 0.02 * BODY_SCALE);
 	return Math.min(fromSpeed, fit);
 }
 
@@ -599,12 +603,12 @@ function dropSlivers(points: Vector3[]): Vector3[] {
 	}
 	const kept = [points[0]];
 	for (let i = 1; i < points.length - 1; i++) {
-		if (Vector3.Distance(points[i], kept[kept.length - 1]) >= 0.002) {
+		if (Vector3.Distance(points[i], kept[kept.length - 1]) >= 0.002 * BODY_SCALE) {
 			kept.push(points[i]);
 		}
 	}
 	const last = points[points.length - 1];
-	if (Vector3.Distance(last, kept[kept.length - 1]) < 0.002) {
+	if (Vector3.Distance(last, kept[kept.length - 1]) < 0.002 * BODY_SCALE) {
 		kept[kept.length - 1] = last;
 	} else {
 		kept.push(last);

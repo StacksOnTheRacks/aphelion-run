@@ -31,17 +31,20 @@ import {
 } from "./camera-path";
 import {
 	MINE_SIZE,
+	BODY_SCALE,
 	EARTH_STATION_RADIUS,
 	EARTH_WAREHOUSE_RADIUS,
 	SATURN_RING_INNER_SCALE,
 	SATURN_RING_OUTER_SCALE,
 	SUN_OUTER_ORBIT,
+	SYSTEM_SCALE,
 	innerOrbitRadius,
 	playerHome,
 	moonOuterOrbitRadius,
 	nearBody,
 	outerOrbitRadius,
 	planetBases,
+	spacedMoonOrbits,
 	type BaseSlot,
 	type Faction,
 	type PlanetBaseInput,
@@ -131,19 +134,19 @@ type Shot = {
 };
 
 const SHOTS: Record<string, Shot> = {
-	"earth-outer": { focus: "earth", alpha: 0.9, beta: 0.8, radius: 156, sunRelative: true },
+	"earth-outer": { focus: "earth", alpha: 0.9, beta: 0.8, radius: 156 * BODY_SCALE, sunRelative: true },
 	// Far enough back that the station ring sits in frame beside the planet, outside that orbit.
 	"earth-inner": {
 		focus: "earth",
 		alpha: 0.9,
 		beta: 1.15,
-		radius: 34,
+		radius: 34 * BODY_SCALE,
 		fill: 0.58,
 		sunRelative: true,
 		ride: true,
 		closeUp: true,
 	},
-	"sun-outer": { focus: "sun", alpha: 0.55, beta: 1.05, radius: 110 },
+	"sun-outer": { focus: "sun", alpha: 0.55, beta: 1.05, radius: 110 * BODY_SCALE },
 };
 
 /**
@@ -258,7 +261,25 @@ const EARTH_DAY_BOOST = 1.35;
 /** Earth and its clouds also take more of the sunlight, which lifts the slopes toward the terminator. */
 const EARTH_SUNLIGHT = 1.25;
 
-export const PLANETS: PlanetSpec[] = [
+/** Design sizes in the table below, grown into the play surface. Heliocentric orbits use the system scale. */
+function scaleSystem(specs: PlanetSpec[]): PlanetSpec[] {
+	return specs.map((spec) => {
+		const moons = spec.moons.map((moon) => ({
+			...moon,
+			diameter: moon.diameter * BODY_SCALE,
+			orbit: moon.orbit * BODY_SCALE,
+		}));
+		const orbits = spacedMoonOrbits(moons);
+		return {
+			...spec,
+			orbit: spec.orbit * SYSTEM_SCALE,
+			diameter: spec.diameter * BODY_SCALE,
+			moons: moons.map((moon, index) => ({ ...moon, orbit: orbits[index] })),
+		};
+	});
+}
+
+export const PLANETS: PlanetSpec[] = scaleSystem([
 	{
 		name: "mercury",
 		orbit: 124,
@@ -367,7 +388,7 @@ export const PLANETS: PlanetSpec[] = [
 			{ name: "nereid", orbit: 44, diameter: 0.5, period: 360.1 },
 		],
 	},
-];
+]);
 
 /** The whole system from nearly overhead, close enough that the outer orbit can leave the frame. */
 SHOTS.system = {
@@ -453,13 +474,13 @@ export const PLACES: ViewPlace[] = [
 	}),
 ];
 
-export const SUN_DIAMETER = 28;
+export const SUN_DIAMETER = 28 * BODY_SCALE;
 /** Corona width as a multiple of the Sun's diameter. It fades out before the satellite band gets crowded. */
 const CORONA_SCALE = 2.2;
 /** The Sun turns once in about 25 days, in radians per second. */
 const SUN_SPIN = (Math.PI * 2) / (25.38 * 86_400);
 const SUNLIGHT_COLOR = new Color3(1, 0.95, 0.86);
-export const SUN_INNER_RING = 24;
+export const SUN_INNER_RING = 24 * BODY_SCALE;
 SHOTS["sun-inner"] = {
 	focus: "sun",
 	alpha: 0.35,
@@ -479,10 +500,13 @@ const INNER_RING_COLOR = new Color3(0.85, 0.55, 0.25);
 
 /** Collectors in the Sun's inner band. Half the original swarm, split across the three owners. */
 const SATELLITE_COUNT = 150;
-const SATELLITE_BAND_INNER = 19;
-const SATELLITE_BAND_OUTER = 30;
-/** Angular speed at radius r is SATELLITE_ORBIT_RATE / r^1.5, so inner satellites lap outer ones. */
-const SATELLITE_ORBIT_RATE = 1.175;
+const SATELLITE_BAND_INNER = 19 * BODY_SCALE;
+const SATELLITE_BAND_OUTER = 30 * BODY_SCALE;
+/**
+ * Angular speed at radius r is SATELLITE_ORBIT_RATE / r^1.5, so inner satellites lap outer ones.
+ * The rate grows with the band so a framed collector keeps the lap it had before the bodies grew.
+ */
+const SATELLITE_ORBIT_RATE = 1.175 * BODY_SCALE ** 1.5;
 
 type SatelliteOwner = "corporate" | "marauder" | "empty";
 
@@ -496,7 +520,7 @@ const STAR_COUNT = 6000;
 /** Extra stars packed into the Milky Way's band. */
 const BAND_STAR_COUNT = 3500;
 /** Inside the camera's far limit. The sky follows the camera, so this is not how far away stars look. */
-const SKY_RADIUS = 7000;
+const SKY_RADIUS = 7000 * SYSTEM_SCALE;
 /** Visual magnitudes: Sirius is about -1.5, the faintest dark-sky stars about 6.5. */
 const STAR_BRIGHTEST = -1;
 const STAR_FAINTEST = 6.5;
@@ -519,7 +543,7 @@ const CAMERA_BETA_MIN = 0.05;
 const CAMERA_BETA_MAX = Math.PI / 2 + 0.4;
 const CAMERA_RADIUS_MIN = 3;
 /** Far enough out that a phone held upright still fits Neptune's orbit across its width. */
-const CAMERA_RADIUS_MAX = 7000;
+const CAMERA_RADIUS_MAX = 7000 * SYSTEM_SCALE;
 /** Clearance off Saturn's ring plane. The mesh is flat, so this is what "missing the rings" means. */
 const RING_HALF_HEIGHT = 0.7;
 
@@ -1057,7 +1081,7 @@ export type EnvironmentDemo = LabelSource & {
 	/** Puts the camera in the ranger's cockpit, with both aft views, or back on the chart where it left. */
 	setPiloting: (on: boolean) => void;
 	/**
-	 * Interior looks out the windscreen. Exterior orbits the hull and draws the course chevrons.
+	 * Interior looks out the windscreen. Exterior orbits the hull and draws the course lane.
 	 * Takes effect while piloting; the chart stays put until then.
 	 */
 	setViewpoint: (viewpoint: PilotViewpoint) => void;
@@ -1112,7 +1136,7 @@ export async function createEnvironment(
 	camera.lowerRadiusLimit = CAMERA_RADIUS_MIN;
 	camera.upperRadiusLimit = CAMERA_RADIUS_MAX;
 	camera.minZ = 0.1;
-	camera.maxZ = 9000;
+	camera.maxZ = 9000 * SYSTEM_SCALE;
 	tuneChartCamera(camera);
 	attachChartCamera(camera, canvas);
 	scene.activeCamera = camera;
@@ -1605,7 +1629,7 @@ export async function createEnvironment(
 		camera.lowerBetaLimit = 0.0001;
 		camera.upperBetaLimit = Math.PI - 0.0001;
 		camera.lowerRadiusLimit = 0.05;
-		camera.upperRadiusLimit = 50000;
+		camera.upperRadiusLimit = 50000 * SYSTEM_SCALE;
 		camera.minZ = 0.1;
 		camera.inertialAlphaOffset = 0;
 		camera.inertialBetaOffset = 0;
