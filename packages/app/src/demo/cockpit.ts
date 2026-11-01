@@ -1,5 +1,7 @@
 import type { Camera } from "@babylonjs/core/Cameras/camera";
 import { TargetCamera } from "@babylonjs/core/Cameras/targetCamera";
+// scene.pick returns an empty miss until this registers the ray. Without it a click on the glass is only a look.
+import "@babylonjs/core/Culling/ray";
 import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import type { GlowLayer } from "@babylonjs/core/Layers/glowLayer";
@@ -71,6 +73,12 @@ const STEADY_CUT = 1;
 const LOOK_YAW = 1.3;
 const LOOK_UP = 0.6;
 const LOOK_DOWN = 0.45;
+/**
+ * Interior rest pitch, in radians. Positive looks down.
+ * The center screen's lower edge sits about 0.71 rad below straight ahead, and the windscreen
+ * field is 1.15 rad, so this pitch puts that edge on the bottom of the frame.
+ */
+const INTERIOR_PITCH = 0.136;
 /** Seconds for the head to catch up with a drag, so a flick turns it rather than jumping. */
 const LOOK_SECONDS = 0.08;
 /** A second tap this soon, and this close to the first, looks ahead again. Outside, it returns behind the ship. */
@@ -468,8 +476,9 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 	// Dragging grabs the view: the world follows the pointer, so the head turns the other way.
 	// A second tap in the same place looks ahead. The browser's double-tap zoom is the same gesture,
 	// so this is recognized here instead of from a dblclick.
-	// Straight ahead looks over the brow. The seat starts tipped down so the panel is in frame.
-	const rest: Head = { yaw: 0, pitch: 0.3 };
+	// Straight ahead looks over the brow. The seat starts at the interior pitch so the center
+	// screen's lower edge meets the bottom of the frame.
+	const rest: Head = { yaw: 0, pitch: INTERIOR_PITCH };
 	let aim: Head = { ...rest };
 	let head: Head = { ...rest };
 	let aimOrbit: ExteriorOrbit = { ...EXTERIOR_HOME };
@@ -485,8 +494,9 @@ export function createCockpit(scene: Scene, mounts: ShipMounts, chart: Camera, g
 		if (!active || viewpoint !== "interior" || center.width < 1 || !box || box.width < 1 || box.height < 1) {
 			return null;
 		}
-		const x = ((clientX - box.left) * engine.getRenderWidth()) / box.width;
-		const y = ((clientY - box.top) * engine.getRenderHeight()) / box.height;
+		// scene.pick takes CSS pixels and scales them by the device ratio itself. Passing render pixels aims the ray off the glass.
+		const x = clientX - box.left;
+		const y = clientY - box.top;
 		const dash = windscreen.cameras[windscreen.cameras.length - 1];
 		const hit = scene.pick(x, y, (mesh) => mesh.name === "Cockpit MFD Center", false, dash);
 		const uv = hit?.hit ? hit.getTextureCoordinates() : null;

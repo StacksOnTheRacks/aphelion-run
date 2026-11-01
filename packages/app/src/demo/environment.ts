@@ -2245,6 +2245,8 @@ export async function createEnvironment(
 	/** Energy spent across the trip, one sample per slice of the clock. Cleared once the ship is down. */
 	const FUEL_BINS = 40;
 	let fuelBins: number[] = [];
+	/** Tank at the previous glass sample, so a drop this frame means the engine is spending. */
+	let fuelWas = energy;
 	sampleFuel = () => {
 		const course = journey.course();
 		if (!course) {
@@ -2278,6 +2280,8 @@ export async function createEnvironment(
 		}
 	};
 	scene.onAfterRenderObservable.add(() => {
+		const spending = energy < fuelWas - 1e-6;
+		fuelWas = energy;
 		if (!piloting || navListeners.size === 0) {
 			return;
 		}
@@ -2310,6 +2314,7 @@ export async function createEnvironment(
 						remaining: course.remaining,
 						total: course.total,
 						spent: fuelBins.slice(),
+						spending,
 					}
 				: null,
 		};

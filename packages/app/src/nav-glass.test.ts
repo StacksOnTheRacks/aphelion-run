@@ -1,5 +1,5 @@
-import type { NavBody, NavFix } from "./demo/nav";
-import { holdStock, paintCenterPanel } from "./nav-glass";
+import { nearbyMineChart, type NavBody, type NavFix } from "./demo/nav";
+import { holdStock, paintCenterPanel, type NavControls } from "./nav-glass";
 import { travelShare } from "./travel-clock";
 
 const failures: string[] = [];
@@ -75,40 +75,58 @@ expect(
 
 {
 	const drawn = recordingContext();
+	const nearest = nearbyMineChart(fixAt(600, 600))[0];
 	paintCenterPanel(drawn.context, 1024, 328, fixAt(600, 600), stock, nav);
-	const openSpace = drawn.texts.filter((text) => text === "OPEN SPACE");
-	expect(drawn.texts.includes("SOL"), "open space shows the system dial");
-	expect(openSpace.length === 1, "open space is only the place reading, not a second dial");
-	expect(drawn.sweeps() === 1, "the system dial is the one that sweeps");
+	expect(drawn.texts.includes("NAV PLANNING"), "a ship with no course is planning");
+	expect(drawn.texts.includes(nearest.label.toUpperCase()), "planning lists the nearest planet");
+	expect(drawn.texts.includes(nearest.mines[0].label.toUpperCase()), "the nearest planet opens onto its mines");
+	expect(!drawn.texts.includes("OPEN SPACE") && !drawn.texts.includes("SOL"), "planning does not draw the system dial");
+	expect(drawn.sweeps() === 0, "planning does not sweep");
 	expect(!drawn.texts.includes("HOME"), "navigation has no recall control");
-	expect(drawn.texts.includes("HOLD") && drawn.texts.includes("ORE") && drawn.texts.includes("12"), "navigation lists what is in the hold");
-	expect(drawn.texts.includes("HYDROGEN") && drawn.texts.includes("0"), "an empty mineral still shows its count");
-	expect(!drawn.texts.includes("ENERGY") && !drawn.texts.includes("FUEL"), "the tank and the burn chart stay off until they apply");
+	expect(drawn.texts.includes("12") && drawn.texts.filter((text) => text === "0").length === 3, "navigation counts what is in the cargo");
+	expect(!drawn.texts.includes("CARGO") && !drawn.texts.includes("ORE") && !drawn.texts.includes("HYDROGEN"), "the cargo strip has no labels");
+	expect(!drawn.texts.includes("HOLD"), "the cargo strip is not labeled hold");
+	expect(drawn.texts.includes("ENERGY") && drawn.texts.includes("1,000"), "navigation shows the energy aboard");
+	expect(!drawn.texts.includes("FUEL") && !drawn.texts.includes("RUN") && !drawn.texts.includes("LEFT"), "the gauge is energy, and the run line is gone");
+	expect(drawn.texts.includes("SELECT A MINE"), "planning waits for a mine");
 }
 
 {
 	const drawn = recordingContext();
 	paintCenterPanel(drawn.context, 1024, 328, fixAt(300, 0), stock, nav);
-	expect(drawn.texts.includes("EARTH") && drawn.texts.includes("EARTH ORBIT"), "at a body the dial is that orbit");
+	expect(drawn.texts.includes("NAV PLANNING") && !drawn.texts.includes("EARTH ORBIT"), "at a body the glass is still planning");
 	expect(!drawn.texts.includes("SOL") && !drawn.texts.includes("OPEN SPACE"), "the system dial and the open-space chart stay off");
-	expect(drawn.sweeps() === 0, "the local dial does not sweep");
+	expect(drawn.sweeps() === 0, "planning does not sweep");
 }
 
 {
 	const drawn = recordingContext();
 	paintCenterPanel(drawn.context, 1024, 328, fixAt(300, 0), stock, { page: "mining" });
 	expect(drawn.sweeps() === 0, "the mining page does not sweep");
-	expect(drawn.texts.includes("ENERGY") && drawn.texts.includes("1,000"), "the hold shows the energy aboard");
-	expect(drawn.texts.includes("ORE") && drawn.texts.includes("12"), "a counted mineral shows in the hold");
-	expect(drawn.texts.includes("CARGO") && drawn.texts.includes("12"), "the minerals share one cargo total");
-	expect(drawn.texts.includes("HYDROGEN") && drawn.texts.includes("0"), "an empty mineral still shows its count");
+	expect(drawn.texts.includes("NO CONTACT"), "mining with no dock names that");
+	expect(drawn.texts.includes("12") && drawn.texts.filter((text) => text === "0").length === 3, "mining still counts the cargo");
+	expect(!drawn.texts.includes("CARGO") && !drawn.texts.includes("ORE") && !drawn.texts.includes("HYDROGEN"), "the cargo strip has no labels");
 	expect(!drawn.texts.includes("HOME"), "mining has no recall control");
+}
+
+{
+	const drawn = recordingContext();
+	paintCenterPanel(drawn.context, 1024, 328, fixAt(300, 0), stock, {
+		page: "mining",
+		source: { kind: "generator", resource: "ore", remaining: 1500, capacity: 2000 },
+	});
+	expect(drawn.texts.includes("MINE") && drawn.texts.includes("REMAINING") && drawn.texts.includes("1,500"), "mining shows the load still in the dock");
+	expect(drawn.texts.includes("CONTAINED") && drawn.texts.includes("2,000"), "mining shows the load the dock contained");
+	expect(drawn.texts.includes("ORE"), "mining names the dock in the header");
+	expect(drawn.texts.includes("12") && !drawn.texts.includes("CARGO") && !drawn.texts.includes("HYDROGEN"), "mining keeps the cargo counts and drops their names");
 }
 
 {
 	const drawn = recordingContext();
 	paintCenterPanel(drawn.context, 1024, 328, fixAt(300, 0), stock, { page: "battle" });
 	expect(drawn.texts.includes("STANDBY") && drawn.texts.includes("NO WEAPONS ARE FITTED"), "battle is the standby page");
+	expect(drawn.texts.includes("12") && drawn.texts.filter((text) => text === "0").length === 3, "battle counts the cargo too");
+	expect(!drawn.texts.includes("CARGO") && !drawn.texts.includes("ORE"), "the cargo strip has no labels");
 	expect(drawn.sweeps() === 0, "the standby page does not sweep");
 }
 
@@ -127,19 +145,41 @@ expect(
 			remaining: 84,
 			total: 120,
 			spent: [0, 4, 12, 20, 24],
+			spending: true,
 		},
 	};
 	paintCenterPanel(idle.context, 1024, 328, fixAt(600, 600), stock, nav);
 	paintCenterPanel(flying.context, 1024, 328, underway, stock, nav);
+	expect(flying.texts.includes("EN ROUTE"), "a course already set is en route");
+	expect(!flying.texts.includes("NAV PLANNING") && !idle.texts.includes("EN ROUTE"), "planning and en route are the two nav states");
 	expect(flying.texts.includes("1:24"), "a trip shows the time left");
 	expect(flying.texts.includes("MARS"), "the course name stays on the panel");
-	expect(flying.texts.includes("FUEL") && flying.texts.includes("24"), "the burn chart sits with the clock and reads the energy spent");
-	expect(!idle.texts.includes("1:24") && !idle.texts.includes("FUEL"), "a berthed ship has no travel clock and no burn chart");
-	expect(flying.arcs() === idle.arcs() + 2, "the countdown is a ring around the time");
+	expect(flying.texts.includes("ENERGY") && flying.texts.includes("1,000"), "the energy gauge stays up during a trip");
+	expect(!flying.texts.includes("FUEL") && !flying.texts.includes("LEFT") && !flying.texts.includes("RUN") && !flying.texts.includes("30%"), "the gauge is not fuel and the run line is gone");
+	expect(!flying.texts.includes("24"), "the gauge does not plot the energy spent");
+	expect(!idle.texts.includes("1:24") && idle.texts.includes("ENERGY") && idle.texts.includes("1,000"), "a berthed ship has no travel clock and still shows its energy");
+	expect(!idle.texts.includes("FUEL") && !idle.texts.includes("RUN"), "a berthed ship has no fuel gauge and no run line");
+	expect(flying.arcs() > idle.arcs(), "the en route clock adds rings the planning list does not draw");
 	expect(travelShare(84, 120) === 0.7, "the ring is the share of the trip still ahead");
 	expect(travelShare(0, 120) === 0, "an arrived trip leaves the ring empty");
 	expect(travelShare(200, 120) === 1, "the ring does not pass a full turn");
 	expect(travelShare(10, 0) === 0, "a trip with no length draws no share");
+}
+
+{
+	const drawn = recordingContext();
+	const countdown: NavControls = {
+		open: null,
+		scroll: 0,
+		selected: null,
+		offer: null,
+		blocked: null,
+		countdown: { seconds: 5, name: "Ore mine" },
+	};
+	paintCenterPanel(drawn.context, 1024, 328, fixAt(600, 600), stock, { page: "nav", nav: countdown });
+	expect(drawn.texts.includes("NAV PLANNING") && drawn.texts.includes("DEPARTING") && drawn.texts.includes("5"), "a locked coast counts down before the ship moves");
+	expect(drawn.texts.includes("ORE MINE"), "the countdown names the mine");
+	expect(!drawn.texts.includes("SELECT A MINE") && drawn.sweeps() === 0, "the list and the dial wait until the countdown is over");
 }
 
 if (failures.length > 0) {
@@ -147,4 +187,4 @@ if (failures.length > 0) {
 	process.exit(1);
 }
 
-console.log("the center glass swaps pages, the dial follows the ship, and both pages list the hold");
+console.log("the center glass swaps pages, the dial follows the ship, and every page counts the cargo");

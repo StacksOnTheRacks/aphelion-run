@@ -12,7 +12,7 @@ import {
 	type EnvironmentDemo,
 	type ShipHold,
 } from "./demo/environment";
-import { MINERALS } from "./demo/energy";
+import { MINERALS, MINE_FULL } from "./demo/energy";
 import {
 	DEPARTURE_SECONDS,
 	recallMove,
@@ -25,9 +25,10 @@ import {
 	targetYields,
 	type ScanTarget,
 } from "./demo/scan";
+import { findMine, mineRows, nearbyMineChart, toggleMineOpen, type NavFix } from "./demo/nav";
 import { pilotPlaque, viewPlaque } from "./demo/view-plaque";
 import { PilotCornerDock } from "./dashboard";
-import { centerPage, holdStock, paintCenterPanel, type CargoLabel } from "./nav-glass";
+import { centerHit, centerPage, holdStock, navScrollMax, paintCenterPanel, type CargoLabel, type NavControls, type NavCourseOffer, type SiphonSource } from "./nav-glass";
 import { Hud, useHudAnchors } from "./hud";
 import type { TravelClock } from "./travel-clock";
 import { PILOT_VIEWPORT } from "./pilot-viewport";
@@ -64,6 +65,23 @@ function sameHold(left: ShipHold, right: ShipHold): boolean {
 	);
 }
 
+/** The dock the ship is drawing, with the load it still holds. Null at any other berth. */
+function siphonSource(system: EnvironmentDemo, live: ShipHold): SiphonSource | null {
+	if (live.charge === null) {
+		return null;
+	}
+	const berthed = system.berth();
+	if (!berthed || (berthed.kind !== "collector" && berthed.kind !== "generator")) {
+		return null;
+	}
+	return {
+		kind: berthed.kind,
+		resource: berthed.kind === "collector" ? "energy" : (berthed.resource ?? "ore"),
+		remaining: live.charge,
+		capacity: MINE_FULL,
+	};
+}
+
 /** A berth is the craft the ship is on. A fresh object with the same id is the same berth. */
 function sameBerth(left: ScanTarget | null, right: ScanTarget | null): boolean {
 	return left?.id === right?.id;
@@ -73,8 +91,10 @@ function sameBerth(left: ScanTarget | null, right: ScanTarget | null): boolean {
  * Sol, and the chrome over it. Names follow the framing: a wide planet chart names the planet and its
  * moons, and a chart on one body names that body and what orbits it. A pick on a body goes there.
  * A pick on a home base, a station, a mine, or a collector opens the route planner: the description
- * and the coast. The slider sets the speed, the time, and the burns, then counts down and flies. The cockpit has no names and
- * no picks.
+ * and the coast. The slider sets the speed, the time, and the burns, then counts down and flies.
+ * In the cockpit the center glass is the dashboard. Nav planning lists nearby planets, the moons
+ * under each, and the mines under those. Picking a mine sets the coast speed. Locking the coast
+ * counts down, then the glass reads en route. The chart names nothing while piloting.
  *
  * The HUD reads the chart on screen, the warehouse, and the ranger. On a chart the plaque names the
  * area in frame: Sol System, a wide planetary chart such as Earth System, Sol itself, or the body
@@ -112,6 +132,11 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const [hold, setHold] = useState(() => system.hold());
 	const [travel, setTravel] = useState<TravelClock | null>(null);
 	const [close, setClose] = useState(false);
+	const [navOpen, setNavOpen] = useState<readonly string[] | null>(null);
+	const [navScroll, setNavScroll] = useState(0);
+	const [navSelected, setNavSelected] = useState<string | null>(null);
+	const [navOffer, setNavOffer] = useState<NavCourseOffer | null>(null);
+	const [navBlocked, setNavBlocked] = useState<string | null>(null);
 	const pilotFits = usePilotFits();
 	const piloting = mode === "pilot" && pilotFits;
 	const back = close ? wideChartStep(view) : null;
@@ -174,6 +199,23 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const flightRef = useRef(flight);
 	flightRef.current = flight;
 	const pageRef = useRef(centerPage(false));
+	const fixRef = useRef<NavFix | null>(null);
+	const courseForRef = useRef(courseFor);
+	courseForRef.current = courseFor;
+	const dockedRef = useRef(docked);
+	dockedRef.current = docked;
+	const departureRef = useRef(departure);
+	departureRef.current = departure;
+	const navControls: NavControls = {
+		open: navOpen,
+		scroll: navScroll,
+		selected: navSelected,
+		offer: navOffer,
+		blocked: navBlocked,
+		countdown: departure ? { seconds: secondsLeft(departure.endsAt, now), name: scanCard(departure.target).label } : null,
+	};
+	const navControlsRef = useRef(navControls);
+	navControlsRef.current = navControls;
 	useEffect(
 		() =>
 			system.onHold((next) => {
@@ -193,8 +235,10 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	useEffect(
 		() =>
 			system.onNav((fix) => {
+				fixRef.current = fix;
 				const live = system.hold();
 				pageRef.current = centerPage(live.siphoning);
+				const source = siphonSource(system, live);
 				system.paintCenter((context, width, height) =>
 					paintCenterPanel(
 						context,
@@ -207,12 +251,86 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 							Nitrogen: live.cargo.nitrogen,
 							Carbon: live.cargo.carbon,
 						}),
-						{ page: pageRef.current }
+						{ page: pageRef.current, source, nav: navControlsRef.current }
 					)
 				);
 			}),
 		[system]
 	);
+	useEffect(() => {
+		return system.onCenterTap((point) => {
+			const fix = fixRef.current;
+			if (!fix || pageRef.current !== "nav") {
+				return;
+			}
+			const controls = navControlsRef.current;
+			const energy = system.hold().energy;
+			const hit = centerHit(point.width, point.height, point.x, point.y, "nav", { fix, controls, energy });
+			if (!hit) {
+				return;
+			}
+			if (hit.type === "toggle") {
+				setNavOpen(toggleMineOpen(nearbyMineChart(fix), controls.open, hit.id));
+				setNavScroll(0);
+				return;
+			}
+			if (hit.type === "scroll") {
+				const limit = navScrollMax(point.width, point.height, mineRows(nearbyMineChart(fix), controls.open).length);
+				setNavScroll((current) => Math.max(0, Math.min(limit, current + hit.dir)));
+				return;
+			}
+			const mine = hit.type === "mine" ? findMine(hit.id) : controls.selected ? findMine(controls.selected) : null;
+			if (!mine) {
+				return;
+			}
+			const target: ScanTarget = { id: mine.id, host: mine.host, kind: "generator", resource: mine.resource };
+			if (hit.type === "mine") {
+				const next = courseForRef.current(target);
+				setNavSelected(mine.id);
+				if (!next.course) {
+					setNavOffer(null);
+					setNavBlocked(
+						travelAction(target, {
+							at: flightRef.current ? null : (dockedRef.current?.host ?? "earth"),
+							departing: departureRef.current !== null,
+							energy,
+						}).label
+					);
+					return;
+				}
+				setNavBlocked(null);
+				setNavOffer({
+					name: scanCard(target).label,
+					speed: next.speed,
+					minSpeed: next.minSpeed,
+					maxSpeed: next.maxSpeed,
+					seconds: next.seconds,
+					cost: next.cost,
+					reserve: next.reserve,
+				});
+				return;
+			}
+			if (hit.type === "speed") {
+				const preview = system.preview(target, hit.speed);
+				if (!preview) {
+					return;
+				}
+				setNavOffer((offer) => (offer ? { ...offer, speed: hit.speed, cost: preview.cost, seconds: preview.seconds } : offer));
+				return;
+			}
+			const offer = controls.offer;
+			if (!offer || !routeCommit(energy, offer.cost, offer.reserve).enabled) {
+				return;
+			}
+			setDeparture({
+				target,
+				endsAt: Date.now() + DEPARTURE_SECONDS * 1000,
+				cost: offer.cost,
+				speed: offer.speed,
+			});
+			setNow(Date.now());
+		});
+	}, [system]);
 	useEffect(() => {
 		if (!pilotFits && mode === "pilot") {
 			setViewpoint("interior");

@@ -1,5 +1,5 @@
-import { centerFrame, centerHit, centerPage } from "../nav-glass";
-import { LOCAL_REACH, bearing, bodyLabel, localBody, localPoint, systemPoint, type NavBody, type NavFix } from "./nav";
+import { centerFrame, centerHit, centerPage, navTargets, type NavControls } from "../nav-glass";
+import { LOCAL_REACH, bearing, bodyLabel, findMine, localBody, localPoint, mineRows, nearbyMineChart, systemPoint, toggleMineOpen, type NavBody, type NavFix } from "./nav";
 
 const failures: string[] = [];
 
@@ -49,6 +49,79 @@ expect(
 	"navigation has no recall control"
 );
 expect(centerHit(1024, 420, glass.content.x + 8, glass.content.y + 8, "nav") === null, "the chart itself is not a control");
+
+const chart = nearbyMineChart(fixAt(0, 0));
+expect(chart[0]?.id === "mercury", "the nearest mine-bearing planet leads the list");
+expect(chart.every((planet) => planet.id !== "earth"), "a planet with no mines is left out");
+expect(!chart.some((planet) => planet.moons.some((moon) => moon.id === "moon")), "Earth's Moon has no mines to group");
+const mars = chart.find((planet) => planet.id === "mars");
+expect(mars?.moons[0]?.id === "phobos" && mars.moons[0].mines[0]?.id === "phobos-generator-ore", "moons group under their planet, and mines group under the moon");
+expect(
+	chart[0]?.mines.map((mine) => mine.id).join() === "mercury-generator-ore,mercury-generator-hydrogen",
+	"a planet's own mines follow its yields"
+);
+expect(findMine("mars-generator-carbon")?.host === "mars", "a mine id is the dock the ship travels to");
+const folded = mineRows(chart, null);
+expect(folded[0]?.id === "mercury" && folded[0].open && folded[1]?.kind === "mine", "the nearest planet starts open on its mines");
+expect(!folded.some((row) => row.kind === "moon" && row.open), "moons start closed");
+expect(toggleMineOpen(chart, null, "phobos").includes("phobos") && toggleMineOpen(chart, null, "phobos").includes("mercury"), "opening a moon keeps the planet that was already open");
+expect(!toggleMineOpen(chart, null, "mercury").includes("mercury"), "the nearest planet can be closed");
+
+const planning: NavControls = { open: null, scroll: 0, selected: null, offer: null, blocked: null, countdown: null };
+const targets = navTargets(1024, 420, fixAt(0, 0), planning);
+const planetRow = targets?.rows.find((row) => row.kind === "planet");
+const mineRow = targets?.rows.find((row) => row.kind === "mine");
+const planetHit = planetRow ? centerHit(1024, 420, planetRow.rect.x + 8, planetRow.rect.y + 8, "nav", { fix: fixAt(0, 0), controls: planning, energy: 1000 }) : null;
+const mineHit = mineRow ? centerHit(1024, 420, mineRow.rect.x + 8, mineRow.rect.y + 8, "nav", { fix: fixAt(0, 0), controls: planning, energy: 1000 }) : null;
+expect(planetHit?.type === "toggle" && planetHit.id === "mercury", "a planet row opens and closes");
+expect(mineHit?.type === "mine" && mineHit.id === "mercury-generator-ore", "a mine row is the one that can be traveled to");
+expect(
+	centerHit(1024, 420, glass.tabs[0].rect.x + 6, glass.tabs[0].rect.y + 6, "nav", { fix: fixAt(0, 0), controls: planning, energy: 1000 }) === null,
+	"the mode marks stay labels while planning"
+);
+
+const offered: NavControls = {
+	...planning,
+	selected: "mercury-generator-ore",
+	offer: { name: "Ore mine", speed: 4, minSpeed: 1, maxSpeed: 9, seconds: 90, cost: 120, reserve: 40 },
+};
+const offerTargets = navTargets(1024, 420, fixAt(0, 0), offered);
+const slow = offerTargets?.speed
+	? centerHit(1024, 420, offerTargets.speed.x + 1, offerTargets.speed.y + 4, "nav", { fix: fixAt(0, 0), controls: offered, energy: 1000 })
+	: null;
+const fast = offerTargets?.speed
+	? centerHit(1024, 420, offerTargets.speed.x + offerTargets.speed.w - 1, offerTargets.speed.y + 4, "nav", { fix: fixAt(0, 0), controls: offered, energy: 1000 })
+	: null;
+const depart = offerTargets?.depart
+	? centerHit(1024, 420, offerTargets.depart.x + 8, offerTargets.depart.y + 8, "nav", { fix: fixAt(0, 0), controls: offered, energy: 1000 })
+	: null;
+const poor = offerTargets?.depart
+	? centerHit(1024, 420, offerTargets.depart.x + 8, offerTargets.depart.y + 8, "nav", { fix: fixAt(0, 0), controls: offered, energy: 10 })
+	: null;
+const notch = offerTargets?.slower
+	? centerHit(1024, 420, offerTargets.slower.x + 4, offerTargets.slower.y + 4, "nav", { fix: fixAt(0, 0), controls: offered, energy: 1000 })
+	: null;
+expect(slow?.type === "speed" && fast?.type === "speed" && slow.speed < fast.speed, "the track sets the coast speed");
+expect(notch?.type === "speed" && notch.speed === 3.9, "a step lowers the coast by a tenth");
+expect(depart?.type === "depart", "a coast the tank can pay is locked from the glass");
+expect(poor === null, "a coast the tank cannot pay is not a control");
+
+const counting: NavControls = { ...planning, countdown: { seconds: 4, name: "Ore mine" } };
+expect(navTargets(1024, 420, fixAt(0, 0), counting) === null, "the countdown is not a list");
+const underway = fixAt(0, 0);
+underway.course = {
+	points: [
+		{ x: 0, z: 0 },
+		{ x: 10, z: 0 },
+	],
+	progress: 0.2,
+	name: "Mercury",
+	remaining: 40,
+	total: 80,
+	spent: [],
+	spending: false,
+};
+expect(centerHit(1024, 420, glass.content.x + 8, glass.content.y + 8, "nav", { fix: underway, controls: planning, energy: 1000 }) === null, "en route does not take a course");
 
 if (failures.length > 0) {
 	console.error(failures.join("\n"));
