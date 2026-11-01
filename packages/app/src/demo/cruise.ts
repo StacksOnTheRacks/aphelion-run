@@ -37,6 +37,8 @@ export type CruiseProfile = {
 	speed: number;
 	minSpeed: number;
 	maxSpeed: number;
+	/** Speed at the end of the cruise. The drop leaves at this. */
+	arriveSpeed: number;
 	/** Seconds the main engine is lit. */
 	thrustSeconds: number;
 	/** Seconds the main engine is dark while the cruise is underway. */
@@ -54,52 +56,65 @@ export type CruiseProfile = {
 	burn: (t: number) => number;
 };
 
-/** Slowest and fastest coast whose burns fit on a cruise of `length`. */
+/**
+ * Slowest and fastest coast whose burns fit on a cruise of `length`. The ship leaves at
+ * `startSpeed` and arrives at `arriveSpeed`. The coast is at least the faster of those two.
+ */
 export function coastLimits(
 	length: number,
 	corners: CruiseCorner[],
-	orbitSpeed: number,
-	shipMax: number
+	startSpeed: number,
+	shipMax: number,
+	arriveSpeed = startSpeed
 ): { min: number; max: number } {
-	const cap = Math.max(orbitSpeed, shipMax);
+	const floor = Math.max(startSpeed, arriveSpeed);
+	const cap = Math.max(floor, shipMax);
 	let max = cap;
-	if (!fits(length, corners, cap, orbitSpeed)) {
-		let lo = orbitSpeed;
+	if (!fits(length, corners, cap, startSpeed, arriveSpeed)) {
+		let lo = floor;
 		let hi = cap;
 		for (let step = 0; step < 28; step++) {
 			const mid = (lo + hi) / 2;
-			if (fits(length, corners, mid, orbitSpeed)) {
+			if (fits(length, corners, mid, startSpeed, arriveSpeed)) {
 				lo = mid;
 			} else {
 				hi = mid;
 			}
 		}
-		max = fits(length, corners, lo, orbitSpeed) ? lo : orbitSpeed;
+		max = fits(length, corners, lo, startSpeed, arriveSpeed) ? lo : floor;
 	}
-	const min = Math.min(max, orbitSpeed + COAST_ABOVE_ORBIT);
+	const min = Math.min(max, floor + COAST_ABOVE_ORBIT);
 	return { min, max };
 }
 
 /**
  * The cruise flown at `wanted`. The speed is held inside the range that fits on `length`.
- * Passing a speed at or below the handoff selects the slow end.
+ * Passing a speed at or below the handoff selects the slow end. The ship is already moving at
+ * `startSpeed` and arrives at `arriveSpeed`. Both default to one handoff when the caller does
+ * not split them.
  */
 export function planCruise(
 	length: number,
 	corners: CruiseCorner[],
 	wanted: number,
-	orbitSpeed: number,
-	shipMax: number
+	startSpeed: number,
+	shipMax: number,
+	arriveSpeed = startSpeed
 ): CruiseProfile {
-	const limits = coastLimits(length, corners, orbitSpeed, shipMax);
+	// A cruise too short to reach the arrival handoff keeps the speed it already has.
+	let closing = arriveSpeed;
+	if (closing > startSpeed + 1e-3 && !fits(length, corners, closing, startSpeed, closing)) {
+		closing = startSpeed;
+	}
+	const limits = coastLimits(length, corners, startSpeed, shipMax, closing);
 	const speed = Math.min(limits.max, Math.max(limits.min, wanted));
-	const laid = layoutSpans(length, corners, speed, orbitSpeed) ?? layoutSpans(length, [], speed, orbitSpeed);
+	const laid = layoutSpans(length, corners, speed, startSpeed, closing) ?? layoutSpans(length, [], speed, startSpeed, closing);
 	const spans = laid ?? [];
-	const depart = burnDistance(orbitSpeed, speed);
-	const arrive = burnDistance(speed, orbitSpeed);
+	const depart = burnDistance(startSpeed, speed);
+	const arrive = burnDistance(speed, closing);
 	const mid = Math.max(0, length - depart - arrive);
-	const tDepart = burnTime(orbitSpeed, speed);
-	const tArrive = burnTime(speed, orbitSpeed);
+	const tDepart = burnTime(startSpeed, speed);
+	const tArrive = burnTime(speed, closing);
 	const tMid = speed > 1e-6 ? mid / speed : 0;
 	const seconds = tDepart + tMid + tArrive;
 	const thrustSeconds = spans.reduce((sum, span) => sum + burnTime(span.startSpeed, span.endSpeed) + turnTime(span), 0);
@@ -114,7 +129,7 @@ export function planCruise(
 			return seconds;
 		}
 		if (distance <= depart + 1e-8) {
-			return timeUnderAccel(orbitSpeed, CRUISE_ACCEL, distance);
+			return timeUnderAccel(startSpeed, CRUISE_ACCEL, distance);
 		}
 		if (distance <= depart + mid + 1e-8) {
 			return tDepart + (distance - depart) / Math.max(speed, 1e-6);
@@ -131,7 +146,7 @@ export function planCruise(
 			return length;
 		}
 		if (t <= tDepart) {
-			return orbitSpeed * t + 0.5 * CRUISE_ACCEL * t * t;
+			return startSpeed * t + 0.5 * CRUISE_ACCEL * t * t;
 		}
 		if (t <= tDepart + tMid) {
 			return depart + speed * (t - tDepart);
@@ -148,6 +163,7 @@ export function planCruise(
 		speed,
 		minSpeed: limits.min,
 		maxSpeed: limits.max,
+		arriveSpeed: closing,
 		thrustSeconds,
 		coastSeconds,
 		seconds,
@@ -169,14 +185,20 @@ function turnTime(span: ThrustSpan): number {
 	return span.startSpeed > 1e-6 ? distance / span.startSpeed : 0;
 }
 
-function fits(length: number, corners: CruiseCorner[], speed: number, orbitSpeed: number): boolean {
-	if (speed < orbitSpeed - 1e-6) {
+function fits(
+	length: number,
+	corners: CruiseCorner[],
+	speed: number,
+	startSpeed: number,
+	arriveSpeed: number
+): boolean {
+	if (speed < Math.max(startSpeed, arriveSpeed) - 1e-6) {
 		return false;
 	}
 	if (length <= 1e-6) {
-		return speed <= orbitSpeed + 1e-6;
+		return speed <= Math.max(startSpeed, arriveSpeed) + 1e-6;
 	}
-	return layoutSpans(length, corners, speed, orbitSpeed) !== null;
+	return layoutSpans(length, corners, speed, startSpeed, arriveSpeed) !== null;
 }
 
 /**
@@ -187,10 +209,11 @@ function layoutSpans(
 	length: number,
 	corners: CruiseCorner[],
 	speed: number,
-	orbitSpeed: number
+	startSpeed: number,
+	arriveSpeed: number
 ): ThrustSpan[] | null {
-	const depart = burnDistance(orbitSpeed, speed);
-	const arrive = burnDistance(speed, orbitSpeed);
+	const depart = burnDistance(startSpeed, speed);
+	const arrive = burnDistance(speed, arriveSpeed);
 	if (depart + arrive > length + 1e-4) {
 		return null;
 	}
@@ -226,13 +249,13 @@ function layoutSpans(
 	}
 	const spans: ThrustSpan[] = [];
 	if (depart > 1e-4) {
-		spans.push({ from: 0, to: depart, startSpeed: orbitSpeed, endSpeed: speed });
+		spans.push({ from: 0, to: depart, startSpeed: startSpeed, endSpeed: speed });
 	}
 	for (const turn of turns) {
 		spans.push({ from: turn.from, to: turn.to, startSpeed: speed, endSpeed: speed });
 	}
 	if (arrive > 1e-4) {
-		spans.push({ from: length - arrive, to: length, startSpeed: speed, endSpeed: orbitSpeed });
+		spans.push({ from: length - arrive, to: length, startSpeed: speed, endSpeed: arriveSpeed });
 	}
 	return spans;
 }

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { Scene } from "@babylonjs/core/scene";
 
-import { emptyCargo, freshSession, STARTING_ENERGY, type Cargo, type SolSession } from "./demo/energy";
+import { cargoUsed, emptyCargo, freshSession, STARTING_ENERGY, type Cargo, type SolSession } from "./demo/energy";
 import { createEnvironment, type EnvironmentDemo } from "./demo/environment";
 import { createGalaxy, type GalaxyDemo } from "./demo/galaxy";
 import { GalaxyPlace } from "./galaxy-view";
@@ -46,6 +46,7 @@ export function GameView() {
 	const sessionRef = useRef<SolSession>(freshSession());
 	const solRef = useRef<EnvironmentDemo | null>(null);
 	const [shipEnergy, setShipEnergy] = useState(STARTING_ENERGY);
+	const [shipCargo, setShipCargo] = useState(0);
 	const [stockpile, setStockpile] = useState<Cargo>(() => emptyCargo());
 	const [loaded, setLoaded] = useState<Loaded | null>(null);
 	const [loading, setLoading] = useState<{ place: Place; progress: number; visible: boolean }>({
@@ -78,6 +79,7 @@ export function GameView() {
 			const saved = solRef.current.session();
 			sessionRef.current = saved;
 			setShipEnergy(saved.energy);
+			setShipCargo(cargoUsed(saved.cargo));
 			setStockpile(saved.base);
 			solRef.current = null;
 		}
@@ -179,6 +181,7 @@ export function GameView() {
 				<GalaxyPlace
 					galaxy={loaded.galaxy}
 					energy={shipEnergy}
+					cargo={shipCargo}
 					holdings={[
 						{ id: "hydrogen", label: "Hydrogen", amount: stockpile.hydrogen },
 						{ id: "ore", label: "Ore", amount: stockpile.ore },

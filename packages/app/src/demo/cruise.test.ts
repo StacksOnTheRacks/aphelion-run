@@ -61,6 +61,14 @@ const straight: CruiseCorner[] = [];
 	expect(Math.abs(depart.to - depart.from - distance) < 1e-3, "the opening burn is as long as the change in speed");
 }
 
+{
+	const crawl = planCruise(2000, straight, 0, 2, 168, 18);
+	expect(crawl.speed >= 18, `a slow orbit does not set the coast (${crawl.speed.toFixed(2)})`);
+	expect(Math.abs(crawl.arriveSpeed - 18) < 1e-6, "the cruise arrives at the asked handoff");
+	expect(crawl.seconds < 2000 / 10, `the coast is not flown at the exit speed (${crawl.seconds.toFixed(1)}s)`);
+	expect(Math.abs(crawl.distanceAt(crawl.seconds) - 2000) < 1e-2, "a split handoff still covers the path");
+}
+
 if (failures.length > 0) {
 	console.error(failures.join("\n"));
 	process.exit(1);

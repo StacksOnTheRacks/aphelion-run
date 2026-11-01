@@ -22,38 +22,40 @@ import type { RingBody } from "./camera-path";
 import { CHART_LAYER, PILOT_LAYER } from "./cockpit";
 import { planCruise, type CruiseCorner, type CruiseProfile } from "./cruise";
 import { HULL_LENGTH, type ShipModel } from "./ranger";
-import { MAX_YAW, headingAt, pointAt, type Route, type RouteKind } from "./route";
+import { MAX_YAW, headingAt, pointAt, sweepForYaw, type Route, type RouteKind } from "./route";
 
 /**
  * A ship flying a planned trip. Leaving a dock, it eases out to a hover, then climbs to the origin's
  * outer orbit. It burns up to the chosen coast speed, crosses with the engine lit and no exhaust, and burns again
  * to arrive. The drop keeps that idle until the ship eases in to dock. A pad is met from above. A mine or collector
  * is met from behind. Once coupled, the hull shifts so the muzzle sits on the access port's axis
- * and the laser fires straight into the opening. The climb and the drop
- * each take the same time on every body; speed eases so the handoff into the cruise does not jump.
+ * and the laser fires straight into the opening. Leaving the dock and arriving on the next one
+ * each take a fixed seven seconds, along the orbit. The cruise lasts as long as the chosen speed
+ * takes to cover it, and that burn is what spends energy.
  * The line ahead is bright where the engine is lit and dull on the coast. It shortens as the ship
  * goes. It is drawn at a fixed width on screen, so the route reads from the whole-system view and
- * from beside a planet alike. From the cockpit, and from outside the hull, the course is a lane of
+ * from beside a planet alike. From outside the hull, the course is a lane of
  * two rails under the ship, with pulses sweeping in toward the ship. The climb out to the
  * outer orbit, and the drop in to dock, stay clear of it. Nothing here moves the camera.
  *
- * The clock does not depend on the camera. Soft undock, the climb, the drop, and soft dock each last
- * a fixed time. The cruise lasts as long as the chosen speed takes to cover it. The path is fixed
- * when the trip starts. A server can sample the same schedule without a viewport.
+ * The clock does not depend on the camera. A departure counts down five seconds before this clock
+ * starts. Egress and ingress are seven seconds each. The cruise is the calculated remainder.
+ * The path is fixed when the trip starts. A server can sample the same schedule without a viewport.
  */
 
 /** Fastest coast the drive will build, in world units per second. Grows with heliocentric distance. */
 export const JOURNEY_PACE = 14 * SYSTEM_SCALE * SPEED_SCALE;
 /**
  * Speed at the outer orbit, where a climb meets the burn and a drop leaves it, in world units per
- * second. A long spiral is faster in the middle and comes back to this at the rim. Grows with the
- * system so the seven-second climb still reaches the rim. The doubled coast sits above this.
+ * second. A climb eases from the speed the ship already has up to this, and a drop eases from this
+ * down to the dock. The doubled coast sits above this.
  */
 export const CLIMB_PACE = 3 * SYSTEM_SCALE;
-/** The climb out to the outer orbit, and the drop back in, each take this long. */
+/**
+ * How long the ship takes to leave an inner orbit, and how long it takes to arrive on the next one.
+ * The path still follows the orbit. The chart plays that path in this many seconds.
+ */
 export const ORBIT_LEG_SECONDS = 7;
-/** Soft undock and soft dock: the ease between the coupled pose and a hover. */
-export const SOFT_DOCK_SECONDS = 3;
 /**
  * How far a coupled ship sits above a pad, in world units. One hull. The hover is twice this,
  * and both shrink when the gap out to the outer orbit is smaller than the hull. A mine or collector
@@ -171,169 +173,43 @@ export const APPROACH_MIN_SWEEP = 0.8;
 export const JOURNEY_MIN_SECONDS = 16;
 export const JOURNEY_MAX_SECONDS = 120;
 
-/**
- * A speed curve that starts at `v0`, ends at `v1`, and covers `length` in `seconds`. A sine hump in
- * the middle makes up whatever the ends do not cover. When the ends are already faster than the path
- * allows, both scale down and the hump is flat, so the ship never snaps to a higher speed.
- */
-type LegProfile = { seconds: number; length: number; v0: number; v1: number; amplitude: number };
-
-function legProfile(seconds: number, length: number, startSpeed: number, endSpeed: number): LegProfile {
-	const v0 = Math.max(0, startSpeed);
-	const v1 = Math.max(0, endSpeed);
-	if (seconds < 1e-6 || length < 1e-6) {
-		return { seconds, length, v0, v1, amplitude: 0 };
-	}
-	const needed = length / seconds;
-	const ends = (v0 + v1) / 2;
-	if (ends <= needed + 1e-6) {
-		return { seconds, length, v0, v1, amplitude: (Math.PI / 2) * (needed - ends) };
-	}
-	const scale = ends > 1e-6 ? needed / ends : 0;
-	return { seconds, length, v0: v0 * scale, v1: v1 * scale, amplitude: 0 };
-}
-
-function legSpeed(t: number, profile: LegProfile): number {
-	if (profile.seconds < 1e-6) {
-		return profile.v1;
-	}
-	const tau = Math.min(1, Math.max(0, t / profile.seconds));
-	return profile.v0 + (profile.v1 - profile.v0) * tau + profile.amplitude * Math.sin(Math.PI * tau);
-}
-
-/** Distance covered by `t`. At `profile.seconds` this is `profile.length`. */
-function legDistance(t: number, profile: LegProfile): number {
-	if (profile.length < 1e-6) {
-		return 0;
-	}
-	if (profile.seconds < 1e-6) {
-		return profile.length;
-	}
-	const tau = Math.min(1, Math.max(0, t / profile.seconds));
-	const covered =
-		profile.seconds *
-		(profile.v0 * tau +
-			(profile.v1 - profile.v0) * tau * tau * 0.5 +
-			(profile.amplitude * (1 - Math.cos(Math.PI * tau))) / Math.PI);
-	return Math.min(profile.length, Math.max(0, covered));
-}
-
 /** Seconds to cover `total` at the ship's maximum coast. The cruise a player flies can be slower. */
 export function journeySeconds(total: number): number {
 	return Math.max(0, total / JOURNEY_PACE);
 }
 
-/** How long a climb of `length` takes. Every climb that has anywhere to go takes `ORBIT_LEG_SECONDS`. */
-export function climbDuration(length: number, _departSpeed: number): number {
-	return length < 1e-6 ? 0 : ORBIT_LEG_SECONDS;
-}
-
 /**
- * Distance covered `t` seconds into a climb that eases from `departSpeed` toward `CLIMB_PACE`.
- * At `climbDuration` this is `length`. A short climb scales both speeds down so it still fills the leg.
- */
-export function climbDistance(t: number, length: number, departSpeed: number): number {
-	return legDistance(t, legProfile(climbDuration(length, departSpeed), length, departSpeed, CLIMB_PACE));
-}
-
-/**
- * How far along a climb the ship is after `t` seconds, and the speed it exits at.
- * Tight bends are flown no faster than `MAX_YAW`. Spare time is spent on the straighter parts,
- * and the whole climb still lasts `ORBIT_LEG_SECONDS`.
+ * How far along a climb the ship is after `t` seconds, the speed it hands to the burn, and how long the climb takes.
+ * Any climb with length plays out in `ORBIT_LEG_SECONDS`, from the dock to the outer orbit.
+ * The burn is met at `CLIMB_PACE`. `departSpeed` is the speed already on the dock; an empty climb keeps it.
  */
 export function climbPace(
 	points: Vector3[],
 	departSpeed: number
-): { distance: (t: number) => number; endSpeed: number } {
-	const segments = yawCaps(points);
-	const total = segments.reduce((sum, segment) => sum + segment.length, 0);
-	const seconds = climbDuration(total, departSpeed);
-	if (seconds < 1e-6 || total < 1e-6) {
-		return { distance: () => 0, endSpeed: Math.max(0, departSpeed) };
+): { distance: (t: number) => number; endSpeed: number; seconds: number } {
+	const total = polylineLength(points);
+	const v0 = Math.max(0, departSpeed);
+	if (total < 1e-6) {
+		return { distance: () => 0, endSpeed: v0, seconds: 0 };
 	}
-	const speedsFor = (scale: number, capFactor: number) => {
-		let covered = 0;
-		return segments.map((segment) => {
-			const mid = covered + segment.length * 0.5;
-			covered += segment.length;
-			const profile = legProfile(seconds, total, departSpeed, CLIMB_PACE);
-			const wanted = legSpeed((mid / total) * seconds, profile) * scale;
-			const cap = segment.cap * capFactor;
-			return Math.min(cap, Math.max(wanted, 0.02 * capFactor));
-		});
-	};
-	const duration = (speeds: number[]) =>
-		segments.reduce((sum, segment, index) => sum + segment.length / Math.max(speeds[index], 1e-4), 0);
-	let lo = 0;
-	let hi = 1;
-	let capFactor = 1;
-	if (duration(speedsFor(hi, 1)) > seconds) {
-		while (hi < 64 && duration(speedsFor(hi, 1)) > seconds) {
-			lo = hi;
-			hi *= 2;
-		}
-		if (duration(speedsFor(hi, 1)) > seconds) {
-			capFactor = duration(speedsFor(1e6, 1)) / seconds;
-			hi = 1e6;
-			lo = 1e6;
-		}
-	}
-	for (let attempt = 0; attempt < 28; attempt++) {
-		const mid = (lo + hi) / 2;
-		if (duration(speedsFor(mid, capFactor)) > seconds) {
-			lo = mid;
-		} else {
-			hi = mid;
-		}
-	}
-	const speeds = speedsFor(hi, capFactor);
-	const endSpeed = speeds.length > 0 ? speeds[speeds.length - 1] : departSpeed;
+	const seconds = ORBIT_LEG_SECONDS;
 	return {
-		endSpeed,
+		endSpeed: CLIMB_PACE,
+		seconds,
 		distance(t: number) {
-			const elapsed = Math.min(Math.max(0, t), seconds);
-			let left = elapsed;
-			let covered = 0;
-			for (let index = 0; index < segments.length; index++) {
-				const speed = Math.max(speeds[index], 1e-4);
-				const span = segments[index].length / speed;
-				if (left <= span) {
-					return Math.min(total, covered + speed * left);
-				}
-				left -= span;
-				covered += segments[index].length;
-			}
-			return total;
+			const tau = Math.min(1, Math.max(0, t / seconds));
+			return total * tau;
 		},
 	};
 }
 
-/** Fastest speed on each segment that keeps the heading blend inside `MAX_YAW`. */
-function yawCaps(points: Vector3[]): { length: number; cap: number }[] {
-	const steps: { length: number; dir: Vector3 }[] = [];
-	for (let i = 1; i < points.length; i++) {
-		const delta = points[i].subtract(points[i - 1]);
-		const length = delta.length();
-		steps.push({ length, dir: length < 1e-8 ? new Vector3(0, 0, 1) : delta.scale(1 / length) });
+/** Seconds to cover `length` while speed eases from `startSpeed` to `endSpeed`. */
+function legSeconds(length: number, startSpeed: number, endSpeed: number): number {
+	if (length < 1e-6) {
+		return 0;
 	}
-	return steps.map((step, index) => {
-		let cap = Infinity;
-		const consider = (other: number) => {
-			const angle = Math.acos(Math.min(1, Math.max(-1, Vector3.Dot(step.dir, steps[other].dir))));
-			if (angle < 1e-4) {
-				return;
-			}
-			const blend = Math.min(step.length, steps[other].length);
-			cap = Math.min(cap, (MAX_YAW * Math.max(blend, 1e-4)) / angle);
-		};
-		if (index > 0) {
-			consider(index - 1);
-		}
-		if (index + 1 < steps.length) {
-			consider(index + 1);
-		}
-		return { length: step.length, cap };
-	});
+	const average = (Math.max(0, startSpeed) + Math.max(0, endSpeed)) / 2;
+	return average < 1e-6 ? 0 : length / average;
 }
 
 /** How long each part of a trip lasts. The sum is the clock a server and the client both sample. */
@@ -347,28 +223,23 @@ export type FlightSchedule = {
 };
 
 /**
- * Phase lengths for a trip. Soft undock and soft dock are three seconds when the ship is coupled.
- * The climb and the drop are seven seconds when they have somewhere to go. `cruiseSeconds` is the
- * coasting cruise, burns included.
+ * Phase lengths for a trip. Egress and ingress are the fixed orbit legs. They are zero when that
+ * part of the trip does not happen. `cruiseSeconds` is the coasting cruise, burns included.
+ * Leaving the dock and settling onto it are inside those legs, not extra time.
  */
 export function flightSchedule(
-	coupled: boolean,
-	climbLength: number,
-	departSpeed: number,
+	_coupled: boolean,
+	climbSeconds: number,
 	cruiseSeconds: number,
-	docks: boolean
+	dropSeconds: number
 ): FlightSchedule {
-	const undockSeconds = coupled ? SOFT_DOCK_SECONDS : 0;
-	const climbSeconds = climbDuration(climbLength, departSpeed);
-	const dropSeconds = docks ? ORBIT_LEG_SECONDS : 0;
-	const dockSeconds = docks ? SOFT_DOCK_SECONDS : 0;
 	return {
-		undockSeconds,
+		undockSeconds: 0,
 		climbSeconds,
 		cruiseSeconds,
 		dropSeconds,
-		dockSeconds,
-		total: undockSeconds + climbSeconds + cruiseSeconds + dropSeconds + dockSeconds,
+		dockSeconds: 0,
+		total: climbSeconds + cruiseSeconds + dropSeconds,
 	};
 }
 
@@ -379,7 +250,7 @@ export function flightSchedule(
 export function legPose(plan: JourneyPlan, elapsed: number): { point: Vector3; heading: Vector3 } {
 	const pace = climbPace(plan.climb, plan.departSpeed);
 	const climbLength = polylineLength(plan.climb);
-	const climbSeconds = climbDuration(climbLength, plan.departSpeed);
+	const climbSeconds = pace.seconds;
 	const profile = cruiseProfile(plan);
 	const distance =
 		elapsed <= climbSeconds
@@ -414,6 +285,11 @@ export type JourneyPlan = {
 	departDock?: Dock;
 	/** Body `departDock` circles. */
 	departBody?: string;
+	/**
+	 * Where the burn ends, relative to the destination, when the trip is committed.
+	 * The drop's duration is planned from here before the ship leaves.
+	 */
+	arriveFrom?: Vector3;
 };
 
 /** Heading changes along a cruise. A corner that touches an assist arc is free. */
@@ -441,11 +317,8 @@ export function cornersAlong(route: Route): CruiseCorner[] {
 
 /** The coasting cruise for `plan`. A missing speed, or one below the handoff, selects the slow end. */
 export function cruiseProfile(plan: JourneyPlan, coastSpeed = plan.coastSpeed ?? 0): CruiseProfile {
-	const pace = climbPace(plan.climb, plan.departSpeed);
-	// The climb may be sped up or slowed so it still lasts seven seconds. The cruise is priced from
-	// the orbital handoff, which is the speed the ship is already carrying, not that animation pace.
-	const handoff = Math.min(pace.endSpeed, CLIMB_PACE);
-	return planCruise(plan.cruise.total, cornersAlong(plan.cruise), coastSpeed, handoff, JOURNEY_PACE);
+	const exitSpeed = CLIMB_PACE;
+	return planCruise(plan.cruise.total, cornersAlong(plan.cruise), coastSpeed, exitSpeed, JOURNEY_PACE, CLIMB_PACE);
 }
 
 /** A craft a ship can dock with. */
@@ -478,7 +351,12 @@ export type Approach = {
 	from: Vector3;
 	/** Angle from the dock to the ship at the start, around the body. */
 	lead: number;
-	/** How fast that angle closes at the start, per whole approach. It matches the speed the ship arrived at. */
+	/**
+	 * Signed angle flown at the arrival radius before the ship starts inward.
+	 * Same sign as `lead`. The rest of the lead is the inward spiral.
+	 */
+	coast?: number;
+	/** How fast the inward spiral's angle closes at its start, over that spiral's own parameter. */
 	closing: number;
 	seconds: number;
 	/** Which side of the ring plane the ship crosses the ring on: +1 along the ring's normal, -1 against it. */
@@ -486,6 +364,11 @@ export type Approach = {
 	ring?: HarborRing;
 	/** Unit direction the burn was traveling when it arrived. The drop curves off this onto the spiral. */
 	heading?: Vector3;
+	/**
+	 * Short angle, in (-π, π], added at the start so a lead that was extended past the ship still
+	 * begins on the ship. It fades across the lead blend. Full turns are not part of it.
+	 */
+	mismatch?: number;
 	/** Shape parameter at each listed time. Absent until the drop has been timed. */
 	warp?: { times: number[]; params: number[] };
 };
@@ -631,10 +514,10 @@ type Flight = {
 	departDock?: Dock;
 	departBody?: string;
 	schedule: FlightSchedule;
-	/** Seconds since the trip started, across undock, climb, burn, drop, and soft dock. */
+	/** Seconds since the trip started: egress, cruise, then ingress. */
 	clock: number;
 	elapsed: number;
-	phase: "undock" | "transit" | "approach" | "soft-dock" | "docked";
+	phase: "undock" | "transit" | "approach" | "docked";
 	/** Distance along the climb after `t` seconds. The burn's handoff is this pace's exit speed. */
 	alongClimb: (t: number) => number;
 	/** Null when the body has nothing to dock with: the ship stays where it arrived. */
@@ -805,7 +688,7 @@ export function createJourney(
 		current.since = 0;
 		const harbor = harborOf(current.plan.arrive.id);
 		const dock = current.plan.arrive.dock;
-		const arrivalSpeed = Math.min(current.handoff, CLIMB_PACE);
+		const arrivalSpeed = current.profile.arriveSpeed;
 		current.approach = planApproach(
 			current.last,
 			current.plan.arrive.turn || 1,
@@ -813,6 +696,13 @@ export function createJourney(
 			current.heading,
 			arrivalSpeed
 		);
+		const dropSeconds = current.approach?.seconds ?? 0;
+		current.schedule = {
+			...current.schedule,
+			dropSeconds,
+			dockSeconds: 0,
+			total: current.schedule.undockSeconds + current.schedule.climbSeconds + current.schedule.cruiseSeconds + dropSeconds,
+		};
 		current.turn = Math.sign(current.approach?.dock.rate ?? 0) || Math.sign(current.plan.arrive.turn) || 1;
 		current.phase = current.approach ? "approach" : "docked";
 	};
@@ -823,12 +713,19 @@ export function createJourney(
 			placeShip(center.add(current.last), current.heading, deltaSeconds);
 			return;
 		}
-		if (current.phase === "approach" || current.phase === "soft-dock") {
+		if (current.phase === "approach") {
 			current.since += deltaSeconds;
 		}
 		const outer = harborOf(current.plan.arrive.id).outer ?? 0;
-		if (current.phase === "soft-dock" || current.phase === "docked") {
-			placeCoupled(current, center, approach.dock, outer, 1 - current.since / SOFT_DOCK_SECONDS, deltaSeconds);
+		if (current.phase === "approach" && approach && current.since >= approach.seconds) {
+			placeCoupled(current, center, approach.dock, outer, 0, deltaSeconds);
+			current.phase = "docked";
+			rememberBerth(current);
+			current.onDone();
+			return;
+		}
+		if (current.phase !== "approach") {
+			placeCoupled(current, center, approach.dock, outer, 0, deltaSeconds);
 			return;
 		}
 		const dock = berthPoint(approach.dock, outer, "hover");
@@ -852,12 +749,12 @@ export function createJourney(
 			const ahead = buildAhead(scene, path, pixelRatio(), climbLength, profile.spans);
 			glow.addExcludedMesh(ahead);
 			const coupled = plan.departDock != null && plan.departBody != null;
-			const docks = harborOf(plan.arrive.id).docks.length > 0 || plan.arrive.dock != null;
+			const schedule = flightClock(plan, harborOf(plan.arrive.id));
 			flight = {
 				plan,
 				path,
 				climbLength,
-				climbSeconds: climbDuration(climbLength, plan.departSpeed),
+				climbSeconds: pace.seconds,
 				cruiseLength: plan.cruise.total,
 				cruiseSeconds: profile.seconds,
 				departSpeed: plan.departSpeed,
@@ -866,7 +763,7 @@ export function createJourney(
 				alongClimb: pace.distance,
 				departDock: plan.departDock,
 				departBody: plan.departBody,
-				schedule: flightSchedule(coupled, climbLength, plan.departSpeed, profile.seconds, docks),
+				schedule,
 				clock: 0,
 				elapsed: 0,
 				phase: coupled ? "undock" : "transit",
@@ -952,43 +849,20 @@ export function createJourney(
 				return;
 			}
 			flight.clock += deltaSeconds;
-			const departDock = flight.departDock;
-			const departBody = flight.departBody;
-			let joinedBurn = false;
-			if (flight.phase === "undock" && departDock && departBody) {
-				const current = flight;
-				current.since += deltaSeconds;
-				const center = centerOf(departBody);
-				const outer = harborOf(departBody).outer ?? 0;
-				placeCoupled(current, center, departDock, outer, current.since / SOFT_DOCK_SECONDS, deltaSeconds);
-				if (current.since < SOFT_DOCK_SECONDS) {
-					return;
-				}
-				joinedBurn = true;
-				current.phase = "transit";
-				current.elapsed = current.since - SOFT_DOCK_SECONDS;
-				current.since = 0;
+			if (flight.phase === "undock") {
+				flight.phase = "transit";
+				flight.elapsed = 0;
+				flight.since = 0;
 			}
 			if (flight.phase !== "transit") {
 				hideLane();
 				const current = flight;
 				settle(current, deltaSeconds, centerOf(current.plan.arrive.id));
-				if (current.phase === "approach" && current.approach && current.since >= current.approach.seconds) {
-					current.phase = "soft-dock";
-					current.since = 0;
-				}
-				if (current.phase === "soft-dock" && current.since >= SOFT_DOCK_SECONDS) {
-					current.phase = "docked";
-					rememberBerth(current);
-					current.onDone();
-				}
 				return;
 			}
 
 			const before = flight.elapsed;
-			if (!joinedBurn) {
-				flight.elapsed += deltaSeconds;
-			}
+			flight.elapsed += deltaSeconds;
 			notifyPhoton(thrustOverlap(before, flight.elapsed, flight.climbSeconds, flight.profile.thrust));
 			const distance = distanceAt(flight);
 			if (flight.elapsed >= flight.climbSeconds + flight.cruiseSeconds) {
@@ -1052,13 +926,12 @@ function distanceAt(flight: Flight): number {
 /**
  * Picks the dock the ship reaches by swinging forward the least, but at least `APPROACH_MIN_SWEEP`,
  * and plans the drop to it. A craft closer than that is skipped when another sits further ahead.
- * With only one craft that close, the lead extends to the minimum sweep, and it does not add a full
- * extra lap. `from` is where the ship met the outer orbit, relative to the body, and `turn` the way
+ * With only one craft that close, the lead extends to the minimum sweep. When that short arc would
+ * hook, a farther craft in the same direction is taken instead, so the spiral can wrap farther
+ * without crossing the dock. `from` is where the ship met the outer orbit, relative to the body, and `turn` the way
  * it was circling. `arrival`, when set, is the heading the burn came in on. `arrivalSpeed` is how
- * fast the burn was going; the drop leaves at that speed. Null when the body has nothing to dock with.
- *
- * The drop always takes `ORBIT_LEG_SECONDS`. Speed eases from the arrival speed down to the dock's
- * orbital speed, faster in the middle when the spiral is long.
+ * fast the burn was going. The spiral still arrives with the orbit. The clock plays it in `ORBIT_LEG_SECONDS`.
+ * Null when the body has nothing to dock with.
  */
 export function planApproach(
 	from: Vector3,
@@ -1070,49 +943,114 @@ export function planApproach(
 	const radius = Math.hypot(from.x, from.z);
 	const shipRate = (turn * Math.max(0, arrivalSpeed)) / Math.max(radius, 1e-6);
 	const fromAngle = Math.atan2(from.z, from.x);
-	type Choice = { dock: Dock; at: Vector3; gap: number; closingRate: number; direction: number };
-	let qualified: Choice | null = null;
-	let nearest: Choice | null = null;
+	type Choice = {
+		dock: Dock;
+		at: Vector3;
+		gap: number;
+		coast: number;
+		closingRate: number;
+		direction: number;
+		dockSpeed: number;
+		score: number;
+	};
+	let chosen: Choice | null = null;
 	for (const dock of harbor.docks) {
 		const at = dock.position();
 		const closingRate = shipRate - dock.rate;
-		const direction = Math.sign(closingRate) || turn || 1;
-		const gap = positiveAngle(direction * (Math.atan2(at.z, at.x) - fromAngle));
-		const choice: Choice = { dock, at, gap, closingRate: direction * Math.abs(closingRate), direction };
-		if (!nearest || gap < nearest.gap) {
-			nearest = choice;
+		// Always the way the ship is already circling. A dock on the other side is a loop ahead,
+		// not a turn back against the orbit.
+		const direction = Math.sign(turn) || 1;
+		const raw = positiveAngle(direction * (Math.atan2(at.z, at.x) - fromAngle));
+		const dockRadius = Math.hypot(at.x, at.z);
+		const dockSpeed = Math.abs(dock.rate) * dockRadius;
+		// The radius change is the slow part. Any angle beyond what that change needs is flown
+		// at the arrival speed on the outer circle. A dock sitting on the ship's angle takes one
+		// forward lap out there. Widening a short gap backward makes the ship turn around.
+		const needed = sweepForYaw(radius, dockRadius, Math.max(arrivalSpeed, dockSpeed), dockSpeed);
+		let gap = raw;
+		let coast = 0;
+		if (raw < 1e-3) {
+			gap = Math.PI * 2;
+			const spiral = Number.isFinite(needed) ? Math.min(Math.max(needed, APPROACH_MIN_SWEEP), gap) : APPROACH_MIN_SWEEP;
+			coast = gap - spiral;
+		} else if (Number.isFinite(needed) && raw > needed) {
+			coast = raw - needed;
 		}
-		if (gap >= APPROACH_MIN_SWEEP && (!qualified || gap < qualified.gap)) {
-			qualified = choice;
+		const spiral = gap - coast;
+		const coastTime = (coast * radius) / Math.max(arrivalSpeed, 1e-3);
+		const length = Math.hypot(radius - dockRadius, ((radius + dockRadius) / 2) * spiral, from.y - at.y);
+		const spiralTime = length / Math.max((Math.max(0, arrivalSpeed) + dockSpeed) / 2, 1e-3);
+		const choice: Choice = {
+			dock,
+			at,
+			gap,
+			coast,
+			closingRate: direction * Math.abs(closingRate),
+			direction,
+			dockSpeed,
+			score: coastTime + spiralTime,
+		};
+		if (!chosen || choice.score < chosen.score) {
+			chosen = choice;
 		}
 	}
-	const best = qualified ?? (nearest ? { ...nearest, gap: APPROACH_MIN_SWEEP } : null);
-	if (!best) {
+	if (!chosen) {
 		return null;
 	}
-	const dockRadius = Math.hypot(best.at.x, best.at.z);
-	const length = Math.hypot(radius - dockRadius, ((radius + dockRadius) / 2) * best.gap, from.y - best.at.y);
-	const seconds = ORBIT_LEG_SECONDS;
-	// A cubic that ends still stays on one side of the dock only while its starting slope is under three times the gap.
-	const closing = best.direction * Math.min(Math.abs(best.closingRate) * seconds, 3 * best.gap);
+	const dockRadius = Math.hypot(chosen.at.x, chosen.at.z);
+	const dockSpeed = chosen.dockSpeed;
+	const gap = chosen.gap;
+	const coast = chosen.coast;
+	const spiral = gap - coast;
+	const length = Math.hypot(radius - dockRadius, ((radius + dockRadius) / 2) * spiral, from.y - chosen.at.y) + coast * radius;
 	const heading = arrival && arrival.lengthSquared() > 1e-8 ? arrival.normalize() : undefined;
-	const approach: Approach = {
-		dock: best.dock,
-		from: from.clone(),
-		lead: -best.direction * best.gap,
-		closing,
-		seconds,
-		side: 1,
-		heading,
+	// A cubic that ends still stays on one side of the dock only while its starting slope is under three times the gap.
+	const build = (seconds: number): Approach => {
+		const approach: Approach = {
+			dock: chosen.dock,
+			from: from.clone(),
+			lead: -chosen.direction * gap,
+			coast: coast > 1e-3 ? -chosen.direction * coast : 0,
+			closing:
+				coast > 1e-3
+					? chosen.direction * spiral
+					: chosen.direction * Math.min(Math.abs(chosen.closingRate) * Math.max(seconds, 1e-3), 3 * gap),
+			seconds,
+			side: 1,
+			heading,
+		};
+		if (harbor.ring) {
+			approach.ring = harbor.ring;
+		}
+		return approach;
 	};
-	if (harbor.ring) {
-		approach.ring = harbor.ring;
+	let approach = build(legSeconds(length, arrivalSpeed, dockSpeed));
+	approach.mismatch = openingMismatch(approach, chosen.at);
+	let warp = timeAlong(approach, chosen.at, arrivalSpeed, dockSpeed);
+	let flown = warp.times[warp.times.length - 1] ?? 0;
+	if (Math.abs(flown - approach.seconds) > 0.25) {
+		approach = build(flown);
+		approach.mismatch = openingMismatch(approach, chosen.at);
+		warp = timeAlong(approach, chosen.at, arrivalSpeed, dockSpeed);
+		flown = warp.times[warp.times.length - 1] ?? flown;
 	}
-	approach.warp = timeWarp(approach, best.at, length, arrivalSpeed);
+	approach.warp = warp;
+	approach.seconds = flown;
 	if (harbor.ring) {
-		approach.side = ringSide(approach, best.at);
+		approach.side = ringSide(approach, chosen.at);
 	}
+	fitOrbitLeg(approach);
 	return approach;
+}
+
+/** Plays an approach in `ORBIT_LEG_SECONDS`. The shape stays the orbital spiral. */
+function fitOrbitLeg(approach: Approach): void {
+	const natural = approach.seconds;
+	if (approach.warp && natural > 1e-3) {
+		const scale = ORBIT_LEG_SECONDS / natural;
+		approach.warp = { times: approach.warp.times.map((time) => time * scale), params: approach.warp.params };
+	}
+	approach.seconds = ORBIT_LEG_SECONDS;
 }
 
 /** Share of the drop spent curving off the burn's heading onto the spiral. */
@@ -1132,26 +1070,50 @@ export function approachPoint(approach: Approach, elapsed: number, dock: Vector3
 const LEAD_BLEND = 0.18;
 
 function spiralPoint(approach: Approach, u: number, dock: Vector3): Vector3 {
-	const swept = sweptPoint(approach, u, dock);
 	if (u <= 1e-6) {
 		return approach.from.clone();
 	}
-	if (Vector3.DistanceSquared(sweptPoint(approach, 0, dock), approach.from) <= 1e-4 || u >= LEAD_BLEND) {
-		return swept;
-	}
-	return Vector3.Lerp(approach.from, swept, smoothstep(0, 1, u / LEAD_BLEND));
+	return sweptPoint(approach, u, dock);
+}
+
+/** Short angle from the spiral's start back to the ship, so an extended lead does not begin ahead of it. */
+function openingMismatch(approach: Approach, dock: Vector3): number {
+	const start = sweptPoint({ ...approach, mismatch: 0 }, 0, dock);
+	const fromAngle = Math.atan2(approach.from.z, approach.from.x);
+	const startAngle = Math.atan2(start.z, start.x);
+	const gap = Math.atan2(Math.sin(fromAngle - startAngle), Math.cos(fromAngle - startAngle));
+	return Math.abs(gap) < 1e-3 ? 0 : gap;
 }
 
 function sweptPoint(approach: Approach, u: number, dock: Vector3): Vector3 {
-	const ease = u * u * (3 - 2 * u);
 	const from = approach.from;
 	const fromRadius = Math.hypot(from.x, from.z);
 	const dockRadius = Math.hypot(dock.x, dock.z);
-	const radius = fromRadius + (dockRadius - fromRadius) * ease;
-	// Cubic Hermite from `lead` to 0: it leaves at the arrival's closing rate and ends at rest beside the dock.
-	const offset = approach.lead * (2 * u * u * u - 3 * u * u + 1) + approach.closing * (u * u * u - 2 * u * u + u);
-	const angle = Math.atan2(dock.z, dock.x) + offset;
-	const point = new Vector3(Math.cos(angle) * radius, from.y + (dock.y - from.y) * ease, Math.sin(angle) * radius);
+	const coast = approach.coast ?? 0;
+	const coastShare = Math.abs(approach.lead) > 1e-6 ? Math.min(1, Math.abs(coast / approach.lead)) : 0;
+	let offset: number;
+	let eased: number;
+	if (coastShare > 1e-4 && u < coastShare) {
+		const along = u / coastShare;
+		const spiralLead = approach.lead - coast;
+		offset = approach.lead + (spiralLead - approach.lead) * along;
+		eased = 0;
+	} else if (coastShare > 1e-4) {
+		const s = coastShare >= 1 ? 1 : (u - coastShare) / (1 - coastShare);
+		const spiralLead = approach.lead - coast;
+		eased = s * s * (3 - 2 * s);
+		offset = spiralLead * (2 * s * s * s - 3 * s * s + 1) + approach.closing * (s * s * s - 2 * s * s + s);
+	} else {
+		eased = u * u * (3 - 2 * u);
+		// Cubic Hermite from `lead` to 0: it leaves at the arrival's closing rate and ends at rest beside the dock.
+		offset = approach.lead * (2 * u * u * u - 3 * u * u + 1) + approach.closing * (u * u * u - 2 * u * u + u);
+	}
+	// Slope at the start, so the closing rate cannot step through the dock, and no slope at the
+	// end, so the slide joins the spiral without a corner.
+	const fade = u >= LEAD_BLEND ? 0 : (1 - u / LEAD_BLEND) ** 2;
+	const angle = Math.atan2(dock.z, dock.x) + offset + (approach.mismatch ?? 0) * fade;
+	const radius = fromRadius + (dockRadius - fromRadius) * eased;
+	const point = new Vector3(Math.cos(angle) * radius, from.y + (dock.y - from.y) * eased, Math.sin(angle) * radius);
 	return approach.ring ? liftOverRing(point, approach.ring, approach.side, dockRadius) : point;
 }
 
@@ -1173,7 +1135,16 @@ function blendHeading(approach: Approach, u: number, dock: Vector3, spiral: Vect
 		return spiral;
 	}
 	const fade = u * (1 - u / APPROACH_BLEND) ** 2;
-	return spiral.add(aimed.subtract(prime).scale(fade));
+	const shifted = spiral.add(aimed.subtract(prime).scale(fade));
+	// The blend curves the nose. It does not carry the ship outside the orbit it just reached.
+	const limit = Math.hypot(approach.from.x, approach.from.z);
+	const radius = Math.hypot(shifted.x, shifted.z);
+	if (radius > limit && radius > 1e-6) {
+		const scale = limit / radius;
+		shifted.x *= scale;
+		shifted.z *= scale;
+	}
+	return shifted;
 }
 
 function shapeParameter(approach: Approach, elapsed: number): number {
@@ -1206,108 +1177,134 @@ function shapeParameter(approach: Approach, elapsed: number): number {
 }
 
 /**
- * Times the drop so it takes `ORBIT_LEG_SECONDS` and the world speed follows the leg profile: arrival
- * speed at the outer orbit, the dock's orbital speed at the end, and a hump in the middle when the
- * spiral is long. Each step is chosen so the ship actually covers that speed, and once it arrives it
- * rides with the dock for whatever time is left.
+ * Times the drop from the spiral itself, with the dock held where it is at the start. Speed eases
+ * from the arrival speed to the dock's orbital speed, and a bend tighter than `MAX_YAW` is flown
+ * slower. The samples stay on that frozen spiral: moving the dock between samples folds a slow
+ * segment back on itself and the ship spends the turn correcting. The clock still counts the dock's
+ * spin, so the speed along the flown path is the speed asked for.
  */
-function timeWarp(
+function timeAlong(
 	approach: Approach,
 	dock0: Vector3,
-	length: number,
-	arrivalSpeed: number
+	arrivalSpeed: number,
+	dockSpeed: number
 ): { times: number[]; params: number[] } {
-	const dockRadius = Math.hypot(dock0.x, dock0.z);
-	const dockSpeed = Math.abs(approach.dock.rate) * dockRadius;
-	const steps = 64;
-	const dt = ORBIT_LEG_SECONDS / steps;
-	// The chord estimate is shorter than the eased spiral, so the hump grows until the shape finishes
-	// on time. The ends stay at the arrival speed and the dock's speed.
-	const fly = (lengthScale: number) => {
-		const profile = legProfile(ORBIT_LEG_SECONDS, Math.max(length, 1e-4) * lengthScale, arrivalSpeed, dockSpeed);
-		const params = [0];
-		let u = 0;
-		for (let step = 0; step < steps; step++) {
-			const t = step * dt;
-			if (u >= 1 - 1e-5) {
-				params.push(1);
-				continue;
-			}
-			const desired = Math.max(legSpeed(t, profile), coastSpeed(approach, dock0, u, t));
-			const w = stepRate(approach, dock0, u, t, dt, desired);
-			u = Math.min(1, u + w * dt);
-			params.push(u);
-		}
-		return params;
-	};
-	let scale = 1;
-	let params = fly(scale);
-	if (params[steps] < 0.995) {
-		let lo = 1;
-		let hi = 2;
-		while (hi < 8 && fly(hi)[steps] < 0.995) {
-			lo = hi;
-			hi *= 2;
-		}
-		for (let attempt = 0; attempt < 6; attempt++) {
-			const mid = (lo + hi) / 2;
-			if (fly(mid)[steps] < 0.995) {
-				lo = mid;
-			} else {
-				hi = mid;
-			}
-		}
-		scale = hi;
-		params = fly(scale);
-	}
-	const times = params.map((_, index) => (index / steps) * ORBIT_LEG_SECONDS);
-	params[steps] = 1;
-	approach.seconds = ORBIT_LEG_SECONDS;
+	const samples = 64;
+	const params = Array.from({ length: samples + 1 }, (_, index) => index / samples);
+	const coast = approach.coast ?? 0;
+	const coastShare = Math.abs(approach.lead) > 1e-6 ? Math.min(1, Math.abs(coast / approach.lead)) : 0;
+	const times = schedule(
+		params.map((u) => spiralPoint(approach, u, dock0)),
+		params,
+		coastShare,
+		Math.max(0, arrivalSpeed),
+		Math.max(0, dockSpeed),
+		approach.dock.rate
+	);
 	return { times, params };
 }
 
-/** World speed when the shape parameter is held still and only the dock keeps turning. */
-function coastSpeed(approach: Approach, dock0: Vector3, u: number, t: number): number {
-	const sample = 0.02;
-	return Vector3.Distance(posed(approach, u, dock0, t), posed(approach, u, dock0, t + sample)) / sample;
+/**
+ * Times at which to visit `points`. The outer circle holds `v0`. The inward spiral eases from `v0`
+ * to `v1`. A bend tighter than `MAX_YAW` is flown slower. `rate` is the dock's spin: the flown
+ * step is the frozen chord plus that spin, and the time is whatever makes the flown step the
+ * speed asked for. The points themselves stay put.
+ */
+function schedule(
+	points: Vector3[],
+	params: number[],
+	coastShare: number,
+	v0: number,
+	v1: number,
+	rate: number
+): number[] {
+	const samples = points.length - 1;
+	const lengths = [0];
+	for (let i = 1; i <= samples; i++) {
+		lengths.push(lengths[i - 1] + Vector3.Distance(points[i - 1], points[i]));
+	}
+	const total = lengths[samples];
+	const times = [0];
+	if (total < 1e-6) {
+		while (times.length < points.length) {
+			times.push(0);
+		}
+		return times;
+	}
+	let elapsed = 0;
+	for (let i = 0; i < samples; i++) {
+		const length = lengths[i + 1] - lengths[i];
+		const u = (params[i] + params[i + 1]) * 0.5;
+		let wanted = v0;
+		if (u >= coastShare) {
+			const span = Math.max(1e-6, 1 - coastShare);
+			const eased = Math.min(1, Math.max(0, (u - coastShare) / span));
+			wanted = v0 + (v1 - v0) * eased;
+		}
+		let cap = Infinity;
+		const step = points[i + 1].subtract(points[i]);
+		if (i > 0) {
+			cap = Math.min(cap, yawSpeedCap(points[i].subtract(points[i - 1]), step, length));
+		}
+		if (i + 1 < samples) {
+			cap = Math.min(cap, yawSpeedCap(step, points[i + 2].subtract(points[i + 1]), length));
+		}
+		elapsed += stepDuration(points[i], points[i + 1], rate, Math.min(wanted, cap));
+		times.push(elapsed);
+	}
+	return times;
 }
 
 /**
- * How fast the shape parameter must move so the ship covers `desired` world units a second over this
- * step. Measured across the whole step, so the flat start of the ease cannot demand an infinite rate.
+ * Seconds to fly from `from` to `to` at `speed` while the dock spins at `rate`. `to` is where the
+ * point sits on the spiral with the dock held still. One step of Newton's method on the spun
+ * distance, held near the frozen estimate so a chord that fights the spin cannot run away.
  */
-function stepRate(approach: Approach, dock0: Vector3, u: number, t: number, dt: number, desired: number): number {
-	const speedFor = (w: number) => {
-		const left = posed(approach, u, dock0, t);
-		const right = posed(approach, Math.min(1, u + w * dt), dock0, t + dt);
-		return Vector3.Distance(left, right) / dt;
-	};
-	const maxW = (1 - u) / Math.max(dt, 1e-6);
-	if (speedFor(0) >= desired - 1e-3) {
+function stepDuration(from: Vector3, to: Vector3, rate: number, speed: number): number {
+	const frozen = Vector3.Distance(from, to);
+	const pace = Math.max(speed, 1e-4);
+	if (frozen < 1e-8) {
 		return 0;
 	}
-	let lo = 0;
-	let hi = Math.min(maxW, 0.2);
-	while (hi < maxW - 1e-6 && speedFor(hi) < desired) {
-		hi = Math.min(maxW, hi * 2);
+	if (Math.abs(rate) < 1e-5) {
+		return frozen / pace;
 	}
-	if (speedFor(hi) < desired) {
-		return hi;
-	}
-	for (let attempt = 0; attempt < 14; attempt++) {
-		const mid = (lo + hi) / 2;
-		if (speedFor(mid) < desired) {
-			lo = mid;
-		} else {
-			hi = mid;
+	let dt = frozen / pace;
+	for (let attempt = 0; attempt < 6; attempt++) {
+		const dist = spunDistance(from, to, rate * dt);
+		const slope = (spunDistance(from, to, rate * (dt + 1e-3)) - dist) / 1e-3;
+		const denom = slope - pace;
+		if (Math.abs(denom) < 1e-6) {
+			break;
 		}
+		const next = dt - (dist - pace * dt) / denom;
+		if (!Number.isFinite(next) || next < 1e-6) {
+			break;
+		}
+		dt = next;
 	}
-	return (lo + hi) / 2;
+	const lo = frozen / (pace * 4);
+	const hi = frozen / Math.max(pace * 0.25, 1e-4);
+	return Math.min(hi, Math.max(lo, dt));
 }
 
-function posed(approach: Approach, u: number, dock0: Vector3, t: number): Vector3 {
-	const dock = yawAround(dock0, approach.dock.rate * t);
-	return blendHeading(approach, u, dock, spiralPoint(approach, u, dock));
+/** Distance from `from` to `to` after `to` has been spun by `angle` around the body. */
+function spunDistance(from: Vector3, to: Vector3, angle: number): number {
+	const cos = Math.cos(angle);
+	const sin = Math.sin(angle);
+	return Math.hypot(to.x * cos - to.z * sin - from.x, to.y - from.y, to.x * sin + to.z * cos - from.z);
+}
+
+/** Fastest speed that keeps the turn from `from` to `to` inside `MAX_YAW` over `length`. */
+function yawSpeedCap(from: Vector3, to: Vector3, length: number): number {
+	if (from.lengthSquared() < 1e-12 || to.lengthSquared() < 1e-12) {
+		return Infinity;
+	}
+	const angle = Math.acos(Math.min(1, Math.max(-1, Vector3.Dot(from.normalize(), to.normalize()))));
+	if (angle < 1e-4) {
+		return Infinity;
+	}
+	return (MAX_YAW * Math.max(length, 1e-4)) / angle;
 }
 
 function yawAround(point: Vector3, angle: number): Vector3 {
@@ -1316,24 +1313,27 @@ function yawAround(point: Vector3, angle: number): Vector3 {
 	return new Vector3(point.x * cos - point.z * sin, point.y, point.x * sin + point.z * cos);
 }
 
-/** Hover pose, relative to the body, `SOFT_DOCK_SECONDS` after `dock` where it is now. The climb starts here. */
+/** Hover pose, relative to the body, where the climb leaves the dock. */
 export function hoverDeparture(dock: Dock, outer: number): Vector3 {
-	const later = yawAround(dock.position(), dock.rate * SOFT_DOCK_SECONDS);
-	return poseOn(later, dock, outer, "hover");
+	return poseOn(dock.position(), dock, outer, "hover");
 }
 
 /**
- * Moves a point along the ring's normal until it clears the ring plane, but only where it sits over
- * the ring itself. Moving along the normal leaves the distance from the ring's axis alone, so the
- * lift fades in and out without ever touching the ring.
+ * Moves a point along the ring's normal until it clears the ring plane. The rise finishes a margin
+ * past the rim, so a straight step that is still climbing does not clip the edge of the ring.
  */
 function liftOverRing(point: Vector3, ring: HarborRing, side: number, dockRadius: number): Vector3 {
 	const normal = ring.normal.normalizeToNew();
 	const height = Vector3.Dot(point, normal);
 	const across = Math.sqrt(Math.max(0, point.lengthSquared() - height * height));
-	const innerMargin = Math.max(1e-3, Math.min(RING_LIFT_MARGIN, (ring.inner - dockRadius) * 0.6));
+	// Stay fully clear for a margin past the rim. A chord that is still climbing through the slab
+	// right at the edge clips the ring, even when the curve itself would have finished the rise outside it.
+	const room = Math.max(0, ring.inner - dockRadius);
+	const innerPlateau = Math.min(RING_LIFT_MARGIN, room * 0.45);
+	const innerFade = Math.min(RING_LIFT_MARGIN, Math.max(0, room - innerPlateau) * 0.8);
 	const over =
-		smoothstep(ring.inner - innerMargin, ring.inner, across) * (1 - smoothstep(ring.outer, ring.outer + RING_LIFT_MARGIN, across));
+		smoothstep(ring.inner - innerPlateau - innerFade, ring.inner - innerPlateau, across) *
+		(1 - smoothstep(ring.outer + RING_LIFT_MARGIN, ring.outer + RING_LIFT_MARGIN * 2, across));
 	if (over <= 0) {
 		return point;
 	}
@@ -1431,13 +1431,40 @@ function polylineLength(points: Vector3[]): number {
 
 /**
  * Seconds from leaving the dock to being down on the next one. A faster coast shortens the cruise.
- * The climb, the drop, and the soft dock stay the same length.
+ * Egress and ingress are seven seconds each when they happen. `harbor` is where the drop is aimed;
+ * without it, and without a dock already chosen, the drop is left out.
  */
-export function tripSeconds(plan: JourneyPlan, coastSpeed = plan.coastSpeed ?? 0): number {
-	const cruiseSeconds = cruiseProfile(plan, coastSpeed).seconds;
-	const coupled = plan.departDock != null && plan.departBody != null;
-	const docks = plan.arrive.dock != null;
-	return flightSchedule(coupled, polylineLength(plan.climb), plan.departSpeed, cruiseSeconds, docks).total;
+export function tripSeconds(plan: JourneyPlan, coastSpeed = plan.coastSpeed ?? 0, harbor: Harbor | null = null): number {
+	return flightClock({ ...plan, coastSpeed }, harbor).total;
+}
+
+/** The clock for `plan`, including a drop planned against where the docks will be on arrival. */
+function flightClock(plan: JourneyPlan, harbor: Harbor | null): FlightSchedule {
+	const pace = climbPace(plan.climb, plan.departSpeed);
+	const profile = cruiseProfile(plan, plan.coastSpeed ?? 0);
+	const cruiseSeconds = profile.seconds;
+	const arrival: Harbor | null = plan.arrive.dock
+		? { docks: [plan.arrive.dock], ring: harbor?.ring, outer: harbor?.outer }
+		: harbor;
+	let dropSeconds = 0;
+	if (arrival && arrival.docks.length > 0 && plan.arriveFrom) {
+		const tArrive = pace.seconds + cruiseSeconds;
+		const approach = planApproach(
+			plan.arriveFrom,
+			plan.arrive.turn || 1,
+			{ ...arrival, docks: arrival.docks.map((dock) => foreseeDock(dock, tArrive)) },
+			undefined,
+			profile.arriveSpeed
+		);
+		dropSeconds = approach?.seconds ?? 0;
+	}
+	return flightSchedule(true, pace.seconds, cruiseSeconds, dropSeconds);
+}
+
+/** Where a dock will be `seconds` from now, if it keeps its rate. */
+function foreseeDock(dock: Dock, seconds: number): Dock {
+	const at = yawAround(dock.position(), dock.rate * seconds);
+	return { ...dock, position: () => at };
 }
 
 /** The lane lies this far under the course, so it reads as a road in the lower windscreen. */

@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { PilotViewpoint } from "./demo/cockpit";
 import {
 	chartButtons,
 	viewTrail,
@@ -12,7 +11,7 @@ import {
 	type EnvironmentDemo,
 	type ShipHold,
 } from "./demo/environment";
-import { MINERALS, MINE_FULL } from "./demo/energy";
+import { cargoUsed, MINERALS, MINE_FULL } from "./demo/energy";
 import {
 	DEPARTURE_SECONDS,
 	recallMove,
@@ -26,16 +25,12 @@ import {
 	type ScanTarget,
 } from "./demo/scan";
 import { findMine, mineRows, nearbyMineChart, toggleMineOpen, type NavFix } from "./demo/nav";
-import { pilotPlaque, viewPlaque } from "./demo/view-plaque";
-import { PilotCornerDock } from "./dashboard";
+import { viewPlaque } from "./demo/view-plaque";
 import { centerHit, centerPage, holdStock, navScrollMax, paintCenterPanel, type CargoLabel, type NavControls, type NavCourseOffer, type SiphonSource } from "./nav-glass";
 import { Hud, useHudAnchors } from "./hud";
 import type { TravelClock } from "./travel-clock";
-import { PILOT_VIEWPORT } from "./pilot-viewport";
 import { RoutePlanner } from "./route-planner";
 import { SpaceLabels, type LabelItem } from "./space-labels";
-
-type Mode = "chart" | "pilot";
 
 const STEP_TITLE: Record<string, string> = {
 	Home: "Your ship's orbit",
@@ -92,28 +87,22 @@ function sameBerth(left: ScanTarget | null, right: ScanTarget | null): boolean {
  * moons, and a chart on one body names that body and what orbits it. A pick on a body goes there.
  * A pick on a home base, a station, a mine, or a collector opens the route planner: the description
  * and the coast. The slider sets the speed, the time, and the burns, then counts down and flies.
- * In the cockpit the center glass is the dashboard. Nav planning lists nearby planets, the moons
+ * The center glass keeps the dashboard for a later exterior shot. Nav planning lists nearby planets, the moons
  * under each, and the mines under those. Picking a mine sets the coast speed. Locking the coast
- * counts down, then the glass reads en route. The chart names nothing while piloting.
+ * counts down, then the glass reads en route.
  *
- * The HUD reads the chart on screen, the warehouse, and the ranger. On a chart the plaque names the
+ * The HUD reads the chart on screen, the warehouse, and the ranger. The plaque names the
  * area in frame: Sol System, a wide planetary chart such as Earth System, Sol itself, or the body
- * once the camera is closer. While piloting it names the body the ship is docked at, or Sol System
- * when the ship is in open space.
- * Pilot enters the cockpit on a desktop or a large tablet. The ship list then leaves. The dash is geometry in the scene, and it turns with the head. Exit and the view switch sit at the lower right, in the chart step's corner, and the view switch is that step's size. Exit stays the smaller plate. The ship list stays hidden out there too. A phone stays on the
- * chart, and shrinking the window below that leaves the cockpit. Locate opens the planetary chart where the ship is docked.
+ * once the camera is closer. Locate opens the planetary chart where the ship is docked.
  * Recall opens the course planner for the cruise home, so the coast speed can be chosen. A hop
  * on the same body still moves straight onto the home dock. A countdown already headed there can be cancelled.
- * The lower right, on a chart, is one step back: System from a planet or Sol, Planet from a moon
- * or from an inner orbit, and Galaxy from the system. While piloting that corner is Exit and the view switch. Escape takes the
- * first chart step, Home on the system chart and otherwise that lower-right step, and leaves the
- * cockpit for the chart. Dragging turns the pilot's head, or swings the exterior camera around the ship.
+ * The lower right is one step back: System from a planet or Sol, Planet from a moon
+ * or from an inner orbit, and Galaxy from the system. Escape takes the
+ * first chart step, Home on the system chart and otherwise that lower-right step.
  */
 export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLeave: () => void }) {
 	const { anchors, keepOut } = useHudAnchors();
 	const [view, setView] = useState<DemoView>(() => system.view());
-	const [mode, setMode] = useState<Mode>("chart");
-	const [viewpoint, setViewpoint] = useState<PilotViewpoint>("interior");
 	const [found, setFound] = useState<ScanTarget[]>([]);
 	const [departure, setDeparture] = useState<{ target: ScanTarget; endsAt: number; cost: number; speed: number } | null>(null);
 	const [planner, setPlanner] = useState<{
@@ -137,8 +126,6 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const [navSelected, setNavSelected] = useState<string | null>(null);
 	const [navOffer, setNavOffer] = useState<NavCourseOffer | null>(null);
 	const [navBlocked, setNavBlocked] = useState<string | null>(null);
-	const pilotFits = usePilotFits();
-	const piloting = mode === "pilot" && pilotFits;
 	const back = close ? wideChartStep(view) : null;
 	const steps = back ? [back] : chartButtons(view);
 	// Home is Locate. The rest of the chart steps stay in the lower right.
@@ -229,9 +216,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 			}),
 		[system]
 	);
-	useEffect(() => system.setScanning(!piloting), [system, piloting]);
 	useEffect(() => system.onTravel(setTravel), [system]);
-	useEffect(() => system.setPiloting(piloting), [system, piloting]);
 	useEffect(
 		() =>
 			system.onNav((fix) => {
@@ -331,14 +316,6 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 			setNow(Date.now());
 		});
 	}, [system]);
-	useEffect(() => {
-		if (!pilotFits && mode === "pilot") {
-			setViewpoint("interior");
-			setMode("chart");
-		}
-	}, [pilotFits, mode]);
-	useEffect(() => system.setViewpoint(viewpoint), [system, viewpoint]);
-
 	const launch = useCallback(
 		(target: ScanTarget, cost: number, speed: number) => {
 			setDeparture(null);
@@ -374,9 +351,6 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	};
 
 	const labels = useMemo<LabelItem[]>(() => {
-		if (piloting) {
-			return [];
-		}
 		const focus = viewTrail(view).filter((body) => !body.id.endsWith("-stop")).at(-1);
 		return found.map((target) => {
 			const label = scanLabel(target, docked?.id === target.id);
@@ -388,7 +362,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 				resources: targetYields(target),
 			};
 		});
-	}, [found, piloting, pick, view, docked?.id]);
+	}, [found, pick, view, docked?.id]);
 
 	const take = useCallback(
 		(button: ChartButton) => {
@@ -410,14 +384,9 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		if (planner) {
 			return;
 		}
-		if (piloting) {
-			setViewpoint("interior");
-			setMode("chart");
-		} else {
-			const step = steps[0];
-			if (step) {
-				take(step);
-			}
+		const step = steps[0];
+		if (step) {
+			take(step);
 		}
 	};
 	useEffect(() => {
@@ -430,17 +399,6 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
 	}, []);
-
-	const togglePilot = () => {
-		if (!pilotFits && !piloting) {
-			return;
-		}
-		setPlanner(null);
-		if (piloting) {
-			setViewpoint("interior");
-		}
-		setMode(piloting ? "chart" : "pilot");
-	};
 
 	const recallPlan = () => {
 		const home = system.homeBase();
@@ -500,7 +458,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	};
 	const recallState = recallPlan();
 
-	const location = piloting ? pilotPlaque(flight ? null : (docked?.host ?? null)) : viewPlaque(view, close);
+	const location = viewPlaque(view, close);
 	const reserve =
 		planner && (planner.target.kind === "collector" || planner.target.kind === "generator")
 			? `${Math.round(system.charge(planner.target.id)).toLocaleString("en-US")} remaining`
@@ -514,41 +472,25 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	return (
 		<>
 			<SpaceLabels source={system} items={labels} title="Scanned" keepOut={keepOut} />
-			{piloting ? (
-				<PilotCornerDock
-					viewpoint={viewpoint}
-					onExit={togglePilot}
-					onToggleViewpoint={() => setViewpoint(viewpoint === "interior" ? "exterior" : "interior")}
-				/>
-			) : null}
 			<Hud
 				anchors={anchors}
 				location={location}
 				energy={hold.energy}
+				cargo={cargoUsed(hold.cargo)}
 				holdings={holdings}
-				pilot={{
-					onClick: togglePilot,
-					disabled: !pilotFits && !piloting,
-					pressed: piloting,
-					title: piloting ? "Back to the chart" : pilotFits ? "Into the cockpit" : "The cockpit needs a larger screen",
-				}}
 				locate={{ onClick: () => take({ label: "Home", target: "ship" }), title: "Where your ship is docked" }}
 				recall={{
 					onClick: recall,
 					disabled: !recallState.plan.enabled,
 					title: recallState.plan.title,
 				}}
-				steps={
-					piloting
-						? []
-						: trail.map((button) => ({
-								label: button.label,
-								title: STEP_TITLE[button.label] ?? button.label,
-								onClick: () => take(button),
-							}))
-				}
-				fleet={!piloting}
+				steps={trail.map((button) => ({
+					label: button.label,
+					title: STEP_TITLE[button.label] ?? button.label,
+					onClick: () => take(button),
+				}))}
 				travel={travel}
+				mining={hold.mine}
 			/>
 			{planner ? (
 				<RoutePlanner
@@ -600,19 +542,6 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 				/>
 			) : null}
 		</>
-	);
-}
-
-/** The cockpit is offered on a desktop or a large tablet, and taken away when the window shrinks below that. */
-function usePilotFits(): boolean {
-	return useSyncExternalStore(
-		(onChange) => {
-			const media = window.matchMedia(PILOT_VIEWPORT);
-			media.addEventListener("change", onChange);
-			return () => media.removeEventListener("change", onChange);
-		},
-		() => window.matchMedia(PILOT_VIEWPORT).matches,
-		() => false
 	);
 }
 

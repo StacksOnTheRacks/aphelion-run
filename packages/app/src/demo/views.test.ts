@@ -25,6 +25,7 @@ import {
 	stopView,
 	travelSeconds,
 	viewTrail,
+	BODY_CHART_NEAR,
 	wheelLimits,
 } from "./environment";
 
@@ -201,14 +202,26 @@ expect(wideChartStep("saturn-titan-outer") === null, "a moon chart steps back wi
 expect(wideChartStep("sun-outer") === null, "the Sun does not step back to moons");
 
 const planetWheel = wheelLimits("earth-outer", 100, 40, 7000);
-expect(planetWheel.near === 40 && planetWheel.far === 100, "a planet view can come in, and cannot pull back past its shot");
+expect(
+	planetWheel.near === 40 * BODY_CHART_NEAR && planetWheel.far === 100,
+	"a planet view can come in past its inner orbit, and cannot pull back past its shot"
+);
 const innerWheel = wheelLimits("earth-inner", 30, 10, 7000);
-expect(innerWheel.near === 30 && innerWheel.far === 30, "an inner orbit holds its shot");
+expect(
+	innerWheel.near === 30 * BODY_CHART_NEAR && innerWheel.far === 30,
+	"an inner orbit can come in a little and cannot pull back"
+);
 const moonWheel = wheelLimits("saturn-titan-inner", 12, 4, 7000);
-expect(moonWheel.near === 12 && moonWheel.far === 12, "a moon's inner orbit holds its shot");
+expect(
+	moonWheel.near === 12 * BODY_CHART_NEAR && moonWheel.far === 12,
+	"a moon's inner orbit can come in a little and cannot pull back"
+);
 const systemWheel = wheelLimits("system", 2000, 800, 7000);
 expect(systemWheel.near === 800 && systemWheel.far === 7000, "the system chart can still pull back");
-expect(wheelLimits("mars-outer", 50, 80, 7000).near === 50, "the near limit stays on the arrived shot when that is closer");
+expect(
+	wheelLimits("mars-outer", 50, 80, 7000).near === 50 * BODY_CHART_NEAR,
+	"the near limit sits a little inside the arrived shot when that is closer"
+);
 
 const inward = 100 - wheelNotch(100, "in");
 const outward = 100 - wheelNotch(100, "out");

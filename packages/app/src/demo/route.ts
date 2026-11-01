@@ -347,19 +347,13 @@ function arcPoints(circle: Circle, from: Vector3, to: Vector3): Vector3[] {
 }
 
 /**
- * The cost of a climb that heads against the orbit, in world units. Reversing throws away the speed
- * the ship already has and builds it the other way, which costs as much as flying halfway around the
- * orbit it is already on. Swinging around with the orbit is the cheaper departure until the swing
- * costs more than that.
- */
-export function reversalPenalty(radius: number): number {
-	return Math.PI * Math.max(0, radius);
-}
-
-/**
  * The slow climb from a dock out to where the burn leaves the outer orbit. The ship keeps turning
  * `turn` (+1 counterclockwise): it starts along the orbit it is on, eases outward, and arrives along
- * the outer orbit headed the way the burn leaves. A ring in the way is crossed above or below it.
+ * the outer orbit headed the way the burn leaves. When the short arc would hook at the rim, the
+ * sweep takes one extra lap so it still arrives at the burn's departure point. A partial extra
+ * turn would have to chord back across the system to meet that point. The radius ease only covers
+ * the angle the hook needs; the rest of the lap is an outer-orbit coast. If that wider arc would
+ * cross a tilted ring, the climb keeps the short arc and rises over the ring instead.
  */
 export function departureSpiral(center: Vector3, from: Vector3, to: Vector3, turn: number, rings: RingBody[]): Vector3[] {
 	const a0 = Math.atan2(from.z - center.z, from.x - center.x);
@@ -367,12 +361,49 @@ export function departureSpiral(center: Vector3, from: Vector3, to: Vector3, tur
 	const r0 = Math.hypot(from.x - center.x, from.z - center.z);
 	const r1 = Math.hypot(to.x - center.x, to.z - center.z);
 	const direction = turn >= 0 ? 1 : -1;
-	const sweep = sweepToward(a0, a1, direction);
+	const short = sweepToward(a0, a1, direction);
+	let sweep = legSweep(r0, r1, short, HANDOFF_SPEED);
+	const needed = sweepForYaw(r0, r1, HANDOFF_SPEED, HANDOFF_SPEED);
+	let easeSweep = sweep;
+	if (Number.isFinite(needed) && needed > short && needed < sweep) {
+		easeSweep = needed;
+	}
+	let points = spiralArc(center, from, to, direction, a0, r0, r1, sweep, easeSweep);
+	// A full extra lap in the ecliptic crosses a tilted ring. Pulling that lap onto one side of the
+	// plane is a kink, not a clearance, so the climb keeps the short arc and the yaw cap slows the hook.
+	if (rings.length > 0 && sweep > short + 0.5) {
+		const lifted = liftSpiral(points, rings);
+		let worst = 0;
+		for (let i = 0; i < lifted.length; i++) {
+			worst = Math.max(worst, Vector3.Distance(lifted[i], points[i]));
+		}
+		const limit = Math.max(...rings.map((ring) => ring.halfHeight), 0) * 3;
+		if (worst > limit) {
+			sweep = short;
+			points = spiralArc(center, from, to, direction, a0, r0, r1, sweep, sweep);
+		}
+	}
+	return liftSpiral(points, rings);
+}
+
+function spiralArc(
+	center: Vector3,
+	from: Vector3,
+	to: Vector3,
+	direction: number,
+	a0: number,
+	r0: number,
+	r1: number,
+	sweep: number,
+	easeSweep: number
+): Vector3[] {
 	const steps = Math.max(8, Math.ceil(Math.max(sweep, Math.abs(r1 - r0) / Math.max(r0, 1)) / ARC_STEP));
+	const easeEnd = sweep > 1e-6 ? Math.min(1, Math.max(0, easeSweep) / sweep) : 1;
 	const points: Vector3[] = [];
 	for (let i = 0; i <= steps; i++) {
 		const u = i / steps;
-		const radius = r0 + (r1 - r0) * ease(u);
+		const eased = easeEnd < 1e-6 ? 1 : ease(Math.min(1, u / easeEnd));
+		const radius = r0 + (r1 - r0) * eased;
 		const angle = a0 + direction * sweep * u;
 		points.push(
 			new Vector3(center.x + Math.cos(angle) * radius, from.y + (to.y - from.y) * u, center.z + Math.sin(angle) * radius)
@@ -380,7 +411,7 @@ export function departureSpiral(center: Vector3, from: Vector3, to: Vector3, tur
 	}
 	points[0] = from.clone();
 	points[points.length - 1] = to.clone();
-	return liftSpiral(points, rings);
+	return points;
 }
 
 /** Sweep from `from` to `to` in the direction of `turn`, in [0, 2π). */
@@ -459,6 +490,42 @@ function softMax(a: number, b: number, soft: number): number {
 
 /** A heading gap smaller than this is already a smooth join. */
 const GENTLE_GAP = (5 * Math.PI) / 180;
+
+/**
+ * Smallest sweep whose radial ease stays inside `MAX_YAW` at the speeds the leg is actually flying.
+ * The outer end is the fast one. The inner end is slower, so it can turn a little harder.
+ */
+export function sweepForYaw(r0: number, r1: number, outerSpeed: number, innerSpeed = outerSpeed): number {
+	const delta = Math.abs(r1 - r0);
+	if (delta < 1e-3) {
+		return 0;
+	}
+	const at = (radius: number, speed: number) => {
+		if (radius < 1e-3) {
+			return Infinity;
+		}
+		return Math.sqrt((6 * delta * Math.max(0, speed)) / (radius * radius * MAX_YAW));
+	};
+	return Math.max(at(r0, outerSpeed), at(r1, innerSpeed));
+}
+
+/**
+ * Sweep to fly from radius `r0` to `r1` and still arrive on the departure point. `sweep` is the
+ * short turn in the direction already chosen. When that arc would hook harder than `MAX_YAW`, the
+ * sweep takes one extra lap: a partial lap does not land on the departure point, and the chord back
+ * to it cuts across the system. `speed` is the faster end of the leg. A hop that is already gentle
+ * stays on the short arc, even when that hop is brief.
+ */
+export function legSweep(r0: number, r1: number, sweep: number, speed: number): number {
+	const full = Math.PI * 2;
+	const short = Math.min(full, Math.max(0, sweep));
+	const cap = short < full - 1e-3 ? short + full : short;
+	const needed = sweepForYaw(r0, r1, speed, speed);
+	if (!Number.isFinite(needed) || needed <= short) {
+		return short;
+	}
+	return cap;
+}
 
 /**
  * Fillet radius at `speed` that yaws at `MAX_YAW`, shrunk so the turn fits in `zone`.

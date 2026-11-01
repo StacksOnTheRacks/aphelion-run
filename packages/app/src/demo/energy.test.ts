@@ -1,4 +1,4 @@
-import { COLLECTOR_CHARGE, CARGO_CAPACITY, ENERGY_CAPACITY, MINE_FULL, STARTING_ENERGY, burnEnergy, cargoUsed, cruiseCost, depositAtHome, drawFromDock, emptyCargo, freshSession, siphonEnergy } from "./energy";
+import { COLLECTOR_CHARGE, CARGO_CAPACITY, ENERGY_CAPACITY, MINE_FULL, STARTING_ENERGY, burnEnergy, cargoUsed, cruiseCost, depositAtHome, drawFromDock, drawSeconds, emptyCargo, freshSession, mineSeconds, siphonEnergy } from "./energy";
 import { JOURNEY_MAX_SECONDS, JOURNEY_MIN_SECONDS } from "./journey";
 
 const failures: string[] = [];
@@ -69,6 +69,22 @@ while (steps < 200) {
 expect(steps === 80 && mining.cargo.ore === CARGO_CAPACITY && remaining === 0, "a full ore mine fills the hold in 80 seconds and then sits empty");
 expect(mining.energy === STARTING_ENERGY, "mining ore does not change the energy tank");
 expect(cargoUsed(mining.cargo) === CARGO_CAPACITY, "a full mine uses the whole shared hold");
+expect(mineSeconds(MINE_FULL, emptyCargo()) === MINE_FULL / 25, "an empty hold facing a full mine counts down the whole load");
+expect(
+	mineSeconds(MINE_FULL, { ...emptyCargo(), ore: CARGO_CAPACITY - 100 }) === 4,
+	"a nearly full hold counts down to the hold, not the mine"
+);
+expect(mineSeconds(40, emptyCargo()) === 1.6, "a thin mine counts down to depletion");
+expect(mineSeconds(MINE_FULL, { ...emptyCargo(), ore: CARGO_CAPACITY }) === 0, "a full hold has no draw left");
+expect(mineSeconds(0, emptyCargo()) === 0, "an empty mine has no draw left");
+expect(
+	drawSeconds(COLLECTOR_CHARGE, ENERGY_CAPACITY - STARTING_ENERGY) === 80,
+	"a fresh tank facing a full collector counts down until both meet"
+);
+expect(drawSeconds(COLLECTOR_CHARGE, 100) === 4, "a nearly full tank counts down to the tank, not the collector");
+expect(drawSeconds(40, ENERGY_CAPACITY) === 1.6, "a thin collector counts down to depletion");
+expect(drawSeconds(COLLECTOR_CHARGE, 0) === 0, "a full tank has no draw left");
+expect(drawSeconds(0, ENERGY_CAPACITY) === 0, "an empty collector has no draw left");
 
 const sharing = drawFromDock(
 	{ energy: STARTING_ENERGY, cargo: { ...emptyCargo(), ore: 1800 } },

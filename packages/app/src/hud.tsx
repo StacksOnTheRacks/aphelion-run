@@ -3,7 +3,7 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Inter } from "next/font/google";
 
-import { ENERGY_CAPACITY } from "./demo/energy";
+import { CARGO_CAPACITY, ENERGY_CAPACITY, type MineClock } from "./demo/energy";
 import { elementColor, type ElementId, palette } from "./palette";
 import { formatTravelTime, travelShare, type TravelClock } from "./travel-clock";
 
@@ -363,18 +363,21 @@ export function useHudAnchors(): { anchors: HudAnchors; keepOut: RefObject<HTMLE
  * The play chrome over the scene. A full-width header sits on the top edge. The place is a plaque fixed
  * to that edge, a little taller than the header row, so its bottom drops below the row. Holdings sit in
  * the row on a desktop and just under the plaque on a phone. The active ship
- * sits flush on the lower left, open along the bottom edge, with pilot, locate, and recall on its row. While the
- * ship is traveling, the time left and its ring sit on that ship's portrait. The bar opens into the fleet; choosing
- * a ship makes it active and closes the list. The chart's step back sits at the lower right, in the
- * chamfered control. `leading` and `corner` can take that corner over.
+ * sits flush on the lower left, open along the bottom edge, with locate and recall on its row. The row
+ * shows how full the energy tank is, and how full the hold is. While the ship is traveling, the time left
+ * and its ring sit on that ship's portrait. While it is drawing, that ring counts down in the yield's color
+ * until the source is empty or the ship is full. A mine wears its element. A collector wears gold. The bar
+ * opens into the fleet; choosing a ship makes it active
+ * and closes the list. The chart's step back sits at the lower right, in the chamfered control. `leading`
+ * and `corner` can take that corner over.
  * One ship is listed: the ranger.
  */
 export function Hud({
 	anchors,
 	location,
 	energy,
+	cargo,
 	holdings,
-	pilot,
 	locate,
 	recall,
 	steps = [],
@@ -382,26 +385,30 @@ export function Hud({
 	corner,
 	fleet = true,
 	travel = null,
+	mining = null,
 }: {
 	anchors: HudAnchors;
 	location: { title: string; detail: string | null };
 	/** Energy aboard the active ship. */
 	energy: number;
+	/** Mineral units in the active ship's hold, of any mix. */
+	cargo: number;
 	/** Mined resources deposited at the home base. */
 	holdings: readonly WarehouseHolding[];
-	pilot: HudAction;
 	locate: HudAction;
 	recall: HudAction;
-	/** The chart steps that used to sit in the lower right. Empty while piloting, and on the galaxy. */
+	/** The chart steps that sit in the lower right. Empty on the galaxy. */
 	steps?: { label: string; title: string; onClick: () => void }[];
 	/** A control drawn to the left of `corner`. */
 	leading?: ReactNode;
-	/** Drawn at the lower right when the chart step is not. The exterior view uses it for the way back into the cockpit. */
+	/** Drawn at the lower right when the chart step is not. */
 	corner?: ReactNode;
-	/** The active ship and its list. Off in the cockpit, where the console takes the bottom edge. */
+	/** The active ship and its list. Hidden when another console takes the bottom edge. */
 	fleet?: boolean;
 	/** Time left on the trip underway. Hidden when the ship is down. */
 	travel?: TravelClock | null;
+	/** Time left until a mine or collector empties, or the ship is full. Hidden when the ship is not drawing. */
+	mining?: MineClock | null;
 }) {
 	const [shipsOpen, setShipsOpen] = useState(false);
 	const [activeShipId, setActiveShipId] = useState<ShipId>("ranger");
@@ -504,8 +511,8 @@ export function Hud({
 												}}
 												className={`relative flex w-full items-center justify-start gap-2.5 p-2 text-left focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none min-[900px]:px-2 min-[900px]:py-1.5 ${active ? "bg-gradient-to-r from-[#A67C20]/25 via-[#2A1F08]/80 to-transparent before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-gradient-to-b before:from-[#FFD73D] before:to-[#A67C20] before:content-['']" : "hover:bg-[#FFD73D]/5"}`}
 											>
-												<ShipPortrait ship={ship} listed travel={active ? travel : null} />
-												<ShipName ship={ship} energy={energy} listed />
+												<ShipPortrait ship={ship} listed travel={active ? travel : null} mining={active ? mining : null} />
+												<ShipName ship={ship} energy={energy} cargo={cargo} listed />
 											</button>
 										</li>
 									);
@@ -513,11 +520,10 @@ export function Hud({
 							</ul>
 						</div>
 					) : (
-						<div role="group" aria-label={`${activeShip.name}, active ship`} className="pointer-events-auto relative isolate flex h-[58px] w-full items-center gap-2 p-2 min-[900px]:h-[52px] min-[900px]:py-1.5 min-[900px]:pr-2.5 min-[900px]:pl-2">
+						<div role="group" aria-label={`${activeShip.name}, active ship`} className="pointer-events-auto relative isolate flex h-[68px] w-full items-center gap-2 p-2 min-[900px]:h-[62px] min-[900px]:py-1.5 min-[900px]:pr-2.5 min-[900px]:pl-2">
 							<Housing cut={{ tr: 14 }} highlight="top" border="except-bottom" />
-							<ShipPortrait ship={activeShip} travel={travel} />
-							<ShipName ship={activeShip} energy={energy} />
-							<ShipAction label="Pilot" action={pilot} icon="/hud/pilot.svg" />
+							<ShipPortrait ship={activeShip} travel={travel} mining={mining} />
+							<ShipName ship={activeShip} energy={energy} cargo={cargo} />
 							<ShipAction label="Locate" action={locate} icon="/hud/locate.svg" />
 							<ShipAction label="Recall" action={recall} icon="/hud/recall.svg" />
 							<button
@@ -560,16 +566,25 @@ function ShipPortrait({
 	ship,
 	listed = false,
 	travel = null,
+	mining = null,
 }: {
 	ship: (typeof SHIPS)[number];
 	listed?: boolean;
 	/** Time left, drawn over the portrait. Null when this ship is down. */
 	travel?: TravelClock | null;
+	/** Time left on a mine or collector. Hidden while a trip is on the portrait. */
+	mining?: MineClock | null;
 }) {
-	const label = travel ? formatTravelTime(travel.remaining) : "";
-	const share = travel ? travelShare(travel.remaining, travel.total) : 0;
-	const radius = 15.5;
-	const turn = 2 * Math.PI * radius;
+	const clock = travel
+		? { remaining: travel.remaining, total: travel.total, color: "#FFD73D", label: `${formatTravelTime(travel.remaining)} remaining` }
+		: mining
+			? {
+					remaining: mining.remaining,
+					total: mining.total,
+					color: elementColor[mining.resource],
+					label: `${formatTravelTime(mining.remaining)} until the ${mining.resource === "energy" ? "collector" : mining.resource} draw stops`,
+				}
+			: null;
 	return (
 		<span className={`relative shrink-0 ${listed ? "size-9" : "size-10"}`}>
 			<span
@@ -585,58 +600,105 @@ function ShipPortrait({
 					style={{ clipPath: chamfer(listed ? 5.5 : 7.5, "tr-bl") }}
 				/>
 			</span>
-			{travel ? (
-				<span role="timer" aria-label={`${label} remaining`} className="pointer-events-none absolute inset-0">
-					<svg viewBox="0 0 36 36" className="h-full w-full -rotate-90" aria-hidden>
-						<circle cx="18" cy="18" r={radius} fill="none" stroke="rgba(7,8,10,0.45)" strokeWidth="2.25" />
-						<circle cx="18" cy="18" r={radius} fill="none" stroke="rgba(255,215,61,0.28)" strokeWidth="1.25" />
-						{share > 0 ? (
-							<circle
-								cx="18"
-								cy="18"
-								r={radius}
-								fill="none"
-								stroke="#FFD73D"
-								strokeWidth="1.25"
-								strokeLinecap={share > 0.985 ? "butt" : "round"}
-								strokeDasharray={`${turn * share} ${turn}`}
-							/>
-						) : null}
-					</svg>
-					<span
-						aria-hidden
-						className={`absolute inset-0 flex items-center justify-center font-bold text-[#ffd73d] tabular-nums drop-shadow-[0_1px_1px_rgba(0,0,0,0.95)] ${label.length > 5 ? "text-[6px]" : "text-[8px]"}`}
-					>
-						{label}
-					</span>
-				</span>
-			) : null}
+			{clock ? <PortraitClock remaining={clock.remaining} total={clock.total} color={clock.color} label={clock.label} /> : null}
 		</span>
 	);
 }
 
-function ShipName({ ship, energy }: { ship: (typeof SHIPS)[number]; energy: number; listed?: boolean }) {
-	const amount = Math.round(energy).toLocaleString("en-US");
-	const fill = Math.max(0, Math.min(1, energy / ENERGY_CAPACITY));
+/** A draining ring over the portrait. Travel and a collector are gold. A mine wears the yield's color. */
+function PortraitClock({ remaining, total, color, label }: { remaining: number; total: number; color: string; label: string }) {
+	const text = formatTravelTime(remaining);
+	const share = travelShare(remaining, total);
+	const radius = 15.5;
+	const turn = 2 * Math.PI * radius;
+	return (
+		<span role="timer" aria-label={label} className="pointer-events-none absolute inset-0">
+			<svg viewBox="0 0 36 36" className="h-full w-full -rotate-90" aria-hidden>
+				<circle cx="18" cy="18" r={radius} fill="none" stroke="rgba(7,8,10,0.45)" strokeWidth="2.25" />
+				<circle cx="18" cy="18" r={radius} fill="none" stroke={color} strokeOpacity="0.28" strokeWidth="1.25" />
+				{share > 0 ? (
+					<circle
+						cx="18"
+						cy="18"
+						r={radius}
+						fill="none"
+						stroke={color}
+						strokeWidth="1.25"
+						strokeLinecap={share > 0.985 ? "butt" : "round"}
+						strokeDasharray={`${turn * share} ${turn}`}
+					/>
+				) : null}
+			</svg>
+			<span
+				aria-hidden
+				className={`absolute inset-0 flex items-center justify-center font-bold tabular-nums drop-shadow-[0_1px_1px_rgba(0,0,0,0.95)] ${text.length > 5 ? "text-[6px]" : "text-[8px]"}`}
+				style={{ color }}
+			>
+				{text}
+			</span>
+		</span>
+	);
+}
+
+function ShipName({ ship, energy, cargo }: { ship: (typeof SHIPS)[number]; energy: number; cargo: number; listed?: boolean }) {
 	return (
 		<div className="min-w-0 flex-1">
 			<p className={`truncate text-sm font-bold tracking-[0.6px] uppercase min-[900px]:text-[12px] min-[900px]:tracking-[1.4px] ${GOLD_TEXT}`}>
 				{ship.name}
 			</p>
-			<p className="mt-0.5 flex items-center gap-1.5 text-[9px] tracking-[1px] text-[#a89060] uppercase">
-				<span className="truncate">{ship.role}</span>
-				<span aria-hidden className="h-[3px] min-w-6 flex-1 overflow-hidden bg-[#FFD73D]/[0.12]" style={{ clipPath: chamfer(1.5) }}>
-					<span
-						className="block h-full bg-gradient-to-r from-[#A67C20] via-[#E8B23A] to-[#FFD73D] transition-[width] duration-500 motion-reduce:transition-none"
-						style={{ width: `${fill * 100}%` }}
-					/>
+			<div className="mt-0.5 flex items-center gap-1.5">
+				<span className="truncate text-[9px] tracking-[1px] text-[#a89060] uppercase">{ship.role}</span>
+				<span className="flex min-w-6 flex-1 flex-col gap-[3px]">
+					<HoldMeter label="Energy" amount={energy} capacity={ENERGY_CAPACITY} tone="energy" />
+					<HoldMeter label="Cargo" amount={cargo} capacity={CARGO_CAPACITY} tone="cargo" />
 				</span>
-				<span className="font-semibold text-[#ffd73d] tabular-nums">
-					<span className="sr-only">Energy </span>
-					{amount}
+				<span className="flex flex-col items-end gap-px text-[9px] leading-none font-semibold tabular-nums">
+					<span aria-hidden className="text-[#ffd73d]">
+						{Math.round(energy).toLocaleString("en-US")}
+					</span>
+					<span aria-hidden className="text-[#7ED4F0]">
+						{Math.round(cargo).toLocaleString("en-US")}
+					</span>
 				</span>
-			</p>
+			</div>
 		</div>
+	);
+}
+
+/** How full one store is. Energy is gold. Cargo is the cool hold color, so the two bars stay distinct. */
+function HoldMeter({
+	label,
+	amount,
+	capacity,
+	tone,
+}: {
+	label: string;
+	amount: number;
+	capacity: number;
+	tone: "energy" | "cargo";
+}) {
+	const fill = Math.max(0, Math.min(1, amount / Math.max(1, capacity)));
+	const track = tone === "energy" ? "bg-[#FFD73D]/[0.12]" : "bg-[#7ED4F0]/30";
+	const bar =
+		tone === "energy"
+			? "bg-gradient-to-r from-[#A67C20] via-[#E8B23A] to-[#FFD73D]"
+			: "bg-gradient-to-r from-[#2A6A80] via-[#4AA8C8] to-[#7ED4F0]";
+	return (
+		<span
+			role="meter"
+			aria-label={label}
+			aria-valuemin={0}
+			aria-valuemax={Math.round(capacity)}
+			aria-valuenow={Math.round(amount)}
+			aria-valuetext={`${Math.round(amount).toLocaleString("en-US")} of ${Math.round(capacity).toLocaleString("en-US")}`}
+			className={`block h-[3px] overflow-hidden ${track}`}
+			style={{ clipPath: chamfer(1.5) }}
+		>
+			<span
+				className={`block h-full ${bar} transition-[width] duration-500 motion-reduce:transition-none`}
+				style={{ width: `${fill * 100}%` }}
+			/>
+		</span>
 	);
 }
 

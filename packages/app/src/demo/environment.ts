@@ -53,6 +53,7 @@ import { daysSinceJ2000, greenwichAngle, moonLongitude, planetLongitude, type Ep
 import { moonGeneratorSlots, planetGeneratorSlots, type GeneratorSlot, type Mineral } from "./generators";
 import {
 	COLLECTOR_CHARGE,
+	ENERGY_CAPACITY,
 	MINERALS,
 	STARTING_DOCK_ID,
 	STARTING_ENERGY,
@@ -60,7 +61,10 @@ import {
 	cargoFrom,
 	depositAtHome,
 	drawFromDock,
+	drawSeconds,
+	mineSeconds,
 	type Cargo,
+	type MineClock,
 	type SolSession,
 } from "./energy";
 import { CLIMB_PACE, createJourney, cruiseProfile, hoverDeparture, tripSeconds, type Dock, type Harbor, type JourneyPlan } from "./journey";
@@ -88,7 +92,7 @@ import type { ScanKind, ScanTarget } from "./scan";
 import { createMoonTerrain } from "./moon-terrain";
 import { trackPicks } from "./pointer";
 import { attachChartCamera, nudgeChartZoom, tuneChartCamera, type ZoomDirection } from "./zoom";
-import { curveClimbJoin, curveClimbStart, departureSpiral, planRoute, reversalPenalty, tangentHeading } from "./route";
+import { curveClimbJoin, curveClimbStart, departureSpiral, planRoute, tangentHeading } from "./route";
 
 type PlanetName = EphemerisPlanet;
 
@@ -825,15 +829,23 @@ export function wideChartStep(view: DemoView): ChartButton | null {
 }
 
 /**
+ * How far inside the old stop a body chart may come. The near limit on a planet, a moon, or the Sun
+ * is this share of the distance the wheel used to stop at. The system chart does not use it.
+ */
+export const BODY_CHART_NEAR = 0.92;
+
+/**
  * How far the wheel may move once the camera has arrived.
- * The system chart can pull back. An outer orbit can come in to its inner orbit and no farther out
- * than the shot it arrived on. An inner orbit stays on that shot.
+ * The system chart can pull back. A body chart can come in a little inside its inner-orbit shot,
+ * and no farther out than the shot it arrived on. An inner orbit can come in that same step and
+ * cannot pull back.
  */
 export function wheelLimits(view: DemoView, arrived: number, closer: number, chartFar: number): { near: number; far: number } {
-	if (view.endsWith("-inner")) {
-		return { near: arrived, far: arrived };
+	if (view === "system") {
+		return { near: Math.min(arrived, closer), far: chartFar };
 	}
-	return { near: Math.min(arrived, closer), far: view === "system" ? chartFar : arrived };
+	const stop = view.endsWith("-inner") ? arrived : Math.min(arrived, closer);
+	return { near: stop * BODY_CHART_NEAR, far: arrived };
 }
 
 /** A body and where it is on screen, in CSS pixels from the canvas's top left. */
@@ -891,10 +903,10 @@ export type Departure = { at: Vector3; turn: number; speed?: number };
  * at the origin, and the climb starts from there instead.
  *
  * The climb leaves with the orbit. It eases outward while it keeps turning the way the satellite
- * circles, and meets the burn along the outer orbit. Heading back against the orbit is taken only
- * when that way out is shorter by more than half a lap, since reversing throws away the speed the
- * ship already has. A ship that is not docked circles the way the bases do, counterclockwise.
- * The burn always arrives the same way, so the ship is already facing the dock it will settle onto.
+ * circles, and meets the burn along the outer orbit. A tangent on the far side is a loop around in
+ * that same direction, never a reversal. A ship that is not docked circles the way the bases do,
+ * counterclockwise. The burn always arrives the same way, so the ship is already facing the dock
+ * it will settle onto.
  *
  * Every planet that is not an end of the trip may give an assist, and so may the Sun. An assist passes
  * just outside that body's outer orbit with the engine dark: gravity bends the path, so the pass is
@@ -931,7 +943,6 @@ export function planJourney(layout: JourneyLayout, fromId: string, toId: string,
 		depart?.at ??
 		(from.bases.length > 0 ? nearestBase() : from.center.add(flatToward(from.center, to.center).scale(from.halo)));
 	const orbitTurn = depart?.turn || 1;
-	const radius = Math.hypot(origin.x - from.center.x, origin.z - from.center.z);
 
 	const option = (turn: number) => {
 		const cruise = planRoute({
@@ -950,10 +961,7 @@ export function planJourney(layout: JourneyLayout, fromId: string, toId: string,
 		const joined = curveClimbJoin(opened, cruise, spheres, rings, from.center);
 		return { cruise: joined.route, climb: joined.climb };
 	};
-	const withOrbit = option(orbitTurn);
-	const againstOrbit = option(-orbitTurn);
-	const chosen =
-		pathLength(againstOrbit.climb) + reversalPenalty(radius) < pathLength(withOrbit.climb) ? againstOrbit : withOrbit;
+	const chosen = option(orbitTurn);
 
 	return {
 		climb: chosen.climb,
@@ -961,14 +969,6 @@ export function planJourney(layout: JourneyLayout, fromId: string, toId: string,
 		arrive: { id: toId, turn: chosen.cruise.endTurn || 1 },
 		departSpeed: depart?.speed ?? CLIMB_PACE,
 	};
-}
-
-function pathLength(points: Vector3[]): number {
-	let length = 0;
-	for (let i = 1; i < points.length; i++) {
-		length += Vector3.Distance(points[i - 1], points[i]);
-	}
-	return length;
 }
 
 /** Unit direction from `from` toward `to`, flattened into the planets' plane. */
@@ -1054,7 +1054,7 @@ export type EnvironmentDemo = LabelSource & {
 	 */
 	quote: (target: ScanTarget, speed?: number) => number;
 	/**
-	 * Burn cost and travel time for a coast to `target`. Time runs from undock to soft dock.
+	 * Burn cost and travel time for a coast to `target`. Time is the seven-second egress, the cruise, and the seven-second ingress. The countdown before departure is not included.
 	 * Null when the target is in the ship's orbit.
 	 */
 	preview: (target: ScanTarget, speed?: number) => { cost: number; seconds: number } | null;
@@ -1113,6 +1113,8 @@ export type ShipHold = {
 	siphonId: string | null;
 	/** Load still in the docked mine or collector. Null at any other dock. */
 	charge: number | null;
+	/** Countdown while a mine or collector is drawing. Null while the ship is not drawing. */
+	mine: MineClock | null;
 };
 
 export type EnvironmentOptions = {
@@ -1272,6 +1274,8 @@ export async function createEnvironment(
 	let lastBerthed = dockId ?? STARTING_DOCK_ID;
 	let siphonId: string | null = null;
 	let siphoning = false;
+	/** Seconds a mine or collector draw was going to take when it started. Zero while not drawing. */
+	let drawSpan = 0;
 	const collectorCharges = new Map<string, number>(Object.entries(session?.collectors ?? {}));
 	let departEnergy = energy;
 	let quoted = 0;
@@ -1279,11 +1283,32 @@ export async function createEnvironment(
 	const holdListeners = new Set<(hold: ShipHold) => void>();
 	let publishedHold = "";
 	const chargeOf = (id: string) => collectorCharges.get(id) ?? COLLECTOR_CHARGE;
+	/** The draw countdown, or null when the ship is not taking from a mine or a collector. */
+	const holdMine = (): MineClock | null => {
+		if (!siphoning || !dockId || !(drawSpan > 0)) {
+			return null;
+		}
+		const craft = crafts.find((item) => item.id === dockId);
+		if (!craft) {
+			return null;
+		}
+		const charge = chargeOf(dockId);
+		const drawing =
+			craft.kind === "generator" && craft.resource
+				? { remaining: mineSeconds(charge, cargo), resource: craft.resource }
+				: craft.kind === "collector"
+					? { remaining: drawSeconds(charge, ENERGY_CAPACITY - energy), resource: "energy" as const }
+					: null;
+		if (!drawing || !(drawing.remaining > 0)) {
+			return null;
+		}
+		return { remaining: drawing.remaining, total: Math.max(drawSpan, drawing.remaining), resource: drawing.resource };
+	};
 	const currentHold = (): ShipHold => {
 		const craft = dockId ? crafts.find((item) => item.id === dockId) : undefined;
 		const mining = craft?.kind === "collector" || craft?.kind === "generator";
 		const charge = mining && dockId ? chargeOf(dockId) : null;
-		return { energy, cargo: { ...cargo }, base: { ...base }, siphoning, dockId, siphonId, charge };
+		return { energy, cargo: { ...cargo }, base: { ...base }, siphoning, dockId, siphonId, charge, mine: holdMine() };
 	};
 	const publishHold = () => {
 		const hold = currentHold();
@@ -1643,9 +1668,9 @@ export async function createEnvironment(
 		view.endsWith("-inner") ? view : (view.replace(/-outer$/, "-inner") as DemoView);
 
 	/**
-	 * Closest a scroll may bring the camera, and no closer than the shot it arrived on.
-	 * From the system the camera stays outside every planet, so an outer orbit is a click.
-	 * From a body it stops at that body's inner orbit, short of the surface.
+	 * The inner-orbit framing a body chart used to stop on, and no closer than the shot it arrived on.
+	 * The wheel then comes in a little past this. From the system the camera stays outside every planet,
+	 * so an outer orbit is a click.
 	 */
 	const closestRadius = (view: DemoView): number => {
 		const arrived = goalFor(view).radius;
@@ -1741,6 +1766,7 @@ export async function createEnvironment(
 		}
 		siphoning = false;
 		siphonId = null;
+		drawSpan = 0;
 		publishHold();
 	};
 
@@ -1750,6 +1776,7 @@ export async function createEnvironment(
 			if (siphoning) {
 				siphoning = false;
 				siphonId = null;
+				drawSpan = 0;
 				publishHold();
 			}
 			return;
@@ -1769,6 +1796,7 @@ export async function createEnvironment(
 			if (siphoning) {
 				siphoning = false;
 				siphonId = null;
+				drawSpan = 0;
 				changed = true;
 			}
 			if (changed) {
@@ -1780,9 +1808,16 @@ export async function createEnvironment(
 			if (siphoning) {
 				siphoning = false;
 				siphonId = null;
+				drawSpan = 0;
 				publishHold();
 			}
 			return;
+		}
+		const starting = !(siphoning && siphonId === dockId);
+		if (starting && craft.kind === "generator" && craft.resource) {
+			drawSpan = mineSeconds(chargeOf(dockId), cargo);
+		} else if (starting && craft.kind === "collector") {
+			drawSpan = drawSeconds(chargeOf(dockId), ENERGY_CAPACITY - energy);
 		}
 		const drawn = drawFromDock(
 			{ energy, cargo },
@@ -2373,6 +2408,13 @@ export async function createEnvironment(
 		return null;
 	};
 
+	/** Where the burn ends, relative to `hostId`, so the drop can be timed before the ship leaves. */
+	const arrivalOffset = (plan: JourneyPlan, hostId: string): Vector3 => {
+		const body = journeyLayout().bodies.find((item) => item.id === hostId);
+		const end = plan.cruise.points[plan.cruise.points.length - 1] ?? Vector3.Zero();
+		return body ? end.subtract(body.center) : end.clone();
+	};
+
 	/** The cruise the ship would actually fly: the departure, the chosen coast, and the dock it arrives at. */
 	const coursePlan = (target: ScanTarget, speed: number): JourneyPlan => {
 		const docked = journey.docked();
@@ -2383,6 +2425,7 @@ export async function createEnvironment(
 			...plan,
 			coastSpeed: speed,
 			arrive: { ...plan.arrive, dock },
+			arriveFrom: arrivalOffset(plan, target.host),
 			departDock: docked?.dock,
 			departBody: docked?.dock ? fromId : undefined,
 		};
@@ -2505,7 +2548,7 @@ export async function createEnvironment(
 				return null;
 			}
 			const plan = coursePlan(target, speed);
-			return { cost: cruiseProfile(plan, speed).cost, seconds: tripSeconds(plan, speed) };
+			return { cost: cruiseProfile(plan, speed).cost, seconds: tripSeconds(plan, speed, harborOf(target.host)) };
 		},
 		offer(target) {
 			const fromId = journey.docked()?.id ?? journey.host() ?? "earth";
@@ -2534,6 +2577,7 @@ export async function createEnvironment(
 					...plan,
 					coastSpeed: speed,
 					arrive: { ...plan.arrive, dock },
+					arriveFrom: arrivalOffset(plan, target.host),
 					departDock: docked?.dock,
 					departBody: docked?.dock ? fromId : undefined,
 				},

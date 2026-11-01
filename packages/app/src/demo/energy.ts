@@ -68,6 +68,30 @@ export function cargoRoom(cargo: Cargo, capacity = CARGO_CAPACITY): number {
 	return Math.max(0, capacity - cargoUsed(cargo));
 }
 
+/**
+ * Seconds left on a draw. A mine names its yield. A collector names energy.
+ * The ring is `remaining` over `total`, and `total` is fixed when the draw starts.
+ */
+export type MineClock = {
+	remaining: number;
+	total: number;
+	resource: Mineral | "energy";
+};
+
+/**
+ * How long a draw keeps going. The ship takes `rate` units a second until the source is empty
+ * or `room` is gone, and stops at the sooner of those.
+ */
+export function drawSeconds(sourceRemaining: number, room: number, rate = SIPHON_RATE): number {
+	const units = Math.min(Math.max(0, sourceRemaining), Math.max(0, room));
+	return rate > 0 ? units / rate : 0;
+}
+
+/** How long a mine keeps drawing: the source emptying, or the hold filling, whichever is first. */
+export function mineSeconds(sourceRemaining: number, cargo: Cargo, rate = SIPHON_RATE): number {
+	return drawSeconds(sourceRemaining, cargoRoom(cargo), rate);
+}
+
 /** A ledger with any missing mineral filled in as empty. */
 export function cargoFrom(partial?: Partial<Cargo> | null): Cargo {
 	const cargo = emptyCargo();
