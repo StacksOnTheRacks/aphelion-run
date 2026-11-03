@@ -49,7 +49,17 @@ import {
 	type Faction,
 	type PlanetBaseInput,
 } from "./bases";
-import { daysSinceJ2000, greenwichAngle, moonLongitude, planetLongitude, type EphemerisPlanet } from "./ephemeris";
+import {
+	PLUTO_APHELION_AU,
+	PLUTO_PERIHELION_AU,
+	daysSinceJ2000,
+	greenwichAngle,
+	moonLongitude,
+	planetLongitude,
+	plutoPlace,
+	plutoTrack,
+	type EphemerisPlanet,
+} from "./ephemeris";
 import { moonGeneratorSlots, planetGeneratorSlots, type GeneratorSlot, type Mineral } from "./generators";
 import {
 	COLLECTOR_CHARGE,
@@ -91,10 +101,11 @@ import type { TravelClock } from "../travel-clock";
 import type { ScanKind, ScanTarget } from "./scan";
 import { createMoonTerrain } from "./moon-terrain";
 import { trackPicks } from "./pointer";
+import { INSPECT_FILL, inspectAimLift, inspectAngles, inspectExtent } from "./inspect";
 import { attachChartCamera, nudgeChartZoom, tuneChartCamera, type ZoomDirection } from "./zoom";
 import { curveClimbJoin, curveClimbStart, departureSpiral, planRoute, tangentHeading } from "./route";
 
-type PlanetName = EphemerisPlanet;
+type PlanetName = EphemerisPlanet | "pluto";
 
 /** A planet or the Sun: `<name>-outer` or `<name>-inner`. */
 export type BodyOrbitView = `${PlanetName | "sun"}-${"outer" | "inner"}`;
@@ -283,6 +294,46 @@ function scaleSystem(specs: PlanetSpec[]): PlanetSpec[] {
 	});
 }
 
+/**
+ * Uranus and Neptune's design orbits, per AU, so Pluto can sit on the same compressed chart.
+ * A linear map from the Sun would throw the outer system off the screen.
+ */
+const URANUS_AU = 19.19126393;
+const NEPTUNE_AU = 30.06992276;
+
+function compressedRadius(au: number): number {
+	const slope = (1060 - 880) / (NEPTUNE_AU - URANUS_AU);
+	return 1060 + (au - NEPTUNE_AU) * slope;
+}
+
+/**
+ * Design radius of Pluto's nearest point, before the system scale.
+ * Neptune's moons reach about 1090 on this chart and Charon adds about 40.
+ * Pluto's real orbit crosses Neptune's, which here would put it inside those moons,
+ * so the whole track is held out until the nearest point clears them.
+ */
+export const PLUTO_NEAREST_ORBIT = 1166;
+
+function plutoChartRadius(au: number): number {
+	return compressedRadius(au) + (PLUTO_NEAREST_ORBIT - compressedRadius(PLUTO_PERIHELION_AU));
+}
+
+/** Where a charted world is at `days`. Pluto's distance and height change. The eight sit on flat circles. */
+export function worldPosition(name: PlanetName, days: number, orbit: number): Vector3 {
+	if (name === "pluto") {
+		const place = plutoPlace(days);
+		const radius = plutoChartRadius(place.au) * SYSTEM_SCALE;
+		return new Vector3(place.x * radius, place.y * radius, place.z * radius);
+	}
+	const angle = planetLongitude(name, days);
+	return new Vector3(Math.cos(angle) * orbit, 0, Math.sin(angle) * orbit);
+}
+
+/** Pluto leaves the planets' plane, so a course in that plane does not bend around it. */
+export function bendsCourse(name: PlanetName): boolean {
+	return name !== "pluto";
+}
+
 export const PLANETS: PlanetSpec[] = scaleSystem([
 	{
 		name: "mercury",
@@ -392,6 +443,16 @@ export const PLANETS: PlanetSpec[] = scaleSystem([
 			{ name: "nereid", orbit: 44, diameter: 0.5, period: 360.1 },
 		],
 	},
+	{
+		name: "pluto",
+		orbit: plutoChartRadius(PLUTO_APHELION_AU),
+		diameter: 6,
+		color: new Color3(0.72, 0.56, 0.44),
+		// Retrograde, and the same period as Charon. The two keep one face toward each other.
+		day: -6.387,
+		path: new Color3(0.5, 0.4, 0.32),
+		moons: [{ name: "charon", orbit: 50, diameter: 3, period: 6.387 }],
+	},
 ]);
 
 /** The whole system from nearly overhead, close enough that the outer orbit can leave the frame. */
@@ -415,6 +476,7 @@ const PLANET_LABEL: Record<PlanetName, string> = {
 	saturn: "Saturn",
 	uranus: "Uranus",
 	neptune: "Neptune",
+	pluto: "Pluto",
 };
 
 function title(name: string): string {
@@ -783,7 +845,8 @@ export type ChartButton = { label: string; target: ChartTarget };
  * The system chart has Home, to the planetary chart where the ship is docked, and Galaxy, to leave Sol.
  * A planet or the Sun steps back to the system. A moon steps back to its planet.
  * An inner orbit steps back to that same place: a planet's own outer orbit, or its planet's when the
- * orbit belongs to a moon. The Sun's inner orbit steps back to the Sun.
+ * orbit belongs to a moon. The Sun's inner orbit steps back to the Sun. That star step says Sun,
+ * the same word every system uses.
  */
 export function chartButtons(view: DemoView): ChartButton[] {
 	if (view === "system") {
@@ -796,7 +859,7 @@ export function chartButtons(view: DemoView): ChartButton[] {
 		return [{ label: "System", target: "system" }];
 	}
 	if (view === "sun-inner") {
-		return [{ label: "Sol", target: "sun-outer" }];
+		return [{ label: "Sun", target: "sun-outer" }];
 	}
 	for (const spec of PLANETS) {
 		const outer = planetOrbitView(spec.name, "outer");
@@ -929,7 +992,7 @@ export function planJourney(layout: JourneyLayout, fromId: string, toId: string,
 		...(sunBody && fromId !== "sun" && toId !== "sun"
 			? [{ name: "Sol", center: sunBody.center, flyby: flybyRadius("sun") }]
 			: []),
-		...PLANETS.filter((spec) => spec.name !== fromId && spec.name !== toId).flatMap((spec) => {
+		...PLANETS.filter((spec) => bendsCourse(spec.name) && spec.name !== fromId && spec.name !== toId).flatMap((spec) => {
 			const body = byId.get(spec.name);
 			return body ? [{ name: PLANET_LABEL[spec.name], center: body.center, flyby: flybyRadius(spec) }] : [];
 		}),
@@ -1006,6 +1069,8 @@ type PlanetBody = {
 	/** Follows the planet without turning with it, so moon paths and orbit rings stay put. */
 	anchor: TransformNode;
 	moons: MoonBody[];
+	/** Bakes an invented surface at full detail for a close view. */
+	sharpen?: () => void;
 };
 
 export type EnvironmentDemo = LabelSource & {
@@ -1036,6 +1101,15 @@ export type EnvironmentDemo = LabelSource & {
 	onScanFound: (listener: (found: ScanTarget[]) => void) => () => void;
 	/** Takes the camera to a scanned body's outer orbit, or rides alongside a scanned craft. On a wide planet or Sun chart, that body comes in to the close framing instead. */
 	visit: (target: ScanTarget) => void;
+	/**
+	 * Holds the camera on a mine, a collector, or the home base. The body it orbits stays behind it,
+	 * and a ship docked there stays in frame. The camera can move around the craft and cannot zoom.
+	 */
+	inspect: (target: ScanTarget) => void;
+	/** Leaves the close look and returns the camera to the chart it came from. */
+	leaveInspect: () => void;
+	/** Calls back with the craft being looked at, or null on the way back to the chart. Once when the listener is added. */
+	onInspect: (listener: (target: ScanTarget | null) => void) => () => void;
 	/** Pulls a close planet chart back out to the wide shot, where the moons are named. */
 	widen: () => void;
 	/**
@@ -1161,6 +1235,12 @@ export async function createEnvironment(
 		orbitLines.push(line);
 		return line;
 	};
+	const addTrack = (name: string, points: Vector3[], color: Color3) => {
+		const line = buildTrack(scene, name, points, color);
+		glow.addExcludedMesh(line);
+		orbitLines.push(line);
+		return line;
+	};
 
 	for (const sky of buildStarfield(scene)) {
 		glow.addExcludedMesh(sky);
@@ -1173,8 +1253,20 @@ export async function createEnvironment(
 	const terrain = createMoonTerrain(scene, { color: SUNLIGHT_COLOR, strength: SUNLIGHT, night: NIGHT_SIDE });
 	const moonByName = new Map<string, MoonBody>();
 	const bodies: PlanetBody[] = PLANETS.map((spec) => {
-		const mesh = buildPlanet(scene, spec.name, spec.diameter, spec.color, spec.texture);
-		addOrbit(`${spec.name}-path`, spec.orbit, spec.path);
+		const surface = terrain.build(spec.name, spec.diameter);
+		const mesh = surface?.mesh ?? buildPlanet(scene, spec.name, spec.diameter, spec.color, spec.texture);
+		if (spec.name === "pluto") {
+			addTrack(
+				`${spec.name}-path`,
+				plutoTrack(360).map((place) => {
+					const radius = plutoChartRadius(place.au) * SYSTEM_SCALE;
+					return new Vector3(place.x * radius, place.y * radius, place.z * radius);
+				}),
+				spec.path
+			);
+		} else {
+			addOrbit(`${spec.name}-path`, spec.orbit, spec.path);
+		}
 		const anchor = new TransformNode(`${spec.name}-anchor`, scene);
 		const moons = spec.moons.map((moon, index) => {
 			const tilt = moon.plane ?? spec.moonPlane ?? 0;
@@ -1197,7 +1289,7 @@ export async function createEnvironment(
 			moonByName.set(moon.name, orbiter);
 			return orbiter;
 		});
-		return { spec, mesh, anchor, moons };
+		return { spec, mesh, anchor, moons, sharpen: surface?.sharpen };
 	});
 
 	const earth = bodies.find((body) => body.spec.name === "earth");
@@ -1377,9 +1469,25 @@ export async function createEnvironment(
 
 	let from = snapshot(camera);
 	let flight: Flight | null = null;
+	/** While a flight is not a chart shot, this pose is the one it is flying toward. */
+	let flightGoal: (() => Pose) | null = null;
+	/** The chart camera, saved when a close look starts, and restored by Back. */
+	let returnPose: Pose | null = null;
 	let active: DemoView = "system";
 	let travel = 1;
 	let moveSeconds = TRAVEL_SECONDS;
+	/**
+	 * A mine or collector held in frame. The offset is the camera's alpha minus the craft's angle,
+	 * so a drag keeps its place as the craft orbits. Radius stays put: this look does not zoom.
+	 */
+	let inspection: { craft: Craft; offset: number; beta: number; radius: number; lift: number } | null = null;
+	const inspectListeners = new Set<(target: ScanTarget | null) => void>();
+	const publishInspect = (target: ScanTarget | null) => {
+		for (const listener of inspectListeners) {
+			listener(target);
+		}
+	};
+	const inspectTarget = new Vector3();
 	/** The screen shows the cockpit. The chart camera keeps its place, so it is where it was on the way back. */
 	let piloting = false;
 	/** Names what is near. A click opens that thing's card. It does not move the camera. */
@@ -1460,7 +1568,8 @@ export async function createEnvironment(
 		const step = deltaSeconds / ZONE_FADE_SECONDS;
 		for (const zone of zones) {
 			const center = (zone.shell.parent as TransformNode | null)?.position ?? origin;
-			const showing = piloting ? nearBody(ranger.position, center, zone.radius) : travel >= 1 && active === zone.view;
+			const showing =
+				!inspection && (piloting ? nearBody(ranger.position, center, zone.radius) : travel >= 1 && active === zone.view);
 			const target = showing ? 1 : 0;
 			zone.fade = zone.fade < target ? Math.min(target, zone.fade + step) : Math.max(target, zone.fade - step);
 			const shown = zone.fade > 0.01;
@@ -1585,8 +1694,7 @@ export async function createEnvironment(
 	const placeBodies = (deltaSeconds: number) => {
 		const days = daysSinceJ2000(Date.now());
 		for (const body of bodies) {
-			const angle = planetLongitude(body.spec.name, days);
-			body.mesh.position.set(Math.cos(angle) * body.spec.orbit, 0, Math.sin(angle) * body.spec.orbit);
+			body.mesh.position.copyFrom(worldPosition(body.spec.name, days, body.spec.orbit));
 			body.anchor.position.copyFrom(body.mesh.position);
 			if (body === earth) {
 				// Turn about the pole first, then lean the pole over.
@@ -1686,6 +1794,7 @@ export async function createEnvironment(
 	camera.lowerRadiusLimit = closestRadius("system");
 
 	const restoreCamera = () => {
+		tuneChartCamera(camera);
 		camera.lowerBetaLimit = CAMERA_BETA_MIN;
 		camera.upperBetaLimit = CAMERA_BETA_MAX;
 		const arrived = goalFor(active).radius;
@@ -1932,6 +2041,41 @@ export async function createEnvironment(
 	let publishTrip = () => {};
 	let sampleFuel = () => {};
 	let collectorDock: string | null = null;
+
+	/** The close look: the craft stays centered, the radius stays put, and a drag still orbits it. */
+	const lockInspectCamera = (deltaSeconds: number) => {
+		const look = inspection;
+		if (!look) {
+			return;
+		}
+		camera.minZ = 0.02;
+		camera.lowerBetaLimit = CAMERA_BETA_MIN;
+		camera.upperBetaLimit = CAMERA_BETA_MAX;
+		camera.lowerRadiusLimit = look.radius;
+		camera.upperRadiusLimit = look.radius;
+		camera.wheelDeltaPercentage = 0;
+		camera.pinchDeltaPercentage = 0;
+		camera.inertialRadiusOffset = 0;
+		camera.movement.zoomAccumulatedPixels = 0;
+		camera.target.copyFrom(look.craft.position(inspectTarget));
+		camera.target.y += look.lift;
+		camera.alpha += look.craft.rate * deltaSeconds;
+		camera.radius = look.radius;
+	};
+
+	const inspectGoal = (): Pose => {
+		const look = inspection;
+		if (!look) {
+			return goalFor(active);
+		}
+		return {
+			alpha: look.craft.angle() + look.offset,
+			beta: look.beta,
+			radius: look.radius,
+			target: look.craft.position(inspectTarget).add(new Vector3(0, look.lift, 0)),
+		};
+	};
+
 	scene.onBeforeRenderObservable.add(() => {
 		const deltaSeconds = engine.getDeltaTime() / 1000;
 		const dockedCraft = journey.docked() !== null && dockId ? crafts.find((item) => item.id === dockId) : undefined;
@@ -1948,6 +2092,11 @@ export async function createEnvironment(
 		// An arrival can open another view from inside the update, so the shot is read after it.
 		const shot = SHOTS[active];
 		fadeZones(deltaSeconds);
+
+		if (travel >= 1 && inspection) {
+			lockInspectCamera(deltaSeconds);
+			return;
+		}
 
 		if (travel >= 1) {
 			camera.minZ = 0.1;
@@ -1983,9 +2132,9 @@ export async function createEnvironment(
 			return;
 		}
 
-		const goal = goalFor(active);
+		const goal = flightGoal ? flightGoal() : goalFor(active);
 		// Arrive on the craft's own azimuth, which keeps moving during the flight.
-		if (riding?.view === active) {
+		if (!flightGoal && riding?.view === active) {
 			goal.alpha = riding.angle();
 		}
 		travel = Math.min(1, travel + deltaSeconds / moveSeconds);
@@ -1995,24 +2144,42 @@ export async function createEnvironment(
 			camera.beta = goal.beta;
 			camera.radius = goal.radius;
 			camera.target.copyFrom(goal.target);
-			camera.minZ = 0.1;
-			restoreCamera();
+			flightGoal = null;
+			if (inspection) {
+				lockInspectCamera(0);
+			} else {
+				camera.minZ = 0.1;
+				returnPose = null;
+				restoreCamera();
+				ranger.lightHull(false);
+				publishInspect(null);
+			}
 			if (!piloting) {
 				attachChartCamera(camera, canvas);
 			}
 		} else {
 			widenCamera();
+			if (inspection) {
+				camera.minZ = 0.02;
+			}
 			const liveEnd = cameraWorldPosition(goal.alpha, goal.beta, goal.radius, goal.target);
 			const position = pointAlong(flight, eased).add(liveEnd.subtract(flight.endWorld).scale(eased));
 			applyWorld(position, Vector3.Lerp(flight.fromTarget, goal.target, eased));
 		}
-		const linesGoal = shot.closeUp ? 0 : 1;
+		const linesGoal = inspection || shot.closeUp ? 0 : 1;
 		setOrbitLines(linesFrom + (linesGoal - linesFrom) * eased);
 		const coronaGoal = shot.corona ?? 1;
 		setCorona(coronaFrom + (coronaGoal - coronaFrom) * eased);
 	});
 
 	const animateTo = (view: DemoView) => {
+		if (inspection || returnPose) {
+			inspection = null;
+			returnPose = null;
+			ranger.lightHull(false);
+			publishInspect(null);
+		}
+		flightGoal = null;
 		riding = chosen?.view === view ? chosen : null;
 		chosen = null;
 		dolly = null;
@@ -2027,6 +2194,7 @@ export async function createEnvironment(
 		travel = 0;
 		// Positions come from the clock, so refresh them before the path is measured against the bodies.
 		placeBodies(0);
+		bodies.find((body) => body.spec.name === SHOTS[view].focus)?.sharpen?.();
 		moonByName.get(SHOTS[view].focus)?.sharpen?.();
 		flight = makeFlight(from, goalFor(view));
 	};
@@ -2100,6 +2268,9 @@ export async function createEnvironment(
 	 * camera is in on that body. A swing changes which of them are near.
 	 */
 	const runScan = (): ScanTarget[] => {
+		if (inspection) {
+			return [craftFound(inspection.craft)];
+		}
 		const eye = camera.globalPosition;
 		const width = canvas.clientWidth;
 		const height = canvas.clientHeight;
@@ -2463,6 +2634,24 @@ export async function createEnvironment(
 		return Math.min(between(target.host, homeHost), between(target.host, "sun"));
 	};
 
+	/** Flies the camera to a pose that can keep moving, without changing which chart is underneath. */
+	const startFlight = (goal: () => Pose) => {
+		riding = null;
+		chosen = null;
+		dolly = null;
+		clearScan();
+		camera.detachControl();
+		widenCamera();
+		from = snapshot(camera);
+		linesFrom = linesNow;
+		coronaFrom = coronaNow;
+		moveSeconds = TRAVEL_SECONDS;
+		travel = 0;
+		placeBodies(0);
+		flightGoal = goal;
+		flight = makeFlight(from, goal());
+	};
+
 	return {
 		go: animateTo,
 		view: () => active,
@@ -2524,6 +2713,53 @@ export async function createEnvironment(
 			for (const listener of selectListeners) {
 				listener(place);
 			}
+		},
+		inspect(target) {
+			const craft = craftById.get(target.id);
+			const lookedAt = craft?.kind === "collector" || craft?.kind === "generator" || craft?.id === STARTING_DOCK_ID;
+			if (!craft || !lookedAt || piloting) {
+				return;
+			}
+			if (!returnPose) {
+				returnPose = snapshot(camera);
+			}
+			const dockedHere = dockId === craft.id && journey.docked() !== null;
+			const mount = craft.kind === "home" ? "pad" : "trail";
+			const facing = inspectAngles(craft.angle(), craft.rate, mount);
+			inspection = {
+				craft,
+				offset: wrapAngle(facing.alpha - craft.angle()),
+				beta: facing.beta,
+				radius: Math.max(0.2, fillDistance(inspectExtent(dockedHere, mount), INSPECT_FILL)),
+				lift: inspectAimLift(dockedHere, mount),
+			};
+			ranger.lightHull(dockedHere);
+			publishInspect(craftFound(craft));
+			bodies.find((body) => body.spec.name === craft.host)?.sharpen?.();
+			moonByName.get(craft.host)?.sharpen?.();
+			startFlight(inspectGoal);
+		},
+		leaveInspect() {
+			if (!inspection || !returnPose) {
+				return;
+			}
+			const pose = returnPose;
+			const shot = SHOTS[active];
+			inspection = null;
+			startFlight(() => {
+				const targetPoint = focusPosition(shot.focus).clone();
+				if (shot.offset) {
+					targetPoint.addInPlace(shot.offset);
+				}
+				return { alpha: pose.alpha, beta: pose.beta, radius: pose.radius, target: targetPoint };
+			});
+		},
+		onInspect(listener) {
+			inspectListeners.add(listener);
+			listener(inspection ? craftFound(inspection.craft) : null);
+			return () => {
+				inspectListeners.delete(listener);
+			};
 		},
 		widen() {
 			beginDolly(goalFor(active).radius);
@@ -2678,7 +2914,7 @@ export async function createEnvironment(
 		setViewpoint: cockpit.setViewpoint,
 		setAftRects: cockpit.setAftRects,
 		zoom(direction) {
-			if (piloting || travel < 1 || dolly) {
+			if (piloting || inspection || travel < 1 || dolly) {
 				return;
 			}
 			nudgeChartZoom(camera, direction);
@@ -3312,6 +3548,14 @@ type ZoneShell = {
 	radius: number;
 };
 
+function styleOrbit(line: LinesMesh, color: Color3): LinesMesh {
+	line.color = color.clone().scale(0.45);
+	line.isPickable = false;
+	// The chart draws these. Cockpit cameras leave this layer out, so a pilot never sees an orbit line.
+	line.layerMask = CHART_LAYER;
+	return line;
+}
+
 function buildOrbit(scene: Scene, name: string, radius: number, color: Color3): LinesMesh {
 	const points: Vector3[] = [];
 	const steps = 180;
@@ -3319,12 +3563,11 @@ function buildOrbit(scene: Scene, name: string, radius: number, color: Color3): 
 		const angle = (i / steps) * Math.PI * 2;
 		points.push(new Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
 	}
-	const ring = MeshBuilder.CreateLines(name, { points }, scene);
-	ring.color = color.clone().scale(0.45);
-	ring.isPickable = false;
-	// The chart draws these. Cockpit cameras leave this layer out, so a pilot never sees an orbit line.
-	ring.layerMask = CHART_LAYER;
-	return ring;
+	return styleOrbit(MeshBuilder.CreateLines(name, { points }, scene), color);
+}
+
+function buildTrack(scene: Scene, name: string, points: Vector3[], color: Color3): LinesMesh {
+	return styleOrbit(MeshBuilder.CreateLines(name, { points }, scene), color);
 }
 
 /** Hexagons along each edge of the icosahedron the zone honeycomb is folded over. */

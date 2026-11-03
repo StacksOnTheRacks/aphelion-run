@@ -32,7 +32,7 @@ The game is larger than one view. Only the place on screen is held on the device
 
 ## Scale
 
-Another body, station, or system is another place that can be loaded on its own. It does not have to sit in memory beside the one on screen. Play still loads Sol. The brief allows a wormhole departure to another system. That system is another load when it can be entered. It cannot be entered yet.
+Another body, station, or system is another place that can be loaded on its own. It does not have to sit in memory beside the one on screen. Play still loads Sol. The brief allows a wormhole departure to another system. Alpha Centauri is that load, as a chart. Other systems cannot be entered yet.
 
 ## Success
 

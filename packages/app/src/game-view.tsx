@@ -5,20 +5,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { Scene } from "@babylonjs/core/scene";
 
+import { createAlphaCentauri, type AlphaCentauriDemo } from "./demo/alpha-centauri";
 import { cargoUsed, emptyCargo, freshSession, STARTING_ENERGY, type Cargo, type SolSession } from "./demo/energy";
 import { createEnvironment, type EnvironmentDemo } from "./demo/environment";
-import { createGalaxy, type GalaxyDemo } from "./demo/galaxy";
+import { ALPHA_CENTAURI_ID, createGalaxy, type GalaxyDemo } from "./demo/galaxy";
+import { AlphaCentauriPlace } from "./alpha-centauri-view";
 import { GalaxyPlace } from "./galaxy-view";
 import { GameChrome } from "./game-chrome";
 import { SystemPlace } from "./system-view";
 
-type Place = "galaxy" | "system";
+type Place = "galaxy" | "system" | "alpha-centauri";
 
-type Loaded = { place: "galaxy"; galaxy: GalaxyDemo } | { place: "system"; system: EnvironmentDemo };
+type Loaded =
+	| { place: "galaxy"; galaxy: GalaxyDemo }
+	| { place: "system"; system: EnvironmentDemo }
+	| { place: "alpha-centauri"; chart: AlphaCentauriDemo };
 
 const LOADING_COPY: Record<Place, string> = {
 	galaxy: "Charting the galaxy",
 	system: "Entering Sol",
+	"alpha-centauri": "Entering Alpha Centauri",
 };
 
 /** The loading screen fades in and out over this long. */
@@ -91,10 +97,13 @@ export function GameView() {
 		const scene = new Scene(engine, { useFloatingOrigin: place !== "galaxy" });
 		let next: Loaded;
 		try {
-			next =
-				place === "galaxy"
-					? { place, galaxy: createGalaxy(engine, scene, canvas, { opening: !crossing }) }
-					: { place, system: await createEnvironment(engine, scene, canvas, { atBerth, session: sessionRef.current }) };
+			if (place === "galaxy") {
+				next = { place, galaxy: createGalaxy(engine, scene, canvas, { opening: !crossing }) };
+			} else if (place === "alpha-centauri") {
+				next = { place, chart: createAlphaCentauri(engine, scene, canvas) };
+			} else {
+				next = { place, system: await createEnvironment(engine, scene, canvas, { atBerth, session: sessionRef.current }) };
+			}
 		} catch (caught) {
 			scene.dispose();
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -170,9 +179,12 @@ export function GameView() {
 		};
 	}, [load]);
 
-	const enterSol = useCallback(() => void load("system", true, false), [load]);
 	const enterShip = useCallback(() => void load("system", true, true), [load]);
 	const leaveSol = useCallback(() => void load("galaxy", true), [load]);
+	const enterChart = useCallback(
+		(id: string) => void load(id === ALPHA_CENTAURI_ID ? "alpha-centauri" : "system", true, false),
+		[load]
+	);
 
 	return (
 		<div className="absolute inset-0 touch-none overflow-hidden overscroll-none bg-black text-white">
@@ -188,11 +200,26 @@ export function GameView() {
 						{ id: "nitrogen", label: "Nitrogen", amount: stockpile.nitrogen },
 						{ id: "carbon", label: "Carbon", amount: stockpile.carbon },
 					]}
-					onEnterSol={enterSol}
+					onEnter={enterChart}
 					onHome={enterShip}
 				/>
 			) : null}
 			{loaded?.place === "system" ? <SystemPlace system={loaded.system} onLeave={leaveSol} /> : null}
+			{loaded?.place === "alpha-centauri" ? (
+				<AlphaCentauriPlace
+					chart={loaded.chart}
+					energy={shipEnergy}
+					cargo={shipCargo}
+					holdings={[
+						{ id: "hydrogen", label: "Hydrogen", amount: stockpile.hydrogen },
+						{ id: "ore", label: "Ore", amount: stockpile.ore },
+						{ id: "nitrogen", label: "Nitrogen", amount: stockpile.nitrogen },
+						{ id: "carbon", label: "Carbon", amount: stockpile.carbon },
+					]}
+					onLeave={leaveSol}
+					onHome={enterShip}
+				/>
+			) : null}
 			{!loaded ? <GameChrome /> : null}
 			{error ? (
 				<p className="absolute top-24 right-6 max-w-sm rounded bg-red-950/90 p-3 text-sm text-red-100">{error}</p>

@@ -171,6 +171,15 @@ expect(viewPlaque("sun-inner", false).title === "Sol", "Sol's inner orbit still 
 expect(viewPlaque("earth-outer", false).title === "Earth System", "Earth's wide chart names Earth's system");
 expect(viewPlaque("neptune-outer", true).title === "Neptune", "a planet zoomed in names the planet");
 expect(viewPlaque("neptune-triton-outer", false).title === "Triton", "a moon chart names the moon");
+expect(systemTargets.some((target) => target.id === "pluto"), "the system chart names Pluto");
+expect(bodyTargets("pluto-outer").map((target) => target.id).join() === "charon", "beside Pluto, Charon can be picked");
+expect(
+	viewTrail("pluto-charon-outer").map((body) => body.label).join(" › ") === "Pluto › Charon",
+	"Charon's trail runs through Pluto"
+);
+expect(chartButtons("pluto-charon-outer")[0]?.label === "Planet", "Charon steps back to the planet, the same word as any moon");
+expect(wideChartStep("pluto-outer")?.label === "Planet", "a close Pluto chart steps back with the same word as any planet");
+expect(viewPlaque("pluto-outer", false).title === "Pluto System", "Pluto's wide chart names that system");
 expect(viewPlaque("earth-inner", false).title === "Earth", "an inner orbit names the body");
 expect(pilotPlaque(null).title === "Sol System", "a ship in open space reads as Sol System");
 expect(pilotPlaque("titan").title === "Titan", "a ship docked at a moon reads as that moon");
@@ -192,8 +201,8 @@ expect(
 );
 expect(chartButtons("saturn-titan-inner")[0]?.target === "saturn-outer", "a moon's orbit steps back to the planet");
 expect(
-	chartButtons("sun-inner")[0]?.label === "Sol" && chartButtons("sun-inner")[0]?.target === "sun-outer",
-	"Sol's orbit steps back to Sol"
+	chartButtons("sun-inner")[0]?.label === "Sun" && chartButtons("sun-inner")[0]?.target === "sun-outer",
+	"Sol's orbit steps back to the Sun"
 );
 expect(chartButtons("jupiter-outer").length === 1, "a planet view has one step");
 expect(wideChartStep("jupiter-outer")?.label === "Planet" && wideChartStep("jupiter-outer")?.target === "wide", "a close planet chart steps back out to the planet");

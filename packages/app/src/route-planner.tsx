@@ -10,7 +10,8 @@ type Action = { label: string; enabled: boolean };
  * What a scan found, and the coast to it. The slider sets the speed, and the burns, the time, and
  * the energy left on arrival follow that speed. Strand Risk means arrival would leave too little to
  * reach home or Sol, and the course cannot be set. A target in the ship's orbit, or a ship already
- * under way, keeps the description and leaves the course unset.
+ * under way, keeps the description and leaves the course unset. View, on a mine, a collector,
+ * or the home base, looks at that craft up close.
  */
 export function RoutePlanner({
 	card,
@@ -21,6 +22,7 @@ export function RoutePlanner({
 	onSpeed,
 	onClose,
 	onCommit,
+	onView,
 }: {
 	card: ScanCard;
 	/** A line under the description, such as the load still in a mine. */
@@ -40,6 +42,8 @@ export function RoutePlanner({
 	onSpeed: (speed: number) => void;
 	onClose: () => void;
 	onCommit: () => void;
+	/** A close look at a mine, a collector, or the home base. Absent for any other card. */
+	onView?: () => void;
 }) {
 	const titleId = useId();
 	const closeRef = useRef<HTMLButtonElement>(null);
@@ -122,6 +126,15 @@ export function RoutePlanner({
 					</>
 				) : null}
 				<div className="mt-5 flex gap-2">
+					{onView ? (
+						<button
+							type="button"
+							onClick={onView}
+							className="touch-manipulation shrink-0 rounded-xl border border-[#E8E4D9]/25 px-4 py-2.5 text-[11px] tracking-[0.22em] text-[#E8E4D9] uppercase transition-colors hover:border-[#FFD73D]/70 hover:text-[#FFE7A3] focus-visible:ring-1 focus-visible:ring-[#FFD73D]/70 focus-visible:outline-none"
+						>
+							View
+						</button>
+					) : null}
 					<button
 						ref={commitRef}
 						type="button"

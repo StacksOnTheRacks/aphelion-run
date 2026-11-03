@@ -41,6 +41,7 @@ export const PLANET_YIELDS: Record<string, readonly Mineral[]> = {
 	saturn: ["hydrogen", "nitrogen", "carbon"],
 	uranus: ["hydrogen", "nitrogen", "carbon"],
 	neptune: ["hydrogen", "nitrogen", "carbon"],
+	pluto: ["hydrogen", "nitrogen", "carbon"],
 };
 
 /** Open annulus the generator ring can use: outside the homes, inside the outer orbit or the rings. */

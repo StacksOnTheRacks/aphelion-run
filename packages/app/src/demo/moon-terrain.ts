@@ -1349,4 +1349,33 @@ void paint(vec3 d) {
 	grain(d, 0.05);
 }`,
 	},
+	pluto: {
+		ice: 0.35,
+		paint: `
+void paint(vec3 d) {
+	albedo = rgb(176, 140, 112);
+	// The dark equatorial band, and the pale heart on one face.
+	albedo = mix(albedo, rgb(92, 58, 48), 1.0 - smoothstep(0.15, 0.55, abs(d.y)));
+	albedo = mix(albedo, rgb(228, 206, 186), spot(d, at(190.0, 18.0), 0.5));
+	craters(d, 4.0, 0.4, 0.05, 21.0);
+	applyCraters(0.6, rgb(236, 220, 200), 0.3);
+	hills(d, 0.002);
+	grain(d, 0.04);
+}`,
+	},
+	charon: {
+		ice: 0.55,
+		paint: `
+void paint(vec3 d) {
+	float lat = asin(d.y);
+	albedo = rgb(168, 156, 148);
+	// Mordor Macula, the dark north polar cap.
+	albedo = mix(albedo, rgb(72, 42, 36), smoothstep(0.35, 0.85, lat));
+	craters(d, 3.2, 0.7, 0.04, 22.0);
+	applyCraters(1.0, rgb(210, 200, 190), 0.45);
+	chasm(d, at(20.0, 10.0), at(70.0, -5.0), 0.8, 0.02, 0.004);
+	hills(d, 0.003);
+	grain(d, 0.04);
+}`,
+	},
 };

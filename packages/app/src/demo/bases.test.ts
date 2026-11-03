@@ -24,6 +24,7 @@ import {
 	spacedMoonOrbits,
 	warehouseRadius,
 } from "./bases";
+import { PLUTO_NEAREST_ORBIT } from "./environment";
 import { moonGeneratorSlots, planetGeneratorSlots } from "./generators";
 
 const failures: string[] = [];
@@ -114,6 +115,13 @@ const DESIGN: PlanetFixture[] = [
 			{ name: "triton", orbit: 30, diameter: 2.2 },
 			{ name: "nereid", orbit: 44, diameter: 0.5 },
 		],
+	},
+	{
+		name: "pluto",
+		// The nearest point of the track, so the check is the close pass by Neptune.
+		orbit: PLUTO_NEAREST_ORBIT,
+		diameter: 6,
+		moons: [{ name: "charon", orbit: 50, diameter: 3 }],
 	},
 ];
 

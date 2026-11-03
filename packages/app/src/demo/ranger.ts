@@ -167,6 +167,8 @@ export type Ranger = ShipModel & {
 	readonly mounts: ShipMounts;
 	/** From the cockpit the hull always shows in the aft views, under a fill light. */
 	setPiloted: (on: boolean) => void;
+	/** A close look at a dock. The hull stays drawn and lit, the way the aft view holds it. */
+	lightHull: (on: boolean) => void;
 	/**
 	 * The mining laser. `center` is the block and `forward` points from the ship toward it.
 	 * The beam runs from the muzzle to the face `inset` in front of that center.
@@ -525,6 +527,8 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 	let burn = 0;
 	let hullOn = false;
 	let piloted = false;
+	/** The chart is holding the hull in a close look, so it stays drawn under the fill light. */
+	let closeLook = false;
 	const aim = new Vector3();
 
 	const worldPerPixel = (position: Vector3) => {
@@ -565,7 +569,7 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 
 	const present = () => {
 		const pixels = HULL_LENGTH / worldPerPixel(ship.getAbsolutePosition());
-		if (piloted) {
+		if (piloted || closeLook) {
 			hullOn = true;
 		} else if (hullOn) {
 			if (pixels < HULL_PIXELS_OFF) {
@@ -620,7 +624,12 @@ export async function loadRanger(scene: Scene, camera: Camera): Promise<Ranger> 
 		mounts,
 		setPiloted(on) {
 			piloted = on;
-			fillLight.intensity = on ? AFT_FILL : 0;
+			fillLight.intensity = on || closeLook ? AFT_FILL : 0;
+			present();
+		},
+		lightHull(on) {
+			closeLook = on;
+			fillLight.intensity = piloted || closeLook ? AFT_FILL : 0;
 			present();
 		},
 		beam(firing, center, forward, inset, deltaSeconds) {

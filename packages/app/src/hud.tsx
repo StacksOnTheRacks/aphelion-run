@@ -9,13 +9,12 @@ import { formatTravelTime, travelShare, type TravelClock } from "./travel-clock"
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "600", "700"] });
 
-/** The corner step carries the mark of the place it opens. */
+/** The corner step carries the mark of the place it opens. The same four words in every system. */
 const STEP_ICON: Record<string, string> = {
 	System: "/hud/system.svg",
 	Galaxy: "/hud/galaxy.svg",
 	Planet: "/hud/planet.svg",
 	Sun: "/hud/sun.svg",
-	Sol: "/hud/sun.svg",
 };
 
 /** Which corners of a plate are cut, in CSS pixels. A corner left out stays square so the plate can sit flush on a screen edge. */
@@ -548,7 +547,7 @@ export function Hud({
 							label={step.label}
 							title={step.title}
 							onClick={step.onClick}
-							icon={STEP_ICON[step.label] ?? "/hud/settings.svg"}
+							icon={STEP_ICON[step.label]}
 						/>
 					))}
 				</div>

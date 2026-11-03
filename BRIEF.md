@@ -15,7 +15,7 @@ The time is far ahead. How far is not set. The player is a human who lives in sp
 
 Satellites hang in the inner orbit of a system's sun and store solar energy. One galaxy-wide company owns them. The company is not named. Siphoning a satellite is theft, as that company sees it. Energy is spent to travel. It is sold for Solscrip on the black market. Minerals and energy share one cargo unit. One of either takes one space in the hold. Solscrip takes none. A full hold is what makes a ship heavy. This brief sets no amounts.
 
-Each system has one planet that sells energy and yields nothing else. In Sol, that planet is Earth. Play stays in Sol. Other systems cannot be entered yet.
+Each system has one planet that sells energy and yields nothing else. In Sol, that planet is Earth. Play stays in Sol. Alpha Centauri can be entered as a chart. Other systems cannot be entered yet.
 
 ## 3. Core gameplay loop
 
@@ -72,6 +72,7 @@ The minerals are hydrogen, ore, nitrogen, and carbon. Ships are improved and rep
 - **Saturn** yields hydrogen, nitrogen, and carbon.
 - **Uranus** yields hydrogen, nitrogen, and carbon.
 - **Neptune** yields hydrogen, nitrogen, and carbon.
+- **Pluto** yields hydrogen, nitrogen, and carbon. Charon shares that yield.
 
 The Sun yields energy. Earth yields nothing a ship can mine. The Moon shares Earth's yield, so it yields nothing either. A pilot mines the home world's yield to have it. The base does not hand it over.
 
@@ -181,7 +182,7 @@ The phone and the PC play the same game. A tall layout and a wide layout are two
 
 A player is in one place at a time. The places are listed below. How a player moves among the map surfaces, and which transitions release the current view and load the next one, is in [docs/surfaces.md](docs/surfaces.md). [STRATEGY.md](STRATEGY.md) holds the load rule.
 
-- **Galaxy:** The Milky Way from above, with Sol among fourteen real star systems within 12 light years. Systems known to have no star, like the brown dwarfs Luhman 16 and WISE 0855−0714, are left out. Zoom in and zoom out are limited. A tap or a click on a system opens a popup. Only Sol can be entered. The others are real stars whose contents will be mostly invented. Each system has a wormhole at its edge. That hop is not a surface yet.
+- **Galaxy:** The Milky Way from above, with Sol among fourteen real star systems within 12 light years. Systems known to have no star, like the brown dwarfs Luhman 16 and WISE 0855−0714, are left out. Zoom in and zoom out are limited. A tap or a click on a system opens a popup. Sol can be entered, and Alpha Centauri can be entered as a chart. The others are real stars whose contents will be mostly invented. Each system has a wormhole at its edge. That hop is not a surface yet.
 - **System:** The whole system. A tap on a planet or the Sun opens that body's outer orbit.
 - **Planet outer orbit:** The planet and its moons. A tap on a moon opens that moon's outer orbit. This is the planet's battle surface.
 - **Moon outer orbit:** The same framing as a planet's outer orbit, for that moon. It is its own battle surface, not the planet's.

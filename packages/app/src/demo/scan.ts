@@ -93,6 +93,9 @@ function bodyText(target: ScanTarget): string {
 	if (target.id === "moon") {
 		return "Earth's Moon is not a combat zone. Like Earth, it yields nothing a ship can mine.";
 	}
+	if (target.id === "pluto") {
+		return "A dwarf planet past Neptune. Charon orbits with it. Its minerals are mined in the inner orbit.";
+	}
 	if (target.kind === "moon") {
 		const planet = moonPlanet(target.id);
 		return `A moon of ${planet ? stopLabel(planet) : "a planet"}. Its minerals are mined there.`;
@@ -170,7 +173,7 @@ export function scanCard(target: ScanTarget, occupied = false): ScanCard {
 	const collector = target.kind === "collector";
 	return {
 		id: target.id,
-		kind: collector ? "Solar collector" : KIND_LABEL[target.kind],
+		kind: collector ? "Solar collector" : target.id === "pluto" ? "Dwarf planet" : KIND_LABEL[target.kind],
 		label: body ? stopLabel(target.id) : craftLabel(target),
 		owner: collector ? (occupied ? "Occupied" : undefined) : target.owner ? OWNER_LABEL[target.owner] : undefined,
 		text: body ? bodyText(target) : craftText(target),
@@ -201,6 +204,11 @@ export function scanLabel(target: ScanTarget, occupied = false): string {
  */
 export function showsCard(target: ScanTarget): boolean {
 	return target.id !== target.host;
+}
+
+/** A mine, a collector, or the ship's home base can be looked at up close. Another home or a station stays on the card. */
+export function canInspect(target: ScanTarget): boolean {
+	return target.kind === "collector" || target.kind === "generator" || target.id === STARTING_DOCK_ID;
 }
 
 /**

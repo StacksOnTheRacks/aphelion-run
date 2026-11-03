@@ -1,7 +1,9 @@
 /**
- * Where the planets and the Moon are at a given moment, accurate to about a degree.
+ * Where the planets, Pluto, and the Moon are at a given moment, accurate to about a degree.
  *
  * Planet orbits use NASA JPL's "Approximate Positions of the Planets" (Standish), valid 1800–2050.
+ * Pluto is not in that table. Its place uses a Kepler orbit for the J2000 elements: the distance
+ * changes, and the orbit is inclined, which the eight planets do not need at this accuracy.
  * The Moon uses the largest terms of its orbit from Meeus, "Astronomical Algorithms".
  * Angles are ecliptic longitudes in radians: measured in the plane of Earth's orbit, counterclockwise
  * seen from the north, starting from the direction of the Sun at the March equinox.
@@ -90,4 +92,71 @@ export function greenwichAngle(days: number): number {
 function wrap(angle: number): number {
 	const turn = Math.PI * 2;
 	return ((angle % turn) + turn) % turn;
+}
+
+/** Pluto's semi-major axis and eccentricity. Perihelion was 5 September 1989. */
+const PLUTO_AXIS_AU = 39.482;
+const PLUTO_ECCENTRICITY = 0.2488;
+const PLUTO_INCLINATION = 17.16 * DEGREES;
+const PLUTO_NODE = 110.299 * DEGREES;
+const PLUTO_ARGUMENT = 113.834 * DEGREES;
+const PLUTO_PERIOD_DAYS = 247.94 * 365.25;
+/** Days from that perihelion to noon on 1 January 2000, so the anomaly is 0 on the perihelion date. */
+const PLUTO_PERIHELION_BEFORE_J2000 = 3770.5;
+
+export const PLUTO_PERIHELION_AU = PLUTO_AXIS_AU * (1 - PLUTO_ECCENTRICITY);
+export const PLUTO_APHELION_AU = PLUTO_AXIS_AU * (1 + PLUTO_ECCENTRICITY);
+
+/** A direction in scene axes (x equinox, y north, z longitude 90°) and a distance in AU. */
+export type SkyPoint = { x: number; y: number; z: number; au: number };
+
+function plutoDirection(trueAnomaly: number, au: number): SkyPoint {
+	const fromNode = trueAnomaly + PLUTO_ARGUMENT;
+	const cosNode = Math.cos(PLUTO_NODE);
+	const sinNode = Math.sin(PLUTO_NODE);
+	const cosFromNode = Math.cos(fromNode);
+	const sinFromNode = Math.sin(fromNode);
+	const cosTilt = Math.cos(PLUTO_INCLINATION);
+	const sinTilt = Math.sin(PLUTO_INCLINATION);
+	return {
+		x: cosNode * cosFromNode - sinNode * sinFromNode * cosTilt,
+		y: sinFromNode * sinTilt,
+		z: sinNode * cosFromNode + cosNode * sinFromNode * cosTilt,
+		au,
+	};
+}
+
+function plutoFromTrueAnomaly(trueAnomaly: number): SkyPoint {
+	const e = PLUTO_ECCENTRICITY;
+	const au = (PLUTO_AXIS_AU * (1 - e * e)) / (1 + e * Math.cos(trueAnomaly));
+	return plutoDirection(trueAnomaly, au);
+}
+
+/** Pluto's place at `days` since J2000. The direction is a unit vector. */
+export function plutoPlace(days: number): SkyPoint {
+	const meanAnomaly = wrap(
+		(PLUTO_PERIHELION_BEFORE_J2000 / PLUTO_PERIOD_DAYS) * Math.PI * 2 + (Math.PI * 2 * days) / PLUTO_PERIOD_DAYS
+	);
+	const e = PLUTO_ECCENTRICITY;
+	let eccentricAnomaly = meanAnomaly + e * Math.sin(meanAnomaly);
+	for (let i = 0; i < 8; i++) {
+		eccentricAnomaly -=
+			(eccentricAnomaly - e * Math.sin(eccentricAnomaly) - meanAnomaly) / (1 - e * Math.cos(eccentricAnomaly));
+	}
+	const trueAnomaly =
+		2 *
+		Math.atan2(
+			Math.sqrt(1 + e) * Math.sin(eccentricAnomaly / 2),
+			Math.sqrt(1 - e) * Math.cos(eccentricAnomaly / 2)
+		);
+	return plutoDirection(trueAnomaly, PLUTO_AXIS_AU * (1 - e * Math.cos(eccentricAnomaly)));
+}
+
+/** One lap of Pluto's orbit, evenly in true anomaly, closed back on the first point. */
+export function plutoTrack(steps: number): SkyPoint[] {
+	const points: SkyPoint[] = [];
+	for (let i = 0; i <= steps; i++) {
+		points.push(plutoFromTrueAnomaly((i / steps) * Math.PI * 2));
+	}
+	return points;
 }

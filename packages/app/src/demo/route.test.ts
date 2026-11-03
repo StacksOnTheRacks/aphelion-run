@@ -17,14 +17,17 @@ import {
 	PLANETS,
 	SUN_DIAMETER,
 	SUN_INNER_RING,
+	PLUTO_NEAREST_ORBIT,
+	bendsCourse,
 	bodyOuterRadius,
 	flybyRadius,
 	planJourney,
 	saturnRing,
+	worldPosition,
 	type JourneyBody,
 	type JourneyLayout,
 } from "./environment";
-import { daysSinceJ2000, moonLongitude, planetLongitude } from "./ephemeris";
+import { daysSinceJ2000, moonLongitude } from "./ephemeris";
 import { HULL_LENGTH } from "./ranger";
 import {
 	CLIMB_PACE,
@@ -271,8 +274,7 @@ function layoutAt(days: number, spin: number): JourneyLayout {
 		{ id: "sun", center: Vector3.Zero(), radius: SUN_DIAMETER / 2, halo: SUN_INNER_RING, outer: bodyOuterRadius("sun"), bases: [] },
 	];
 	for (const spec of PLANETS) {
-		const angle = planetLongitude(spec.name, days);
-		const center = new Vector3(Math.cos(angle) * spec.orbit, 0, Math.sin(angle) * spec.orbit);
+		const center = worldPosition(spec.name, days, spec.orbit);
 		const placed = planetBases({
 			diameter: spec.diameter,
 			moons: spec.moons.map((moon) => ({ orbit: moon.orbit, diameter: moon.diameter })),
@@ -425,7 +427,7 @@ const FIRST_DAY = daysSinceJ2000(Date.UTC(2026, 9, 12));
 			}
 		}
 	}
-	expect(JOURNEY_STOPS.filter((stop) => PLANET_IDS.has(stop.id)).length === 8, "every planet is a stop");
+	expect(JOURNEY_STOPS.filter((stop) => PLANET_IDS.has(stop.id)).length === PLANETS.length, "every charted world is a stop");
 	console.log(`All pairs: ${runs} runs, ${passes} assist passes`);
 }
 
@@ -599,6 +601,30 @@ for (const spec of PLANETS) {
 	expect(flyby < mercuryShell, `the Sun's assist stays inside Mercury's orbit (flyby ${flyby.toFixed(2)}, shell ${mercuryShell.toFixed(2)})`);
 }
 
+{
+	const pluto = PLANETS.find((spec) => spec.name === "pluto")!;
+	const neptune = PLANETS.find((spec) => spec.name === "neptune")!;
+	let nearest = Infinity;
+	let farthest = 0;
+	let offPlane = 0;
+	const period = 247.94 * 365.25;
+	for (let step = 0; step <= 360; step++) {
+		const at = worldPosition("pluto", (step / 360) * period, pluto.orbit);
+		const distance = at.length();
+		nearest = Math.min(nearest, distance);
+		farthest = Math.max(farthest, distance);
+		offPlane = Math.max(offPlane, Math.abs(at.y));
+	}
+	expect(farthest > nearest * 1.2, "Pluto's orbit is eccentric");
+	expect(offPlane > nearest * 0.2, "Pluto's orbit leaves the planets' plane");
+	expect(
+		Math.abs(nearest / SYSTEM_SCALE - PLUTO_NEAREST_ORBIT) < 1,
+		`Pluto's nearest point is the chart clearance (${(nearest / SYSTEM_SCALE).toFixed(1)})`
+	);
+	expect(nearest > neptune.orbit, "Pluto stays outside Neptune's orbit");
+	expect(Math.abs(farthest - pluto.orbit) < 1, "the chart frames Pluto's farthest point");
+}
+
 function assistCandidates(layout: JourneyLayout, fromId: string, toId: string): AssistCandidate[] {
 	const candidates: AssistCandidate[] = [];
 	if (fromId !== "sun" && toId !== "sun") {
@@ -606,7 +632,7 @@ function assistCandidates(layout: JourneyLayout, fromId: string, toId: string): 
 		candidates.push({ name: "Sol", center: sun.center, flyby: flybyRadius("sun") });
 	}
 	for (const spec of PLANETS) {
-		if (spec.name === fromId || spec.name === toId) {
+		if (!bendsCourse(spec.name) || spec.name === fromId || spec.name === toId) {
 			continue;
 		}
 		candidates.push({

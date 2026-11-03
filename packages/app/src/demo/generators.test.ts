@@ -88,6 +88,11 @@ const PLANETS: PlanetFixture[] = [
 			{ name: "nereid", orbit: 44, diameter: 0.5 },
 		],
 	},
+	{
+		name: "pluto",
+		diameter: 6,
+		moons: [{ name: "charon", orbit: 50, diameter: 3 }],
+	},
 ];
 
 const SHEET: Record<string, readonly Mineral[]> = {
@@ -98,6 +103,7 @@ const SHEET: Record<string, readonly Mineral[]> = {
 	saturn: ["hydrogen", "nitrogen", "carbon"],
 	uranus: ["hydrogen", "nitrogen", "carbon"],
 	neptune: ["hydrogen", "nitrogen", "carbon"],
+	pluto: ["hydrogen", "nitrogen", "carbon"],
 };
 
 expect(JSON.stringify(PLANET_YIELDS) === JSON.stringify(SHEET), "planet yields match the generators tab");

@@ -107,10 +107,19 @@ expect(arms(inward.x, inward.z) < -0.9, "the Sagittarius arm, a minor arm, lies 
 const solCard = systemCard(SOL_ID);
 expect(solCard?.charted === true && solCard.text.length > 0, "Sol has a charted card");
 const solAction = solCard ? systemCardAction(solCard) : null;
-expect(solAction?.label === "Enter System" && solAction.enabled === true, "Sol's card can enter the system");
+	expect(solAction?.label === "Enter System" && solAction.enabled === true, "Sol's card can enter the system");
 for (const neighbor of NEIGHBORS) {
 	const card = systemCard(neighbor.id);
 	const action = card ? systemCardAction(card) : null;
+	if (neighbor.id === "alpha-centauri") {
+		expect(card?.charted === true, "Alpha Centauri has a charted card");
+		expect(
+			(card?.text.includes("Rigil") && card.text.includes("Toliman") && card.text.includes("Proxima")) === true,
+			"Alpha Centauri's card names the three stars"
+		);
+		expect(action?.label === "Enter System" && action.enabled === true, "Alpha Centauri can be entered");
+		continue;
+	}
 	expect(card?.charted === false && (card?.text.length ?? 0) > 0, `${neighbor.label} has an uncharted card`);
 	expect(action?.label === "Uncharted Space" && action.enabled === false, `${neighbor.label} cannot be entered`);
 }

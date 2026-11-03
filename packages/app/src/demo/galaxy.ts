@@ -33,6 +33,8 @@ export const NEIGHBOR_REACH = 60;
 /** Spectral class of a system's brightest star, which sets the color of its marker. */
 export type StarClass = "A" | "F" | "G" | "K" | "M";
 
+export const ALPHA_CENTAURI_ID = "alpha-centauri";
+
 export type NeighborSystem = {
 	id: string;
 	label: string;
@@ -53,7 +55,7 @@ export type NeighborSystem = {
  * Struve 2398, and GJ 1061 are real stars in range that the game leaves off the map.
  */
 export const NEIGHBORS: NeighborSystem[] = [
-	{ id: "alpha-centauri", label: "Alpha Centauri", distance: 4.37, longitude: 315.7, latitude: -0.7, star: "G" },
+	{ id: ALPHA_CENTAURI_ID, label: "Alpha Centauri", distance: 4.37, longitude: 315.7, latitude: -0.7, star: "G" },
 	{ id: "wolf-359", label: "Wolf 359", distance: 7.86, longitude: 244.1, latitude: 56.1, star: "M" },
 	{ id: "sirius", label: "Sirius", distance: 8.6, longitude: 227.2, latitude: -8.9, star: "A" },
 	{ id: "ross-154", label: "Ross 154", distance: 9.7, longitude: 11.3, latitude: -10.3, star: "M" },
@@ -187,6 +189,15 @@ export function systemCard(id: string): SystemCard | null {
 			label: "Sol",
 			text: "Pilots base on its planets and moons, take energy from Sol, and sell the haul at Earth.",
 			charted: true,
+		};
+	}
+	if (id === ALPHA_CENTAURI_ID) {
+		return {
+			id: ALPHA_CENTAURI_ID,
+			label: "Alpha Centauri",
+			text: "Rigil Kentaurus and Toliman orbit one another, and Proxima Centauri rides far outside them. The worlds around the pair are invented.",
+			charted: true,
+			star: "G",
 		};
 	}
 	const neighbor = NEIGHBORS.find((system) => system.id === id);

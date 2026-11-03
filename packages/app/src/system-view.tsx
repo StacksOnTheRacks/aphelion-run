@@ -17,6 +17,7 @@ import {
 	recallMove,
 	routeCommit,
 	scanCard,
+	canInspect,
 	scanLabel,
 	showsCard,
 	secondsLeft,
@@ -37,8 +38,11 @@ const STEP_TITLE: Record<string, string> = {
 	Galaxy: "Back to the galaxy",
 	System: "Back to the system",
 	Planet: "Back to the planet",
-	Sol: "Back to Sol",
+	Sun: "Back to Sol",
+	Back: "Back to the previous view",
 };
+
+type CornerStep = ChartButton | { label: "Back"; target: "back" };
 
 /** The hold the HUD shows. Fractions between those whole units do not change the screen. */
 function sameHold(left: ShipHold, right: ShipHold): boolean {
@@ -96,9 +100,12 @@ function sameBerth(left: ScanTarget | null, right: ScanTarget | null): boolean {
  * once the camera is closer. Locate opens the planetary chart where the ship is docked.
  * Recall opens the course planner for the cruise home, so the coast speed can be chosen. A hop
  * on the same body still moves straight onto the home dock. A countdown already headed there can be cancelled.
- * The lower right is one step back: System from a planet or Sol, Planet from a moon
- * or from an inner orbit, and Galaxy from the system. Escape takes the
- * first chart step, Home on the system chart and otherwise that lower-right step.
+ * View on a mine, a collector, or the home base holds the camera on that craft: the body it orbits stays in frame,
+ * a docked ship stays in frame, and the wheel does not zoom. The lower right then says Back and
+ * returns to the chart the camera left. Otherwise the lower right is one step back: System from a
+ * planet or Sol, Planet from a moon or from an inner orbit, Sun from Sol's inner orbit, and Galaxy
+ * from the system. Escape takes the first chart step, Home on the system chart and otherwise that
+ * lower-right step. During a close look, Escape is Back.
  */
 export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLeave: () => void }) {
 	const { anchors, keepOut } = useHudAnchors();
@@ -126,10 +133,13 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const [navSelected, setNavSelected] = useState<string | null>(null);
 	const [navOffer, setNavOffer] = useState<NavCourseOffer | null>(null);
 	const [navBlocked, setNavBlocked] = useState<string | null>(null);
+	const [inspecting, setInspecting] = useState<ScanTarget | null>(null);
 	const back = close ? wideChartStep(view) : null;
 	const steps = back ? [back] : chartButtons(view);
-	// Home is Locate. The rest of the chart steps stay in the lower right.
-	const trail = steps.filter((button) => button.target !== "ship");
+	// Home is Locate. The rest of the chart steps stay in the lower right. A close look replaces them with Back.
+	const trail: CornerStep[] = inspecting
+		? [{ label: "Back", target: "back" }]
+		: steps.filter((button) => button.target !== "ship");
 
 	const go = useCallback(
 		(next: DemoView) => {
@@ -183,6 +193,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	useEffect(() => system.onScan(pick), [system, pick]);
 	useEffect(() => system.onScanFound(setFound), [system]);
 	useEffect(() => system.onFraming(setClose), [system]);
+	useEffect(() => system.onInspect(setInspecting), [system]);
 	const flightRef = useRef(flight);
 	flightRef.current = flight;
 	const pageRef = useRef(centerPage(false));
@@ -365,8 +376,10 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	}, [found, pick, view, docked?.id]);
 
 	const take = useCallback(
-		(button: ChartButton) => {
-			if (button.target === "galaxy") {
+		(button: CornerStep) => {
+			if (button.target === "back") {
+				system.leaveInspect();
+			} else if (button.target === "galaxy") {
 				onLeave();
 			} else if (button.target === "ship") {
 				system.home();
@@ -382,6 +395,10 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const upRef = useRef<() => void>(() => {});
 	upRef.current = () => {
 		if (planner) {
+			return;
+		}
+		if (inspecting) {
+			system.leaveInspect();
 			return;
 		}
 		const step = steps[0];
@@ -458,7 +475,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	};
 	const recallState = recallPlan();
 
-	const location = viewPlaque(view, close);
+	const location = inspecting ? { title: scanCard(inspecting).label, detail: null } : viewPlaque(view, close);
 	const reserve =
 		planner && (planner.target.kind === "collector" || planner.target.kind === "generator")
 			? `${Math.round(system.charge(planner.target.id)).toLocaleString("en-US")} remaining`
@@ -517,6 +534,15 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 						);
 					}}
 					onClose={() => setPlanner(null)}
+					onView={
+						canInspect(planner.target)
+							? () => {
+									const target = planner.target;
+									setPlanner(null);
+									system.inspect(target);
+								}
+							: undefined
+					}
 					onCommit={() => {
 						if (!planner.course) {
 							return;

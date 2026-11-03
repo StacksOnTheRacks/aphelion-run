@@ -8,7 +8,7 @@ Which of these release the current scene and load the next one is still open. Th
 
 The Milky Way from above. Sol sits among fourteen real star systems within 12 light years. Systems known to have no star are left out.
 
-Zoom in and zoom out are limited. Turning the view is allowed. A tap or a click on a system opens a popup over the galaxy. The popup is already in the game. Sol’s popup can enter the system. Every other system’s popup says the space is uncharted and cannot be entered.
+Zoom in and zoom out are limited. Turning the view is allowed. A tap or a click on a system opens a popup over the galaxy. The popup is already in the game. Sol’s popup can enter the system. Alpha Centauri’s popup can enter its chart. Every other system’s popup says the space is uncharted and cannot be entered.
 
 Active travel paths between systems are visible on this view.
 
@@ -20,7 +20,7 @@ A tap on a planet or the Sun opens that body’s outer orbit. A moon is not a ta
 
 Leaving Sol returns to the galaxy, and that crossing loads the galaxy again.
 
-Each system has a wormhole at its edge. A ship leaves through its own and arrives through the target's. That hop is not a camera surface. Other systems cannot be entered yet.
+Each system has a wormhole at its edge. A ship leaves through its own and arrives through the target's. That hop is not a camera surface. Alpha Centauri can be entered as a chart. Play stays in Sol. Other systems cannot be entered yet.
 
 ## Planet outer orbit
 
@@ -44,7 +44,7 @@ Every body has one, including each moon and the Sun. Mining, docking, and siphon
 
 Moving between the inner orbit and the outer orbit is an impulse rocket. A departure counts down five seconds, then the ship spends seven seconds leaving along its orbit. The cruise lasts as long as the chosen speed takes to cover the course, and that burn is what spends energy. Arriving spends seven seconds coming in along the orbit to the dock. A ship on that burn cannot be attacked. A ship in an outer orbit can challenge a ship that is mining that body. The honeycomb is that battle shell. A depleted mine, or a full hold, leaves the ship idle at that collector or mine until the player moves it. The source refills when the ship leaves. A finished Earth sale puts the ship in the inner orbit.
 
-Open: there is no chosen way to go from a planet or moon outer orbit into its inner orbit. Zoom looks in at what orbits the body and stays on the chart the player is already on. On a planet, a moon, or the Sun, the wheel comes a little inside the inner-orbit framing and no farther. An inner orbit can come in that same step and cannot pull back. The system chart does not. A click on a base, a station, or a collector currently flies the camera into the inner orbit and rides with that craft. That is also a stand-in. The replacement has not been decided.
+Open: there is no chosen way to go from a planet or moon outer orbit into its inner orbit. Zoom looks in at what orbits the body and stays on the chart the player is already on. On a planet, a moon, or the Sun, the wheel comes a little inside the inner-orbit framing and no farther. An inner orbit can come in that same step and cannot pull back. The system chart does not. A click on a mine, a collector, or the home base opens its card. View on that card is another zoom level: the camera holds on that craft, with the body it orbits in the frame and a ship when one is docked there. The camera can move around the craft and cannot zoom. Back, in the lower right, returns to the chart the player came from.
 
 Whatever replaces it has to be the same action on a phone and on a desk, and it has to work when the player wants to look inward before choosing a craft. Changing the zoom must keep the player on the surface they are already on.
 
@@ -56,4 +56,4 @@ Whatever replaces it has to be the same action on a phone and on a desk, and it 
 
 The chart is the only view the player works from. The exterior camera stays in the scene so a later battle or another event can be framed on the hull from outside. Nothing in the ship list enters that camera.
 
-The chart names what the framing is about, at most the ten nearest the camera, and only those can be picked. The system chart names the Sun and the planets. A planet chart names the planet and its moons until a tap or the wheel comes in on the planet, and then it names the planet and what orbits it. A moon chart names that moon and what orbits it. Swinging the camera names what comes around into view. A tap on the Sun, a planet, or a moon goes there. A tap on a home base, a station, or a collector opens a card. View rides alongside that craft. Travel To counts down five seconds, which can be cancelled, and then flies from wherever the ship sits. It is offered only while the ship is in orbit or docked, and not for the body the ship already orbits. A ship in flight cannot be rerouted.
+The chart names what the framing is about, at most the ten nearest the camera, and only those can be picked. The system chart names the Sun and the planets. A planet chart names the planet and its moons until a tap or the wheel comes in on the planet, and then it names the planet and what orbits it. A moon chart names that moon and what orbits it. Swinging the camera names what comes around into view. A tap on the Sun, a planet, or a moon goes there. A tap on a home base, a station, a mine, or a collector opens a card. View, on a mine, a collector, or the home base, holds the camera on that craft. Travel To counts down five seconds, which can be cancelled, and then flies from wherever the ship sits. It is offered only while the ship is in orbit or docked, and not for the body the ship already orbits. A ship in flight cannot be rerouted.

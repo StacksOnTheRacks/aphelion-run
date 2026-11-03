@@ -6,6 +6,7 @@ import {
 	scanCard,
 	recallMove,
 	scanLabel,
+	canInspect,
 	showsCard,
 	secondsLeft,
 	targetYields,
@@ -46,10 +47,16 @@ expect(scanCard(marsOre).kind === "Generator" && scanCard(marsOre).label === "Or
 expect(scanCard(marsOre).text.includes("ore") && scanCard(marsOre).text.includes("Mars"), "a generator's card says where it mines");
 expect(scanCard(phobosHydrogen).label === "Hydrogen mine", "a moon's generator is named for its mineral");
 expect(scanCard(mars).owner === undefined, "a body has no owner");
+expect(canInspect(collector) && canInspect(marsOre) && canInspect(phobosHydrogen), "a mine or a collector can be viewed up close");
+expect(!canInspect(mars) && !canInspect(marsHome) && !canInspect(earthStation), "a body, another home, and a station stay on the card");
 
 expect(targetYields(bodyScan("neptune")).join() === "hydrogen,nitrogen,carbon", "Neptune lists every mineral mined there");
 expect(targetYields(bodyScan("triton")).join() === targetYields(bodyScan("neptune")).join(), "a moon yields what its planet yields");
 expect(targetYields(bodyScan("moon")).length === 0 && targetYields(bodyScan("earth")).length === 0, "Earth and its Moon yield nothing");
+expect(scanCard(bodyScan("pluto")).kind === "Dwarf planet" && scanCard(bodyScan("pluto")).label === "Pluto", "Pluto's card names the dwarf planet");
+expect(targetYields(bodyScan("pluto")).join() === "hydrogen,nitrogen,carbon", "Pluto lists the ice-world minerals");
+expect(targetYields(bodyScan("charon")).join() === targetYields(bodyScan("pluto")).join(), "Charon yields what Pluto yields");
+expect(scanCard(bodyScan("charon")).text.includes("Pluto"), "Charon's card names Pluto");
 expect(targetYields(sun).join() === "energy" && targetYields(collector).join() === "energy", "Sol and its collectors give energy");
 expect(targetYields(marsOre).join() === "ore", "a mine yields its own mineral");
 expect(destinationName(sun) === "Sol", "the star reads as Sol");
@@ -86,6 +93,7 @@ expect(
 expect(routeCommit(60, 40, 20).enabled, "arriving with exactly the return in hand can still be set");
 
 const homeBase: ScanTarget = { id: STARTING_DOCK_ID, host: "earth", kind: "home", owner: "corporate" };
+expect(canInspect(homeBase), "the home base can be viewed up close");
 expect(scanCard(homeBase).label === "Home base" && scanCard(homeBase).kind === "Home base", "the starting station is the home base");
 expect(scanCard(homeBase).owner === undefined, "the home base is not labeled as just another faction craft");
 expect(scanCard(homeBase).text.includes("Recall"), "the home base says Recall returns there");

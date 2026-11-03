@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
-import { NEIGHBORS, SOL_ID, systemCard, systemCardAction, type GalaxyDemo, type StarClass, type SystemCard } from "./demo/galaxy";
+import { ALPHA_CENTAURI_ID, NEIGHBORS, SOL_ID, systemCard, systemCardAction, type GalaxyDemo, type StarClass, type SystemCard } from "./demo/galaxy";
 import { palette } from "./palette";
 import { Hud, useHudAnchors, type WarehouseHolding } from "./hud";
 import { SpaceLabels, type LabelItem } from "./space-labels";
@@ -21,7 +21,7 @@ export function GalaxyPlace({
 	energy,
 	cargo,
 	holdings,
-	onEnterSol,
+	onEnter,
 	onHome,
 }: {
 	galaxy: GalaxyDemo;
@@ -30,7 +30,7 @@ export function GalaxyPlace({
 	cargo: number;
 	/** Mined resources deposited at the home base. */
 	holdings: readonly WarehouseHolding[];
-	onEnterSol: () => void;
+	onEnter: (id: string) => void;
 	onHome: () => void;
 }) {
 	const { anchors, keepOut } = useHudAnchors();
@@ -63,7 +63,7 @@ export function GalaxyPlace({
 				locate={{ onClick: onHome, title: "Where your ship is docked" }}
 				recall={{ onClick: () => {}, disabled: true, title: "The ship is holding" }}
 			/>
-			{card ? <SystemModal card={card} onClose={() => setOpenId(null)} onEnter={onEnterSol} /> : null}
+			{card ? <SystemModal card={card} onClose={() => setOpenId(null)} onEnter={() => onEnter(card.id)} /> : null}
 		</>
 	);
 }
@@ -105,7 +105,7 @@ function SystemModal({ card, onClose, onEnter }: { card: SystemCard; onClose: ()
 					{card.image ? (
 						<img src={card.image} alt="" className="h-full w-full object-cover" />
 					) : (
-						<SurveyPlate charted={card.charted} star={card.star} />
+						<SurveyPlate card={card} />
 					)}
 				</div>
 				<div className="mt-4 flex items-start justify-between gap-3">
@@ -144,13 +144,28 @@ function SystemModal({ card, onClose, onEnter }: { card: SystemCard; onClose: ()
 	);
 }
 
-/** Stand-in portrait until a system has its own image. Charted Sol shows its orbits; the rest show a star. */
-function SurveyPlate({ charted, star }: { charted: boolean; star?: StarClass }) {
-	const color = charted ? palette.pulse : star ? STAR_COLOR[star] : palette.bone;
+/** Stand-in portrait until a system has its own image. Sol shows its orbits. Alpha Centauri shows the triple. */
+function SurveyPlate({ card }: { card: SystemCard }) {
+	if (card.id === ALPHA_CENTAURI_ID) {
+		return (
+			<svg viewBox="0 0 320 180" className="h-full w-full" aria-hidden>
+				<rect width="320" height="180" fill="#07080f" />
+				<ellipse cx="160" cy="96" rx="118" ry="34" fill="none" stroke="#FF8F6B" strokeOpacity="0.35" />
+				<ellipse cx="146" cy="96" rx="34" ry="13" fill="none" stroke="#FFE6AD" strokeOpacity="0.7" transform="rotate(-16 146 96)" />
+				<ellipse cx="176" cy="96" rx="40" ry="15" fill="none" stroke="#FFBD80" strokeOpacity="0.7" transform="rotate(-16 176 96)" />
+				<circle cx="118" cy="90" r="7" fill="#FFE6AD" />
+				<circle cx="188" cy="104" r="5.5" fill="#FFBD80" />
+				<circle cx="262" cy="74" r="3.2" fill="#FF5C45" />
+				<circle cx="160" cy="78" r="2.1" fill="#3DCFC4" />
+				<circle cx="214" cy="112" r="1.6" fill="#E07A45" />
+			</svg>
+		);
+	}
+	const color = card.charted ? palette.pulse : card.star ? STAR_COLOR[card.star] : palette.bone;
 	return (
 		<svg viewBox="0 0 320 180" className="h-full w-full" aria-hidden>
 			<rect width="320" height="180" fill="#07080f" />
-			{charted ? (
+			{card.charted ? (
 				<>
 					<ellipse cx="160" cy="96" rx="118" ry="28" fill="none" stroke="#E8E4D9" strokeOpacity="0.18" />
 					<ellipse cx="160" cy="96" rx="86" ry="20" fill="none" stroke="#E8E4D9" strokeOpacity="0.28" />
@@ -161,8 +176,8 @@ function SurveyPlate({ charted, star }: { charted: boolean; star?: StarClass }) 
 			) : (
 				<circle cx="160" cy="90" r="36" fill="none" stroke={color} strokeOpacity="0.2" strokeDasharray="3 6" />
 			)}
-			<circle cx="160" cy={charted ? 96 : 90} r="16" fill={color} fillOpacity="0.18" />
-			<circle cx="160" cy={charted ? 96 : 90} r="5" fill={color} />
+			<circle cx="160" cy={card.charted ? 96 : 90} r="16" fill={color} fillOpacity="0.18" />
+			<circle cx="160" cy={card.charted ? 96 : 90} r="5" fill={color} />
 		</svg>
 	);
 }
