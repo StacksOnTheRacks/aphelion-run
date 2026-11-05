@@ -198,9 +198,8 @@ function replicate(source: Node, parent: TransformNode | null, id: string): Tran
 }
 
 /**
- * The collector's body is bronze, the same gold as a solid. Next to the Sun a full-bright map
- * clips to white, so the hull is held down and given a bronze glow. The solar cap keeps a little
- * blue of its own. Older exports still name the material Orange.
+ * The collector's body wears the ranger's own hull material, so it needs no dressing here. The
+ * solar cap keeps a little blue of its own.
  */
 function dressCollector(root: Node): void {
 	for (const mesh of childMeshes(root)) {
@@ -208,11 +207,7 @@ function dressCollector(root: Node): void {
 		if (!(material instanceof PBRMaterial)) {
 			continue;
 		}
-		if (material.name.includes("Bronze") || material.name.includes("Orange")) {
-			material.albedoColor.set(0.5, 0.5, 0.5);
-			material.emissiveColor.set(0.4, 0.29, 0.1);
-			material.emissiveIntensity = 0.45;
-		} else if (material.name.includes("Solar")) {
+		if (material.name.includes("Solar")) {
 			material.emissiveColor.set(0.02, 0.05, 0.12);
 			material.emissiveIntensity = 0.6;
 		}

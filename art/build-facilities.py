@@ -959,6 +959,8 @@ def build():
 		"throat": circuit_material("Facility Throat", circuit),
 		"accent": principled("Mine Accent", (0.78, 0.42, 0.22), 0.55, 0.32, emission=0.4),
 	}
+	# The mine body, collector body and bore accent share the ranger's own hull material.
+	ranger_hull = bpy.data.materials["Ranger Hull"]
 	collar_mesh, collar_inner, _collar_outer, _collar_half, collar_depth = collar_source()
 	# The copied mesh keeps the ranger material slot. Object assignment overrides it.
 	if len(collar_mesh.materials) == 0:
@@ -978,7 +980,7 @@ def build():
 	port = Vector((0, 1, 0))
 	starboard = Vector((0, -1, 0))
 	# Every mouth is open through the hull. The shutter sits inside it, behind the cuff.
-	sphere(col, "MineBody", mine, mats["carbon"], (
+	sphere(col, "MineBody", mine, ranger_hull, (
 		(bore, BORE_INNER * MOUTH),
 		(port, PORT_INNER * MOUTH),
 		(starboard, PORT_INNER * MOUTH),
@@ -987,10 +989,10 @@ def build():
 	add_aperture(col, mine, "MinePort", port, PORT_INNER, collar_mesh, collar_inner, collar_depth, mats)
 	add_aperture(col, mine, "MineStarboard", starboard, PORT_INNER, collar_mesh, collar_inner, collar_depth, mats)
 	# The accent sits on the hull side of the bore cuff, a band of the mined color.
-	accent_ring(col, mine, bore, BORE_INNER + 0.16, FACE_PROUD - 0.12, mats["accent"])
+	accent_ring(col, mine, bore, BORE_INNER + 0.16, FACE_PROUD - 0.12, ranger_hull)
 
 	collector_root, collector = facility("Collector", Vector((24, 0, 0)))
-	sphere(col, "CollectorBody", collector, mats["bronze"], (
+	sphere(col, "CollectorBody", collector, ranger_hull, (
 		(port, PORT_INNER * MOUTH),
 		(starboard, PORT_INNER * MOUTH),
 	))
