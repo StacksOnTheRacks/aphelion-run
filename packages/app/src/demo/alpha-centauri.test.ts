@@ -13,9 +13,11 @@ import {
 	binaryPlaces,
 	chartDistance,
 	chartGap,
+	chartStars,
 	orbitRadius,
 	orbitStyle,
 	proximaPlace,
+	starLight,
 	trueAnomaly,
 } from "./alpha-centauri";
 
@@ -110,6 +112,23 @@ const plaque = alphaPlaque("system");
 expect(plaque.title === "Alpha Centauri" && plaque.detail === null, "the system plaque names the system");
 expect(alphaPlaque("cinder").title === "Cinder" && alphaPlaque("cinder").detail === null, "a world plaque names the world");
 expect(alphaPlaque("proxima-c").title === "Proxima c" && alphaPlaque("proxima-c").detail === null, "Proxima c's plaque names the world");
+
+const besideToliman = starLight({ x: -200, y: 0, z: 0 }, [
+	{ id: "rigil", at: { x: 60, y: 0, z: 0 } },
+	{ id: "toliman", at: { x: -70, y: 0, z: 0 } },
+]);
+expect(besideToliman[0]?.id === "toliman" && besideToliman[0].reach === 1, "a world nearer Toliman takes its light from Toliman");
+expect(
+	besideToliman[1]?.id === "rigil" && besideToliman[1].reach < 0.3,
+	"Rigil, twice as far, gives about a quarter of the light"
+);
+const besideRigil = starLight({ x: 80, y: 0, z: 0 }, [
+	{ id: "rigil", at: { x: 60, y: 0, z: 0 } },
+	{ id: "toliman", at: { x: -70, y: 0, z: 0 } },
+]);
+expect(besideRigil[0]?.id === "rigil", "a world nearer Rigil takes its light from Rigil");
+expect(chartStars("pair").join() === "rigil,toliman", "a circumbinary world is lit by the pair, not by Proxima drawn in beside it");
+expect(chartStars("proxima").join() === "proxima", "Proxima's worlds are lit by Proxima");
 
 if (failures.length > 0) {
 	for (const failure of failures) {
