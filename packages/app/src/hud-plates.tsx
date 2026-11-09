@@ -85,8 +85,8 @@ export function CommandBarPlate() {
 }
 
 /**
- * The active ship's plate in the upper left. Closed on a desktop, the lower right corner is cut and
- * machined, and a scale runs along the foot. Open, the plate is square so the fleet list joins it.
+ * The active ship's plate on the bottom edge. Closed on a desktop, the upper right corner is cut and
+ * machined, and a scale runs along the top. Open, the plate is square so the fleet list joins it.
  */
 export function ShipPlate({ open, desktop }: { open: boolean; desktop: boolean }) {
 	return (
@@ -108,8 +108,8 @@ export function ShipPlate({ open, desktop }: { open: boolean; desktop: boolean }
 					return (
 						<>
 							{defs}
-							<rect x={-1} y={-1} width={w + 2} height={h + 1} fill={fill} />
-							{open ? null : <path d={`M0 ${h - 0.5}H${w}`} stroke={gold(0.45)} />}
+							<rect x={-1} y={0} width={w + 2} height={h + 1} fill={fill} />
+							{open ? null : <path d={`M0 0.5H${w}`} stroke={gold(0.45)} />}
 						</>
 					);
 				}
@@ -117,7 +117,7 @@ export function ShipPlate({ open, desktop }: { open: boolean; desktop: boolean }
 					return (
 						<>
 							{defs}
-							<path d={`M-1 -1H${w}V${h}H-1Z`} fill={fill} />
+							<path d={`M-1 0H${w}V${h + 1}H-1Z`} fill={fill} />
 							<path d={`M${w - 0.5} 0V${h}`} stroke={gold(0.55)} />
 						</>
 					);
@@ -125,17 +125,16 @@ export function ShipPlate({ open, desktop }: { open: boolean; desktop: boolean }
 				const cut = 14;
 				const ticks = Array.from({ length: 24 }, (_, index) => {
 					const major = index % 4 === 0;
-					const tall = major ? 4 : 2;
-					return <rect key={index} x={12 + index * 6} y={h - tall} width={1} height={tall} fill={gold(major ? 0.45 : 0.22)} />;
+					return <rect key={index} x={12 + index * 6} y={0} width={1} height={major ? 4 : 2} fill={gold(major ? 0.45 : 0.22)} />;
 				});
 				return (
 					<>
 						{defs}
-						<path d={`M-1 -1H${w}V${h - cut}L${w - cut} ${h}H-1Z`} fill={fill} />
-						<path d={`M${w - 0.5} 0V${h - cut}L${w - cut} ${h - 0.5}H0`} fill="none" stroke={`url(#${id}-rule)`} />
-						<path d={`M${w - 3.5} 0V${h - cut - 1.5}L${w - cut - 1.5} ${h - 3.5}H0`} fill="none" stroke={gold(0.1)} />
+						<path d={`M-1 0H${w - cut}L${w} ${cut}V${h + 1}H-1Z`} fill={fill} />
+						<path d={`M0 0.5H${w - cut}L${w - 0.5} ${cut}V${h}`} fill="none" stroke={`url(#${id}-rule)`} />
+						<path d={`M0 3.5H${w - cut - 1.5}L${w - 3.5} ${cut + 1.5}V${h}`} fill="none" stroke={gold(0.1)} />
 						{ticks}
-						<path d={`M${w - 170} ${h - 0.75}H${w - cut}L${w - 0.75} ${h - cut}V22`} fill="none" stroke={`url(#${id}-edge)`} strokeWidth={1.5} />
+						<path d={`M${w - 170} 0.75H${w - cut}L${w - 0.75} ${cut}V${h - 22}`} fill="none" stroke={`url(#${id}-edge)`} strokeWidth={1.5} />
 					</>
 				);
 			}}
@@ -143,7 +142,7 @@ export function ShipPlate({ open, desktop }: { open: boolean; desktop: boolean }
 	);
 }
 
-/** The fleet list under the ship plate. A seam rule where it joins; the lower right is cut and machined on a desktop. */
+/** The fleet list above the ship plate. A seam rule where it joins; the upper right is cut and machined on a desktop. */
 export function FleetPlate({ desktop }: { desktop: boolean }) {
 	return (
 		<MeasuredSvg
@@ -163,17 +162,17 @@ export function FleetPlate({ desktop }: { desktop: boolean }) {
 						</defs>
 						{desktop ? (
 							<>
-								<path d={`M-1 0H${w}V${h - cut}L${w - cut} ${h}H-1Z`} fill={fill} />
-								<path d={`M${w - 0.5} 0V${h - cut}L${w - cut} ${h - 0.5}H0`} fill="none" stroke={`url(#${id}-rule)`} />
-								<path d={`M${w - 220} ${h - 0.75}H${w - cut}L${w - 0.75} ${h - cut}`} fill="none" stroke={`url(#${id}-edge)`} strokeWidth={1.5} />
+								<path d={`M-1 0H${w - cut}L${w} ${cut}V${h}H-1Z`} fill={fill} />
+								<path d={`M0 0.5H${w - cut}L${w - 0.5} ${cut}V${h}`} fill="none" stroke={`url(#${id}-rule)`} />
+								<path d={`M${w - 220} 0.75H${w - cut}L${w - 0.75} ${cut}`} fill="none" stroke={`url(#${id}-edge)`} strokeWidth={1.5} />
 							</>
 						) : (
 							<>
 								<rect x={-1} y={0} width={w + 2} height={h} fill={fill} />
-								<path d={`M0 ${h - 0.5}H${w}`} stroke={gold(0.45)} />
+								<path d={`M0 0.5H${w}`} stroke={gold(0.45)} />
 							</>
 						)}
-						<path d={`M12 0.5H${w - 12}`} stroke={gold(0.22)} />
+						<path d={`M12 ${h - 0.5}H${w - 12}`} stroke={gold(0.22)} />
 					</>
 				);
 			}}

@@ -366,7 +366,7 @@ export function useHudAnchors(): { anchors: HudAnchors; keepOut: RefObject<HTMLE
 	return { anchors, keepOut };
 }
 
-/** Wide layout. The phone stacks the crest under the ship and parks the stores at the lower left. */
+/** Wide layout. The phone parks the stores and the chart step above the ship plate. */
 function useDesktop(): boolean {
 	const [desktop, setDesktop] = useState(false);
 	useLayoutEffect(() => {
@@ -380,10 +380,10 @@ function useDesktop(): boolean {
 }
 
 /**
- * The play chrome over the chart. The ship, the place, and the home stores share the top edge.
- * The ship sits at the upper left. Its fleet list drops down from that plate, and the two become one
- * surface while the list is open. The place is a crest in the center that carries its name.
- * Stores sit in the top bar on a desktop and at the lower left on a phone. The chart step sits at the
+ * The play chrome over the chart. The place and the home stores share the top edge; the place is a
+ * crest in the center that carries its name. The ship sits on the bottom edge at the lower left. Its
+ * fleet list opens upward from that plate, and the two become one surface while the list is open.
+ * Stores sit in the top bar on a desktop and above the ship on a phone. The chart step sits at the
  * lower right. While the ship is traveling, the time left and its ring sit on the portrait. While it is
  * drawing, that ring counts down in the yield's color. A mine wears its element. A collector wears gold.
  * One ship is listed: the ranger.
@@ -453,26 +453,13 @@ export function Hud({
 
 			<div
 				ref={anchors.warehouse}
-				className="absolute bottom-4 left-3 z-20 min-[900px]:bottom-auto min-[900px]:left-auto min-[900px]:right-0 min-[900px]:top-0 min-[900px]:h-10"
+				className={`absolute left-3 z-20 min-[900px]:bottom-auto min-[900px]:left-auto min-[900px]:right-0 min-[900px]:top-0 min-[900px]:h-10 ${fleet ? "bottom-14" : "bottom-4"}`}
 			>
 				<HomeStores holdings={holdings} />
 			</div>
 
 			{fleet ? (
-				<div ref={anchors.ships} className="absolute top-0 left-0 z-30 w-full min-[900px]:w-[280px]">
-					<ShipModule
-						ship={activeShip}
-						open={shipsOpen}
-						desktop={desktop}
-						readout={readout}
-						energy={energy}
-						cargo={cargo}
-						locate={locate}
-						recall={recall}
-						travel={travel}
-						mining={mining}
-						onToggle={() => setShipsOpen((open) => !open)}
-					/>
+				<div ref={anchors.ships} className="absolute bottom-0 left-0 z-30 flex w-full flex-col min-[900px]:w-[280px]">
 					{shipsOpen ? (
 						<FleetList
 							ship={activeShip}
@@ -487,11 +474,27 @@ export function Hud({
 							}}
 						/>
 					) : null}
+					<ShipModule
+						ship={activeShip}
+						open={shipsOpen}
+						desktop={desktop}
+						readout={readout}
+						energy={energy}
+						cargo={cargo}
+						locate={locate}
+						recall={recall}
+						travel={travel}
+						mining={mining}
+						onToggle={() => setShipsOpen((open) => !open)}
+					/>
 				</div>
 			) : null}
 
 			{steps.length > 0 ? (
-				<div ref={anchors.system} className="absolute right-3 bottom-4 z-30 flex flex-col items-end gap-2 min-[900px]:right-6 min-[900px]:bottom-6">
+				<div
+					ref={anchors.system}
+					className={`absolute right-3 z-30 flex flex-col items-end gap-2 min-[900px]:right-6 min-[900px]:bottom-6 ${fleet ? "bottom-14" : "bottom-4"}`}
+				>
 					{steps.map((step) => (
 						<ChartStep key={step.label} label={step.label} title={step.title} onClick={step.onClick} />
 					))}
@@ -559,7 +562,7 @@ function ShipModule({
 				<ShipAction label="Locate" action={locate} icon="/hud/locate.svg" />
 				<ShipAction label="Recall" action={recall} icon="/hud/recall.svg" />
 				<ShipButton label={open ? "Hide ships" : "Show ships"} expanded={open} engaged={open} onClick={onToggle}>
-					<ChevronDown up={open} />
+					<ChevronDown up={!open} />
 				</ShipButton>
 			</div>
 		</div>
@@ -584,7 +587,7 @@ function FleetList({
 	onPick: (id: ShipId) => void;
 }) {
 	return (
-		<div className="pointer-events-auto relative flex flex-col gap-2.5 pt-3 pr-4 pb-3.5 pl-3">
+		<div className="pointer-events-auto relative flex flex-col gap-2.5 pt-3 pr-4 pb-3 pl-3">
 			<FleetPlate desktop={desktop} />
 			<div className="flex items-center gap-2">
 				<Diamond />
@@ -623,9 +626,7 @@ function FleetList({
 						</li>
 					);
 				})}
-			</ul>
-			<p className="text-[9.5px] text-[#A89060]/80">Choose a ship to make it active. The list closes when you pick one.</p>
-		</div>
+			</ul>		</div>
 	);
 }
 
@@ -678,7 +679,7 @@ function LocationCrest({ place, desktop, crestRef }: { place: HudPlace; desktop:
 			ref={crestRef}
 			role="status"
 			aria-live="polite"
-			className="absolute top-[54px] left-1/2 z-10 w-max max-w-full -translate-x-1/2 min-[900px]:top-0 min-[900px]:max-w-[calc(100%-38rem)] min-[1180px]:max-w-[calc(100%-53rem)]"
+			className="absolute top-0 left-1/2 z-10 w-max max-w-full -translate-x-1/2 min-[900px]:top-0 min-[900px]:max-w-[calc(100%-38rem)] min-[1180px]:max-w-[calc(100%-53rem)]"
 		>
 			<div
 				className="relative flex h-8 min-w-[280px] flex-col items-center pt-1.5 min-[900px]:h-11 min-[900px]:min-w-[440px] min-[900px]:pt-[7px]"
