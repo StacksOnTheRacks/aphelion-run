@@ -476,6 +476,16 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const recallState = recallPlan();
 
 	const location = inspecting ? { title: scanCard(inspecting).label, detail: null } : viewPlaque(view, close);
+	const berth = docked ? scanCard(docked).label : null;
+	const status = travel
+		? `En route · ${travel.name}`
+		: departure
+			? `Departing · ${scanCard(departure.target).label}`
+			: hold.mine
+				? `Drawing · ${berth ?? hold.mine.resource}`
+				: berth
+					? `Docked · ${berth}`
+					: "Holding";
 	const reserve =
 		planner && (planner.target.kind === "collector" || planner.target.kind === "generator")
 			? `${Math.round(system.charge(planner.target.id)).toLocaleString("en-US")} remaining`
@@ -492,6 +502,7 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 			<Hud
 				anchors={anchors}
 				location={location}
+				status={status}
 				energy={hold.energy}
 				cargo={cargoUsed(hold.cargo)}
 				holdings={holdings}

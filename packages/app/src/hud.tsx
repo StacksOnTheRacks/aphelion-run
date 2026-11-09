@@ -1,13 +1,15 @@
 "use client";
 
 import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Inter } from "next/font/google";
+import { Inter, Rajdhani } from "next/font/google";
 
 import { CARGO_CAPACITY, ENERGY_CAPACITY, type MineClock } from "./demo/energy";
+import { CommandBarPlate, CREST_WING, CrestPlate, FleetPlate, ShipPlate, StepPlate } from "./hud-plates";
 import { elementColor, type ElementId, palette } from "./palette";
 import { formatTravelTime, travelShare, type TravelClock } from "./travel-clock";
 
 const inter = Inter({ subsets: ["latin"], weight: ["400", "600", "700"] });
+const rajdhani = Rajdhani({ subsets: ["latin"], weight: ["600", "700"] });
 
 /** The corner step carries the mark of the place it opens. The same four words in every system. */
 const STEP_ICON: Record<string, string> = {
@@ -324,15 +326,21 @@ function openBottomPath(width: number, height: number, cut: Required<HousingCut>
 export type WarehouseHolding = { id: string; label: string; amount: number };
 
 /** The fleet. The bar shows the active ship; the list is every ship the pilot can take. */
-const SHIPS = [{ id: "ranger", name: "Ranger", role: "Explorer", portrait: "/hud/ranger.png" }] as const;
+const SHIPS = [{ id: "ranger", name: "Ranger", portrait: "/hud/ranger.png" }] as const;
 
 type ShipId = (typeof SHIPS)[number]["id"];
+type Ship = (typeof SHIPS)[number];
 
 export type HudAction = {
 	onClick: () => void;
 	title: string;
 	disabled?: boolean;
 	pressed?: boolean;
+};
+
+export type HudPlace = {
+	title: string;
+	detail: string | null;
 };
 
 export type HudAnchors = {
@@ -358,22 +366,32 @@ export function useHudAnchors(): { anchors: HudAnchors; keepOut: RefObject<HTMLE
 	return { anchors, keepOut };
 }
 
+/** Wide layout. The phone stacks the crest under the ship and parks the stores at the lower left. */
+function useDesktop(): boolean {
+	const [desktop, setDesktop] = useState(false);
+	useLayoutEffect(() => {
+		const query = window.matchMedia("(min-width: 900px)");
+		const apply = () => setDesktop(query.matches);
+		apply();
+		query.addEventListener("change", apply);
+		return () => query.removeEventListener("change", apply);
+	}, []);
+	return desktop;
+}
+
 /**
- * The play chrome over the scene. A full-width header sits on the top edge. The place is a plaque fixed
- * to that edge, a little taller than the header row, so its bottom drops below the row. Holdings sit in
- * the row on a desktop and just under the plaque on a phone. The active ship
- * sits flush on the lower left, open along the bottom edge, with locate and recall on its row. The row
- * shows how full the energy tank is, and how full the hold is. While the ship is traveling, the time left
- * and its ring sit on that ship's portrait. While it is drawing, that ring counts down in the yield's color
- * until the source is empty or the ship is full. A mine wears its element. A collector wears gold. The bar
- * opens into the fleet; choosing a ship makes it active
- * and closes the list. The chart's step back sits at the lower right, in the chamfered control. `leading`
- * and `corner` can take that corner over.
+ * The play chrome over the chart. The ship, the place, and the home stores share the top edge.
+ * The ship sits at the upper left. Its fleet list drops down from that plate, and the two become one
+ * surface while the list is open. The place is a crest in the center that carries its name.
+ * Stores sit in the top bar on a desktop and at the lower left on a phone. The chart step sits at the
+ * lower right. While the ship is traveling, the time left and its ring sit on the portrait. While it is
+ * drawing, that ring counts down in the yield's color. A mine wears its element. A collector wears gold.
  * One ship is listed: the ranger.
  */
 export function Hud({
 	anchors,
 	location,
+	status,
 	energy,
 	cargo,
 	holdings,
@@ -387,7 +405,9 @@ export function Hud({
 	mining = null,
 }: {
 	anchors: HudAnchors;
-	location: { title: string; detail: string | null };
+	location: HudPlace;
+	/** Where the ship is, in a short line. Derived from the trip and the draw when omitted. */
+	status?: string;
 	/** Energy aboard the active ship. */
 	energy: number;
 	/** Mineral units in the active ship's hold, of any mix. */
@@ -412,6 +432,8 @@ export function Hud({
 	const [shipsOpen, setShipsOpen] = useState(false);
 	const [activeShipId, setActiveShipId] = useState<ShipId>("ranger");
 	const activeShip = SHIPS.find((ship) => ship.id === activeShipId) ?? SHIPS[0];
+	const desktop = useDesktop();
+	const readout = status ?? shipStatus(travel, mining);
 
 	return (
 		<div
@@ -423,136 +445,59 @@ export function Hud({
 				left: "env(safe-area-inset-left)",
 			}}
 		>
-			<div className="absolute inset-x-0 top-0">
-				<div ref={anchors.header} className="pointer-events-none absolute inset-x-0 top-0 h-8 min-[900px]:h-7">
-					<Housing cut={{}} border="bottom" bleed />
-				</div>
-				<div
-					ref={anchors.location}
-					role="status"
-					aria-live="polite"
-					className="pointer-events-auto absolute top-0 left-1/2 z-10 isolate flex h-10 max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-2 px-3.5 min-[900px]:h-9 min-[900px]:max-w-[min(24rem,calc(100%-36rem))] min-[900px]:px-4"
-				>
-					<Housing cut={{ bl: 14, br: 14 }} highlight="bottom" border="except-top" />
-					<Diamond className="hidden min-[900px]:inline-block" />
-					<p
-						className={`truncate text-sm font-semibold min-[900px]:text-[13px] min-[900px]:font-bold min-[900px]:tracking-[2px] min-[900px]:uppercase ${GOLD_TEXT}`}
-					>
-						{location.title}
-					</p>
-					{location.detail ? (
-						<p className="flex min-w-0 items-center gap-1.5 border-l border-[#FFD73D]/20 pl-2 text-[11px] font-normal text-[#a89060] min-[900px]:text-[10px] min-[900px]:tracking-[1px] min-[900px]:uppercase">
-							<img src="/hud/status-dot.svg" alt="" width={12} height={12} className="shrink-0" />
-							<span className="truncate">{location.detail}</span>
-						</p>
-					) : null}
-					<Diamond className="hidden min-[900px]:inline-block" />
-				</div>
-				<div ref={anchors.warehouse} className="absolute top-10 right-0 min-[900px]:top-1">
-					<div className="pointer-events-auto relative isolate flex h-6 items-center pr-2.5 min-[900px]:h-5">
-						<span aria-hidden className="absolute inset-0 -z-10 bg-gradient-to-r from-transparent via-[#1A160C]/80 to-[#1A160C]/90 min-[900px]:hidden" />
-						<ul aria-label="Warehouse" className="flex items-center">
-							{holdings.map((item, index) => {
-								const amount = Math.round(item.amount).toLocaleString("en-US");
-								return (
-									<li key={item.id} title={item.label} className="group flex items-center" aria-label={`${item.label}, ${amount}`}>
-										{index > 0 ? <span aria-hidden className="mx-1.5 h-2.5 w-px bg-gradient-to-b from-transparent via-[#FFD73D]/35 to-transparent" /> : null}
-										<span aria-hidden className="relative mr-1 flex size-4 shrink-0 items-center justify-center">
-											<span className="absolute inset-[3px] rotate-45 bg-gradient-to-br from-[#3A2E12] to-[#0B0A07] ring-1 ring-[#FFD73D]/30 transition-shadow group-hover:ring-[#FFD73D]/70" />
-											<ResourceMark id={item.label} className="relative size-2.5" />
-											{isElement(item.label.toLowerCase()) ? null : (
-												<span className="relative text-[8px] font-bold text-[#a89060]">{item.label.charAt(0)}</span>
-											)}
-										</span>
-										<span aria-hidden className="min-w-[2ch] text-[11px] leading-none font-bold tracking-[0.3px] text-[#ffd73d] tabular-nums">
-											{shortCount(item.amount)}
-										</span>
-									</li>
-								);
-							})}
-						</ul>
-					</div>
-				</div>
+			<div ref={anchors.header} className="absolute inset-x-0 top-0 hidden h-10 min-[900px]:block">
+				<CommandBarPlate />
+			</div>
+
+			<LocationCrest place={location} desktop={desktop} crestRef={anchors.location} />
+
+			<div
+				ref={anchors.warehouse}
+				className="absolute bottom-4 left-3 z-20 min-[900px]:bottom-auto min-[900px]:left-auto min-[900px]:right-0 min-[900px]:top-0 min-[900px]:h-10"
+			>
+				<HomeStores holdings={holdings} />
 			</div>
 
 			{fleet ? (
-				<div ref={anchors.ships} className="absolute bottom-0 left-0 w-[min(286px,calc(100%-6.5rem))] min-[900px]:w-[352px] min-[900px]:max-w-[calc(100%-8rem)]">
+				<div ref={anchors.ships} className="absolute top-0 left-0 z-30 w-full min-[900px]:w-[280px]">
+					<ShipModule
+						ship={activeShip}
+						open={shipsOpen}
+						desktop={desktop}
+						readout={readout}
+						energy={energy}
+						cargo={cargo}
+						locate={locate}
+						recall={recall}
+						travel={travel}
+						mining={mining}
+						onToggle={() => setShipsOpen((open) => !open)}
+					/>
 					{shipsOpen ? (
-						<div className="pointer-events-auto relative isolate flex w-full flex-col gap-1.5 p-2 min-[900px]:gap-1 min-[900px]:p-1.5">
-							<Housing cut={{ tr: 14 }} highlight="top" border="except-bottom" />
-							<div className="flex items-center gap-2 pl-1">
-								<Diamond />
-								<p className="text-[10px] font-bold tracking-[2px] text-[#a89060] uppercase">
-									Fleet <span className="text-[#ffd73d] tabular-nums">{SHIPS.length}</span>
-								</p>
-								<span aria-hidden className="h-px flex-1 bg-gradient-to-r from-[#FFD73D]/35 to-transparent" />
-								<button
-									type="button"
-									aria-expanded
-									aria-label="Hide ships"
-									onClick={() => setShipsOpen(false)}
-									className="flex size-8 items-center justify-center focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none min-[900px]:h-6 min-[900px]:w-7"
-								>
-									<img src="/hud/chevron-down.svg" alt="" width={16} height={16} />
-								</button>
-							</div>
-							<ul aria-label="Ships" className="flex flex-col gap-1.5">
-								{SHIPS.map((ship) => {
-									const active = ship.id === activeShip.id;
-									return (
-										<li key={ship.id}>
-											<button
-												type="button"
-												aria-current={active ? "true" : undefined}
-												onClick={() => {
-													setActiveShipId(ship.id);
-													setShipsOpen(false);
-												}}
-												className={`relative flex w-full items-center justify-start gap-2.5 p-2 text-left focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none min-[900px]:px-2 min-[900px]:py-1.5 ${active ? "bg-gradient-to-r from-[#A67C20]/25 via-[#2A1F08]/80 to-transparent before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-gradient-to-b before:from-[#FFD73D] before:to-[#A67C20] before:content-['']" : "hover:bg-[#FFD73D]/5"}`}
-											>
-												<ShipPortrait ship={ship} listed travel={active ? travel : null} mining={active ? mining : null} />
-												<ShipName ship={ship} energy={energy} cargo={cargo} listed />
-											</button>
-										</li>
-									);
-								})}
-							</ul>
-						</div>
-					) : (
-						<div role="group" aria-label={`${activeShip.name}, active ship`} className="pointer-events-auto relative isolate flex h-[68px] w-full items-center gap-2 p-2 min-[900px]:h-[62px] min-[900px]:py-1.5 min-[900px]:pr-2.5 min-[900px]:pl-2">
-							<Housing cut={{ tr: 14 }} highlight="top" border="except-bottom" />
-							<ShipPortrait ship={activeShip} travel={travel} mining={mining} />
-							<ShipName ship={activeShip} energy={energy} cargo={cargo} />
-							<ShipAction label="Locate" action={locate} icon="/hud/locate.svg" />
-							<ShipAction label="Recall" action={recall} icon="/hud/recall.svg" />
-							<button
-								type="button"
-								aria-expanded={false}
-								aria-label="Show ships"
-								onClick={() => setShipsOpen(true)}
-								className="flex size-7 shrink-0 items-center justify-center focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none"
-							>
-								<img src="/hud/ships-chevron.svg" alt="" width={16} height={16} />
-							</button>
-						</div>
-					)}
+						<FleetList
+							ship={activeShip}
+							desktop={desktop}
+							energy={energy}
+							cargo={cargo}
+							travel={travel}
+							mining={mining}
+							onPick={(id) => {
+								setActiveShipId(id);
+								setShipsOpen(false);
+							}}
+						/>
+					) : null}
 				</div>
 			) : null}
 
 			{steps.length > 0 ? (
-				<div ref={anchors.system} className="absolute right-3 bottom-3 flex flex-col items-end gap-2 min-[900px]:right-6 min-[900px]:bottom-6">
+				<div ref={anchors.system} className="absolute right-3 bottom-4 z-30 flex flex-col items-end gap-2 min-[900px]:right-6 min-[900px]:bottom-6">
 					{steps.map((step) => (
-						<HudTile
-							key={step.label}
-							label={step.label}
-							title={step.title}
-							onClick={step.onClick}
-							icon={STEP_ICON[step.label]}
-						/>
+						<ChartStep key={step.label} label={step.label} title={step.title} onClick={step.onClick} />
 					))}
 				</div>
 			) : (
-				<div ref={anchors.system} className={corner ? "absolute right-6 bottom-6 flex items-end gap-3" : "hidden"}>
+				<div ref={anchors.system} className={corner ? "absolute right-6 bottom-6 z-30 flex items-end gap-3" : "hidden"}>
 					{leading}
 					{corner}
 				</div>
@@ -561,17 +506,380 @@ export function Hud({
 	);
 }
 
+/** A line for the ship when the caller does not send one. */
+function shipStatus(travel: TravelClock | null, mining: MineClock | null): string {
+	if (travel) {
+		return `En route · ${travel.name}`;
+	}
+	if (mining) {
+		return mining.resource === "energy" ? "Drawing energy" : `Drawing ${mining.resource}`;
+	}
+	return "Holding";
+}
+
+function ShipModule({
+	ship,
+	open,
+	desktop,
+	readout,
+	energy,
+	cargo,
+	locate,
+	recall,
+	travel,
+	mining,
+	onToggle,
+}: {
+	ship: Ship;
+	open: boolean;
+	desktop: boolean;
+	/** Where the ship is. Read aloud with the ship's name; not drawn. */
+	readout: string;
+	energy: number;
+	cargo: number;
+	locate: HudAction;
+	recall: HudAction;
+	travel: TravelClock | null;
+	mining: MineClock | null;
+	onToggle: () => void;
+}) {
+	return (
+		<div
+			role="group"
+			aria-label={`${ship.name}, active ship, ${readout}`}
+			className="pointer-events-auto relative flex h-12 w-full items-center gap-2.5 pr-2.5 pl-2"
+		>
+			<ShipPlate open={open} desktop={desktop} />
+			<ShipPortrait ship={ship} travel={travel} mining={mining} />
+			<p className={`${rajdhani.className} min-w-0 truncate text-[16px] leading-none font-bold tracking-[0.12em] uppercase ${GOLD_TEXT}`}>
+				{ship.name}
+			</p>
+			<CapacityBars energy={energy} cargo={cargo} />
+			<div className="ml-auto flex items-center gap-[5px]">
+				<ShipAction label="Locate" action={locate} icon="/hud/locate.svg" />
+				<ShipAction label="Recall" action={recall} icon="/hud/recall.svg" />
+				<ShipButton label={open ? "Hide ships" : "Show ships"} expanded={open} engaged={open} onClick={onToggle}>
+					<ChevronDown up={open} />
+				</ShipButton>
+			</div>
+		</div>
+	);
+}
+
+function FleetList({
+	ship,
+	desktop,
+	energy,
+	cargo,
+	travel,
+	mining,
+	onPick,
+}: {
+	ship: Ship;
+	desktop: boolean;
+	energy: number;
+	cargo: number;
+	travel: TravelClock | null;
+	mining: MineClock | null;
+	onPick: (id: ShipId) => void;
+}) {
+	return (
+		<div className="pointer-events-auto relative flex flex-col gap-2.5 pt-3 pr-4 pb-3.5 pl-3">
+			<FleetPlate desktop={desktop} />
+			<div className="flex items-center gap-2">
+				<Diamond />
+				<p className="text-[10px] font-bold tracking-[0.18em] text-[#A89060] uppercase">
+					Fleet <span className="text-[#FFD73D] tabular-nums">1 / {SHIPS.length}</span>
+				</p>
+				<span aria-hidden className="h-px flex-1 bg-gradient-to-r from-[#FFD73D]/35 to-transparent" />
+			</div>
+			<ul aria-label="Ships" className="flex flex-col gap-1.5">
+				{SHIPS.map((listed) => {
+					const active = listed.id === ship.id;
+					return (
+						<li key={listed.id}>
+							<button
+								type="button"
+								aria-current={active ? "true" : undefined}
+								onClick={() => onPick(listed.id)}
+								className={`relative flex w-full items-center gap-2.5 px-2.5 py-2 text-left focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none ${active ? "bg-gradient-to-r from-[#A67C20]/25 via-[#2A1F08]/80 to-transparent before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-gradient-to-b before:from-[#FFD73D] before:to-[#A67C20] before:content-['']" : "hover:bg-[#FFD73D]/5"}`}
+							>
+								<ShipPortrait ship={listed} travel={active ? travel : null} mining={active ? mining : null} />
+								<div className="min-w-0 flex-1">
+									<p className={`${rajdhani.className} truncate text-[16px] leading-none font-bold tracking-[0.12em] uppercase ${GOLD_TEXT}`}>
+										{listed.name}
+									</p>
+									<span className="mt-1.5 flex items-center gap-2">
+										<HoldMeter label="Energy" amount={energy} capacity={ENERGY_CAPACITY} tone="energy" />
+										<HoldMeter label="Cargo" amount={cargo} capacity={CARGO_CAPACITY} tone="cargo" />
+									</span>
+								</div>
+								{active ? (
+									<span className="border border-[#FFD73D]/50 bg-[#FFD73D]/10 px-1.5 py-0.5 text-[8px] font-semibold tracking-[0.14em] text-[#FFD73D] uppercase">
+										Active
+									</span>
+								) : null}
+							</button>
+						</li>
+					);
+				})}
+			</ul>
+			<p className="text-[9.5px] text-[#A89060]/80">Choose a ship to make it active. The list closes when you pick one.</p>
+		</div>
+	);
+}
+
+/** Energy and cargo, read from the bottom, with no written labels. */
+function CapacityBars({ energy, cargo }: { energy: number; cargo: number }) {
+	return (
+		<span className="flex items-center gap-[3px]">
+			<CapacityBar label="Energy" amount={energy} capacity={ENERGY_CAPACITY} tone="energy" />
+			<CapacityBar label="Cargo" amount={cargo} capacity={CARGO_CAPACITY} tone="cargo" />
+		</span>
+	);
+}
+
+function CapacityBar({
+	label,
+	amount,
+	capacity,
+	tone,
+}: {
+	label: string;
+	amount: number;
+	capacity: number;
+	tone: "energy" | "cargo";
+}) {
+	const segments = 9;
+	const fill = Math.max(0, Math.min(1, amount / Math.max(1, capacity)));
+	const lit = Math.round(fill * segments);
+	const on = tone === "energy" ? "bg-[#FFD73D]" : "bg-[#7ED4F0]";
+	const off = tone === "energy" ? "bg-[#FFD73D]/15" : "bg-[#7ED4F0]/20";
+	return (
+		<span
+			role="meter"
+			aria-label={label}
+			aria-valuemin={0}
+			aria-valuemax={Math.round(capacity)}
+			aria-valuenow={Math.round(amount)}
+			aria-valuetext={`${Math.round(amount).toLocaleString("en-US")} of ${Math.round(capacity).toLocaleString("en-US")}`}
+			className="flex flex-col-reverse gap-px"
+		>
+			{Array.from({ length: segments }, (_, index) => (
+				<span key={index} aria-hidden className={`block h-[2px] w-[5px] ${index < lit ? on : off}`} />
+			))}
+		</span>
+	);
+}
+
+function LocationCrest({ place, desktop, crestRef }: { place: HudPlace; desktop: boolean; crestRef: RefObject<HTMLDivElement> }) {
+	return (
+		<div
+			ref={crestRef}
+			role="status"
+			aria-live="polite"
+			className="absolute top-[54px] left-1/2 z-10 w-max max-w-full -translate-x-1/2 min-[900px]:top-0 min-[900px]:max-w-[calc(100%-38rem)] min-[1180px]:max-w-[calc(100%-53rem)]"
+		>
+			<div
+				className="relative flex h-8 min-w-[280px] flex-col items-center pt-1.5 min-[900px]:h-11 min-[900px]:min-w-[440px] min-[900px]:pt-[7px]"
+				style={{ paddingInline: (desktop ? CREST_WING.desktop : CREST_WING.phone) + (desktop ? 36 : 28) }}
+			>
+				<CrestPlate desktop={desktop} />
+				<div className="flex min-w-0 items-center gap-3">
+					{desktop ? <Bracket /> : null}
+					<p
+						className={`${rajdhani.className} min-w-0 truncate text-[18px] leading-none font-bold tracking-[0.22em] uppercase min-[900px]:text-[20px] ${GOLD_TEXT}`}
+						style={{ filter: "drop-shadow(0 0 5px rgba(255, 190, 60, 0.35))" }}
+					>
+						{place.title}
+					</p>
+					{desktop ? <Bracket flip /> : null}
+				</div>
+				{desktop ? <BearingTicks /> : null}
+			</div>
+		</div>
+	);
+}
+
+function Bracket({ flip = false }: { flip?: boolean }) {
+	return (
+		<svg width="7" height="18" viewBox="0 0 7 18" aria-hidden className="shrink-0">
+			<path d={flip ? "M0.5 0.5H6V17.5H0.5" : "M6.5 0.5H1V17.5H6.5"} fill="none" stroke="#FFD73D" strokeOpacity="0.55" />
+		</svg>
+	);
+}
+
+function BearingTicks() {
+	return (
+		<span aria-hidden className="mt-1 flex h-1.5 items-end gap-1">
+			{Array.from({ length: 31 }, (_, index) => {
+				const mid = index === 15;
+				const big = index % 5 === 0;
+				return <span key={index} className={`w-px ${mid ? "h-1.5 bg-[#FFD73D]/90" : big ? "h-1 bg-[#FFD73D]/45" : "h-0.5 bg-[#FFD73D]/[0.22]"}`} />;
+			})}
+		</span>
+	);
+}
+
+function HomeStores({ holdings }: { holdings: readonly WarehouseHolding[] }) {
+	return (
+		<>
+			<div className="pointer-events-auto relative hidden h-10 items-center pr-2 min-[900px]:flex">
+				<ul aria-label="Warehouse" className="flex items-center">
+					{holdings.map((item, index) => (
+						<li key={item.id} className="flex items-center">
+							{index > 0 ? <span aria-hidden className="h-[18px] w-px bg-gradient-to-b from-transparent via-[#FFD73D]/35 to-transparent" /> : null}
+							<StoreReadout item={item} labeled />
+						</li>
+					))}
+				</ul>
+			</div>
+			<div className="pointer-events-auto relative w-[168px] px-2.5 py-2 min-[900px]:hidden">
+				<Housing cut={{ tr: 14 }} highlight="bottom" />
+				<ul aria-label="Warehouse" className="grid grid-cols-2 gap-x-2 gap-y-1">
+					{holdings.map((item) => (
+						<li key={item.id}>
+							<StoreReadout item={item} />
+						</li>
+					))}
+				</ul>
+			</div>
+		</>
+	);
+}
+
+/** The bar seats each mark in a socket ringed in its element's color. The phone plate shows the bare mark. */
+function StoreReadout({ item, labeled = false }: { item: WarehouseHolding; labeled?: boolean }) {
+	const amount = shortCount(item.amount);
+	const key = item.label.toLowerCase();
+	const ring = isElement(key) ? elementColor[key] : HUD.gold;
+	return (
+		<span
+			className={`flex items-center ${labeled ? "gap-2 px-3" : "gap-1.5"}`}
+			title={item.label}
+			aria-label={`${item.label}, ${Math.round(item.amount).toLocaleString("en-US")}`}
+		>
+			{labeled ? (
+				<span aria-hidden className="relative grid size-6 shrink-0 place-items-center">
+					<span className="absolute inset-1 rounded-[2px] border bg-[#1A160C]" style={{ borderColor: `${ring}55` }} />
+					<ResourceMark id={item.label} className="relative size-3.5" />
+				</span>
+			) : (
+				<ResourceMark id={item.label} className="size-[13px] shrink-0" />
+			)}
+			<span className="min-w-0">
+				<span className="block text-[12px] leading-none font-bold text-[#E8E4D9] tabular-nums min-[900px]:text-[13px]">{amount}</span>
+				{labeled ? (
+					<span className="mt-[3px] hidden text-[7.5px] leading-none font-semibold tracking-[0.18em] text-[#A89060] uppercase min-[1180px]:block">
+						{item.label}
+					</span>
+				) : null}
+			</span>
+		</span>
+	);
+}
+
+const STEP_KICKER: Record<string, string> = {
+	Back: "Previous view",
+};
+
+function ChartStep({ label, title, onClick }: { label: string; title: string; onClick: () => void }) {
+	const icon = STEP_ICON[label];
+	return (
+		<button
+			type="button"
+			title={title}
+			aria-label={title}
+			onClick={onClick}
+			className="pointer-events-auto relative flex h-14 w-[168px] items-center gap-1.5 pr-2 pl-1.5 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none min-[900px]:h-16 min-[900px]:w-[228px] min-[900px]:gap-2.5 min-[900px]:pr-3.5 min-[900px]:pl-2"
+		>
+			<StepPlate />
+			<StepDial icon={icon} />
+			<span className="min-w-0 flex-1 text-left">
+				<span className="block truncate text-[7.5px] font-semibold tracking-[0.16em] text-[#A89060] uppercase min-[900px]:text-[8.5px] min-[900px]:tracking-[0.18em]">
+					{STEP_KICKER[label] ?? "Return to"}
+				</span>
+				<span className={`${rajdhani.className} block truncate text-[18px] leading-none font-bold tracking-[0.14em] uppercase min-[900px]:text-[22px] ${GOLD_TEXT}`}>
+					{label}
+				</span>
+			</span>
+			<ChevronRight />
+		</button>
+	);
+}
+
+function StepDial({ icon }: { icon?: string }) {
+	const gradientId = `dial-${useId().replace(/:/g, "")}`;
+	const ticks = Array.from({ length: 28 }, (_, index) => {
+		const angle = (index / 28) * Math.PI * 2;
+		const major = index % 7 === 0;
+		const outer = 24;
+		const inner = major ? 20.5 : 22.2;
+		return {
+			x1: 26 + Math.cos(angle) * outer,
+			y1: 26 + Math.sin(angle) * outer,
+			x2: 26 + Math.cos(angle) * inner,
+			y2: 26 + Math.sin(angle) * inner,
+			major,
+		};
+	});
+	return (
+		<span className="relative grid size-11 shrink-0 place-items-center min-[900px]:size-[52px]">
+			<svg viewBox="0 0 52 52" className="absolute inset-0" aria-hidden>
+				{ticks.map((tick, index) => (
+					<line
+						key={index}
+						x1={tick.x1}
+						y1={tick.y1}
+						x2={tick.x2}
+						y2={tick.y2}
+						stroke="#FFD73D"
+						strokeOpacity={tick.major ? 0.6 : 0.25}
+					/>
+				))}
+				<circle cx="26" cy="26" r="17" fill="#0B0A07" stroke="#FFD73D" strokeOpacity="0.45" />
+				<path d="M9 26A17 17 0 0 1 26 9" fill="none" stroke={`url(#${gradientId})`} strokeWidth="1.75" strokeLinecap="round" />
+				<defs>
+					<linearGradient id={gradientId} x1="0" y1="0" x2="52" y2="52" gradientUnits="userSpaceOnUse">
+						<stop offset="0" stopColor="#FFF3C4" />
+						<stop offset="1" stopColor="#A67C20" />
+					</linearGradient>
+				</defs>
+			</svg>
+			{icon ? (
+				<img src={icon} alt="" width={16} height={16} className="relative size-4" />
+			) : (
+				<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden className="relative">
+					<path d="M9 4L5 8l4 4" fill="none" stroke="#FFD73D" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+				</svg>
+			)}
+		</span>
+	);
+}
+
+function ChevronDown({ up }: { up: boolean }) {
+	return (
+		<svg width="12" height="12" viewBox="0 0 16 16" aria-hidden className={`shrink-0 ${up ? "rotate-180" : ""}`}>
+			<path d="M3.5 5.5L8 10l4.5-4.5" fill="none" stroke="#0B0800" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+		</svg>
+	);
+}
+
+function ChevronRight() {
+	return (
+		<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden className="shrink-0">
+			<path d="M6 3.5L10.5 8 6 12.5" fill="none" stroke="#FFD73D" strokeOpacity="0.7" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+		</svg>
+	);
+}
+
 function ShipPortrait({
 	ship,
-	listed = false,
 	travel = null,
 	mining = null,
 }: {
-	ship: (typeof SHIPS)[number];
-	listed?: boolean;
-	/** Time left, drawn over the portrait. Null when this ship is down. */
+	ship: Ship;
 	travel?: TravelClock | null;
-	/** Time left on a mine or collector. Hidden while a trip is on the portrait. */
 	mining?: MineClock | null;
 }) {
 	const clock = travel
@@ -585,18 +893,18 @@ function ShipPortrait({
 				}
 			: null;
 	return (
-		<span className={`relative shrink-0 ${listed ? "size-9" : "size-10"}`}>
+		<span className="relative size-9 shrink-0">
 			<span
 				className="absolute inset-0 bg-gradient-to-br from-[#FFD73D] via-[#E8B23A]/60 to-[#A67C20] p-px"
-				style={{ clipPath: chamfer(listed ? 6 : 8, "tr-bl") }}
+				style={{ clipPath: chamfer(6.5, "tr-bl") }}
 			>
 				<img
 					src={ship.portrait}
 					alt=""
-					width={40}
-					height={40}
+					width={36}
+					height={36}
 					className="size-full bg-[#0B0A07] object-cover"
-					style={{ clipPath: chamfer(listed ? 5.5 : 7.5, "tr-bl") }}
+					style={{ clipPath: chamfer(6, "tr-bl") }}
 				/>
 			</span>
 			{clock ? <PortraitClock remaining={clock.remaining} total={clock.total} color={clock.color} label={clock.label} /> : null}
@@ -630,37 +938,12 @@ function PortraitClock({ remaining, total, color, label }: { remaining: number; 
 			</svg>
 			<span
 				aria-hidden
-				className={`absolute inset-0 flex items-center justify-center font-bold tabular-nums drop-shadow-[0_1px_1px_rgba(0,0,0,0.95)] ${text.length > 5 ? "text-[6px]" : "text-[8px]"}`}
+				className={`absolute inset-0 flex items-center justify-center font-bold tabular-nums drop-shadow-[0_1px_1px_rgba(0,0,0,0.95)] ${text.length > 5 ? "text-[5.5px]" : "text-[7px]"}`}
 				style={{ color }}
 			>
 				{text}
 			</span>
 		</span>
-	);
-}
-
-function ShipName({ ship, energy, cargo }: { ship: (typeof SHIPS)[number]; energy: number; cargo: number; listed?: boolean }) {
-	return (
-		<div className="min-w-0 flex-1">
-			<p className={`truncate text-sm font-bold tracking-[0.6px] uppercase min-[900px]:text-[12px] min-[900px]:tracking-[1.4px] ${GOLD_TEXT}`}>
-				{ship.name}
-			</p>
-			<div className="mt-0.5 flex items-center gap-1.5">
-				<span className="truncate text-[9px] tracking-[1px] text-[#a89060] uppercase">{ship.role}</span>
-				<span className="flex min-w-6 flex-1 flex-col gap-[3px]">
-					<HoldMeter label="Energy" amount={energy} capacity={ENERGY_CAPACITY} tone="energy" />
-					<HoldMeter label="Cargo" amount={cargo} capacity={CARGO_CAPACITY} tone="cargo" />
-				</span>
-				<span className="flex flex-col items-end gap-px text-[9px] leading-none font-semibold tabular-nums">
-					<span aria-hidden className="text-[#ffd73d]">
-						{Math.round(energy).toLocaleString("en-US")}
-					</span>
-					<span aria-hidden className="text-[#7ED4F0]">
-						{Math.round(cargo).toLocaleString("en-US")}
-					</span>
-				</span>
-			</div>
-		</div>
 	);
 }
 
@@ -690,31 +973,54 @@ function HoldMeter({
 			aria-valuemax={Math.round(capacity)}
 			aria-valuenow={Math.round(amount)}
 			aria-valuetext={`${Math.round(amount).toLocaleString("en-US")} of ${Math.round(capacity).toLocaleString("en-US")}`}
-			className={`block h-[3px] overflow-hidden ${track}`}
+			className={`block h-[3px] w-[72px] overflow-hidden min-[900px]:w-[52px] ${track}`}
 			style={{ clipPath: chamfer(1.5) }}
 		>
-			<span
-				className={`block h-full ${bar} transition-[width] duration-500 motion-reduce:transition-none`}
-				style={{ width: `${fill * 100}%` }}
-			/>
+			<span className={`block h-full ${bar}`} style={{ width: `${fill * 100}%` }} />
 		</span>
 	);
 }
 
 function ShipAction({ label, action, icon }: { label: string; action: HudAction; icon: string }) {
-	const engaged = action.pressed === true;
+	return (
+		<ShipButton label={label} title={action.title} pressed={action.pressed} engaged={action.pressed === true} disabled={action.disabled} onClick={action.onClick}>
+			<img src={icon} alt="" width={14} height={14} />
+		</ShipButton>
+	);
+}
+
+/** A gold key on the ship plate. Engaged reads pressed in. */
+function ShipButton({
+	label,
+	title,
+	pressed,
+	expanded,
+	engaged,
+	disabled,
+	onClick,
+	children,
+}: {
+	label: string;
+	title?: string;
+	pressed?: boolean;
+	expanded?: boolean;
+	engaged: boolean;
+	disabled?: boolean;
+	onClick: () => void;
+	children: ReactNode;
+}) {
 	return (
 		<button
 			type="button"
-			title={action.title}
+			title={title}
 			aria-label={label}
-			aria-pressed={action.pressed}
-			disabled={action.disabled}
-			onClick={action.onClick}
-			style={{ clipPath: chamfer(6, "tr-bl") }}
-			className={`flex size-[34px] shrink-0 items-center justify-center transition-[filter,transform] duration-150 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none motion-reduce:transition-none min-[900px]:size-8 ${engaged ? "bg-gradient-to-b from-[#E8B23A] to-[#A67C20] shadow-[inset_0_2px_4px_rgba(0,0,0,0.35)]" : "bg-gradient-to-b from-[#FFF3C4] via-[#FFD73D] to-[#C48A2E] shadow-[inset_0_1px_0_rgba(255,255,255,0.55),inset_0_-2px_0_rgba(120,84,16,0.45)]"} ${action.disabled ? "cursor-not-allowed opacity-40 saturate-50" : "hover:brightness-110 active:translate-y-px"}`}
+			aria-pressed={pressed}
+			aria-expanded={expanded}
+			disabled={disabled}
+			onClick={onClick}
+			className={`flex size-[30px] shrink-0 items-center justify-center rounded-[2px] transition-[filter,transform] duration-150 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none motion-reduce:transition-none min-[900px]:size-[26px] ${engaged ? "bg-gradient-to-b from-[#E8B23A] to-[#A67C20] shadow-[inset_0_2px_4px_rgba(0,0,0,0.35)]" : "bg-gradient-to-b from-[#FFF3C4] via-[#FFD73D] via-45% to-[#C48A2E] shadow-[inset_0_1px_0_rgba(255,255,255,0.55),inset_0_-2px_0_rgba(120,84,16,0.45)]"} ${disabled ? "cursor-not-allowed opacity-40 saturate-50" : "hover:brightness-110 active:translate-y-px"}`}
 		>
-			<img src={icon} alt="" width={16} height={16} />
+			{children}
 		</button>
 	);
 }
