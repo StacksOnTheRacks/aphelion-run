@@ -78,7 +78,7 @@ import {
 	type SolSession,
 } from "./energy";
 import { CLIMB_PACE, createJourney, cruiseProfile, hoverDeparture, tripSeconds, type Dock, type Harbor, type JourneyPlan } from "./journey";
-import { CHART_LAYER, createCockpit, type CenterPaint, type PilotViewpoint, type ScreenRect } from "./cockpit";
+import { CHART_LAYER, EXTERIOR_RADIUS, createCockpit, type CenterPaint, type PilotViewpoint, type ScreenRect } from "./cockpit";
 import { loadFacilities, type Facility, type FacilityKit } from "./facilities";
 import { HULL_LENGTH, loadRanger } from "./ranger";
 import {
@@ -101,7 +101,15 @@ import type { TravelClock } from "../travel-clock";
 import type { ScanKind, ScanTarget } from "./scan";
 import { createMoonTerrain } from "./moon-terrain";
 import { trackPicks } from "./pointer";
-import { INSPECT_FILL, inspectAimLift, inspectAngles, inspectExtent } from "./inspect";
+import {
+	INSPECT_FILL,
+	inspectAimLift,
+	inspectAngles,
+	inspectExtent,
+	inspectMount,
+	locateLook,
+	shipFollowPose,
+} from "./inspect";
 import { attachChartCamera, nudgeChartZoom, tuneChartCamera, type ZoomDirection } from "./zoom";
 import { curveClimbJoin, curveClimbStart, departureSpiral, planRoute, tangentHeading } from "./route";
 
@@ -1106,10 +1114,19 @@ export type EnvironmentDemo = LabelSource & {
 	 * and a ship docked there stays in frame. The camera can move around the craft and cannot zoom.
 	 */
 	inspect: (target: ScanTarget) => void;
+	/**
+	 * Finds the ship. Docked, it is the same close look as View on that berth. Anywhere else in the
+	 * system, the camera rides astern, to starboard, and above the hull. A ship that docks while this
+	 * is up is taken into View on its new berth. Returns `galaxy` while the ship is between systems.
+	 */
+	locate: () => "galaxy" | null;
 	/** Leaves the close look and returns the camera to the chart it came from. */
 	leaveInspect: () => void;
-	/** Calls back with the craft being looked at, or null on the way back to the chart. Once when the listener is added. */
-	onInspect: (listener: (target: ScanTarget | null) => void) => () => void;
+	/**
+	 * Calls back with the craft being looked at, `ship` while the camera rides the hull, or null on the
+	 * way back to the chart. Once when the listener is added.
+	 */
+	onInspect: (listener: (target: CloseLook | null) => void) => () => void;
 	/** Pulls a close planet chart back out to the wide shot, where the moons are named. */
 	widen: () => void;
 	/**
@@ -1476,13 +1493,14 @@ export async function createEnvironment(
 	let active: DemoView = "system";
 	let travel = 1;
 	let moveSeconds = TRAVEL_SECONDS;
+	let inspection: Inspection | null = null;
 	/**
-	 * A mine or collector held in frame. The offset is the camera's alpha minus the craft's angle,
-	 * so a drag keeps its place as the craft orbits. Radius stays put: this look does not zoom.
+	 * Locate opened the close look, so it follows the ship: off the dock it rides the hull, and on a
+	 * dock it is that berth's View. Back, another View, or a chart step ends it.
 	 */
-	let inspection: { craft: Craft; offset: number; beta: number; radius: number; lift: number } | null = null;
-	const inspectListeners = new Set<(target: ScanTarget | null) => void>();
-	const publishInspect = (target: ScanTarget | null) => {
+	let locating = false;
+	const inspectListeners = new Set<(target: CloseLook | null) => void>();
+	const publishInspect = (target: CloseLook | null) => {
 		for (const listener of inspectListeners) {
 			listener(target);
 		}
@@ -2042,13 +2060,24 @@ export async function createEnvironment(
 	let sampleFuel = () => {};
 	let collectorDock: string | null = null;
 
-	/** The close look: the craft stays centered, the radius stays put, and a drag still orbits it. */
+	/** Middle of the hull in world space, where the exterior camera looked. */
+	const hullCenterOf = (out: Vector3): Vector3 => {
+		const ship = ranger.mounts.eye.parent as TransformNode | null;
+		if (!ship) {
+			return out.copyFrom(ranger.position);
+		}
+		ship.computeWorldMatrix(true);
+		return Vector3.TransformCoordinatesToRef(ranger.mounts.hullCenter, ship.getWorldMatrix(), out);
+	};
+	const shipHeading = (): Vector3 => journey.ship()?.heading ?? idleHeading;
+
+	/** The close look: the subject stays centered, the radius stays put, and a drag still orbits it. */
 	const lockInspectCamera = (deltaSeconds: number) => {
 		const look = inspection;
 		if (!look) {
 			return;
 		}
-		camera.minZ = 0.02;
+		camera.minZ = look.mode === "ship" ? 0.005 : 0.02;
 		camera.lowerBetaLimit = CAMERA_BETA_MIN;
 		camera.upperBetaLimit = CAMERA_BETA_MAX;
 		camera.lowerRadiusLimit = look.radius;
@@ -2057,9 +2086,19 @@ export async function createEnvironment(
 		camera.pinchDeltaPercentage = 0;
 		camera.inertialRadiusOffset = 0;
 		camera.movement.zoomAccumulatedPixels = 0;
-		camera.target.copyFrom(look.craft.position(inspectTarget));
-		camera.target.y += look.lift;
-		camera.alpha += look.craft.rate * deltaSeconds;
+		if (look.mode === "ship") {
+			const heading = shipHeading();
+			const yaw = Math.atan2(heading.z, heading.x);
+			if (look.yaw !== null) {
+				camera.alpha += wrapAngle(yaw - look.yaw);
+			}
+			look.yaw = yaw;
+			hullCenterOf(camera.target);
+		} else {
+			camera.target.copyFrom(look.craft.position(inspectTarget));
+			camera.target.y += look.lift;
+			camera.alpha += look.craft.rate * deltaSeconds;
+		}
 		camera.radius = look.radius;
 	};
 
@@ -2067,6 +2106,9 @@ export async function createEnvironment(
 		const look = inspection;
 		if (!look) {
 			return goalFor(active);
+		}
+		if (look.mode === "ship") {
+			return shipFollowPose(hullCenterOf(inspectTarget), shipHeading(), undefined, look.radius);
 		}
 		return {
 			alpha: look.craft.angle() + look.offset,
@@ -2173,6 +2215,7 @@ export async function createEnvironment(
 	});
 
 	const animateTo = (view: DemoView) => {
+		locating = false;
 		if (inspection || returnPose) {
 			inspection = null;
 			returnPose = null;
@@ -2269,7 +2312,7 @@ export async function createEnvironment(
 	 */
 	const runScan = (): ScanTarget[] => {
 		if (inspection) {
-			return [craftFound(inspection.craft)];
+			return inspection.mode === "facility" ? [craftFound(inspection.craft)] : [];
 		}
 		const eye = camera.globalPosition;
 		const width = canvas.clientWidth;
@@ -2652,6 +2695,61 @@ export async function createEnvironment(
 		flight = makeFlight(from, goal());
 	};
 
+	/** Flies into the close look on a craft. A close look already up keeps the chart Back returns to. */
+	const inspectCraft = (craft: Craft) => {
+		if (!returnPose) {
+			returnPose = snapshot(camera);
+		}
+		const dockedHere = dockId === craft.id && journey.docked() !== null;
+		const mount = inspectMount(craft.kind as ScanKind);
+		const facing = inspectAngles(craft.angle(), craft.rate, mount);
+		inspection = {
+			mode: "facility",
+			craft,
+			offset: wrapAngle(facing.alpha - craft.angle()),
+			beta: facing.beta,
+			radius: Math.max(0.2, fillDistance(inspectExtent(dockedHere, mount), INSPECT_FILL)),
+			lift: inspectAimLift(dockedHere, mount),
+		};
+		ranger.lightHull(dockedHere);
+		publishInspect(craftFound(craft));
+		bodies.find((body) => body.spec.name === craft.host)?.sharpen?.();
+		moonByName.get(craft.host)?.sharpen?.();
+		startFlight(inspectGoal);
+	};
+
+	/** Flies onto the exterior mount and rides the hull from there. */
+	const followShip = () => {
+		if (inspection?.mode === "ship") {
+			return;
+		}
+		if (!returnPose) {
+			returnPose = snapshot(camera);
+		}
+		inspection = { mode: "ship", radius: EXTERIOR_RADIUS, yaw: null };
+		ranger.lightHull(true);
+		publishInspect("ship");
+		startFlight(inspectGoal);
+	};
+
+	/**
+	 * Locate's look for where the ship is now: its berth's View, or the hull. Between systems the
+	 * galaxy shows the ship, so that is left to the caller. Inside Sol the ship is never between systems.
+	 */
+	const findShip = (): "galaxy" | null => {
+		const berthed = journey.docked() !== null && dockId ? craftById.get(dockId) : undefined;
+		const look = locateLook({ interSystem: false, dockedId: berthed && berthed.kind !== "ship" ? berthed.id : null });
+		if (look.kind === "galaxy") {
+			return "galaxy";
+		}
+		if (look.kind === "inspect" && berthed) {
+			inspectCraft(berthed);
+		} else {
+			followShip();
+		}
+		return null;
+	};
+
 	return {
 		go: animateTo,
 		view: () => active,
@@ -2716,28 +2814,22 @@ export async function createEnvironment(
 		},
 		inspect(target) {
 			const craft = craftById.get(target.id);
-			const lookedAt = craft?.kind === "collector" || craft?.kind === "generator" || craft?.id === STARTING_DOCK_ID;
-			if (!craft || !lookedAt || piloting) {
+			if (!craft || craft.kind === "ship" || piloting) {
 				return;
 			}
-			if (!returnPose) {
-				returnPose = snapshot(camera);
+			locating = false;
+			inspectCraft(craft);
+		},
+		locate() {
+			if (piloting) {
+				return null;
 			}
-			const dockedHere = dockId === craft.id && journey.docked() !== null;
-			const mount = craft.kind === "home" ? "pad" : "trail";
-			const facing = inspectAngles(craft.angle(), craft.rate, mount);
-			inspection = {
-				craft,
-				offset: wrapAngle(facing.alpha - craft.angle()),
-				beta: facing.beta,
-				radius: Math.max(0.2, fillDistance(inspectExtent(dockedHere, mount), INSPECT_FILL)),
-				lift: inspectAimLift(dockedHere, mount),
-			};
-			ranger.lightHull(dockedHere);
-			publishInspect(craftFound(craft));
-			bodies.find((body) => body.spec.name === craft.host)?.sharpen?.();
-			moonByName.get(craft.host)?.sharpen?.();
-			startFlight(inspectGoal);
+			locating = true;
+			const found = findShip();
+			if (found === "galaxy") {
+				locating = false;
+			}
+			return found;
 		},
 		leaveInspect() {
 			if (!inspection || !returnPose) {
@@ -2746,6 +2838,7 @@ export async function createEnvironment(
 			const pose = returnPose;
 			const shot = SHOTS[active];
 			inspection = null;
+			locating = false;
 			startFlight(() => {
 				const targetPoint = focusPosition(shot.focus).clone();
 				if (shot.offset) {
@@ -2756,7 +2849,7 @@ export async function createEnvironment(
 		},
 		onInspect(listener) {
 			inspectListeners.add(listener);
-			listener(inspection ? craftFound(inspection.craft) : null);
+			listener(!inspection ? null : inspection.mode === "ship" ? "ship" : craftFound(inspection.craft));
 			return () => {
 				inspectListeners.delete(listener);
 			};
@@ -2828,8 +2921,14 @@ export async function createEnvironment(
 					}
 					onDone();
 					publishHold();
+					if (locating) {
+						findShip();
+					}
 				}
 			);
+			if (locating) {
+				findShip();
+			}
 		},
 		berth() {
 			if (!dockId) {
@@ -2861,6 +2960,9 @@ export async function createEnvironment(
 			player.host = craft.host;
 			player.view = orbitView(craft.host, "inner");
 			publishHold();
+			if (locating) {
+				findShip();
+			}
 		},
 		hold: currentHold,
 		onHold(listener) {
@@ -2896,6 +2998,9 @@ export async function createEnvironment(
 			const back = journey.docked();
 			rememberDock(idForDock(back?.dock));
 			publishHold();
+			if (locating) {
+				findShip();
+			}
 		},
 		setPiloting(on) {
 			if (piloting === on) {
@@ -3818,6 +3923,15 @@ type SpinningBase = {
 	trail?: boolean;
 };
 
+/**
+ * Where a craft mesh is this frame. Until the render id advances — after onBeforeRender — a cached
+ * world matrix is still last frame's, so a camera locked to it slides by one frame of orbit.
+ */
+function currentWorldPosition(mesh: TransformNode, out: Vector3): Vector3 {
+	mesh.computeWorldMatrix(true);
+	return out.copyFrom(mesh.getAbsolutePosition());
+}
+
 function dockOf(base: SpinningBase): Dock {
 	return {
 		position: () => base.mesh.position.clone(),
@@ -3845,6 +3959,18 @@ type Craft = {
 	angle: () => number;
 	position: (out: Vector3) => Vector3;
 };
+
+/** What the close look holds: a craft in View, or `ship` while Locate rides the hull. */
+export type CloseLook = ScanTarget | "ship";
+
+/**
+ * A craft held in frame. The offset is the camera's alpha minus the craft's angle, so a drag keeps its
+ * place as the craft orbits. Or the hull, with `yaw` the heading last frame, so a drag keeps its place
+ * as the ship turns. Radius stays put either way: a close look does not zoom.
+ */
+type Inspection =
+	| { mode: "facility"; craft: Craft; offset: number; beta: number; radius: number; lift: number }
+	| { mode: "ship"; radius: number; yaw: number | null };
 
 function buildHabitats(
 	scene: Scene,
@@ -3969,7 +4095,7 @@ function addBaseSlots(
 			reach: Math.max(slot.size.width, slot.size.depth) / 2,
 			rate: BASE_SPIN * ORBIT_PACE,
 			angle: () => craft.angle,
-			position: (out) => out.copyFrom(mesh.getAbsolutePosition()),
+			position: (out) => currentWorldPosition(mesh, out),
 		});
 	});
 }
@@ -4064,7 +4190,7 @@ function addGeneratorSlots(
 			reach: MINE_SIZE.depth / 2,
 			rate: MINE_SPIN * ORBIT_PACE,
 			angle: () => craft.angle,
-			position: (out) => out.copyFrom(mesh.getAbsolutePosition()),
+			position: (out) => currentWorldPosition(mesh, out),
 		});
 	}
 }

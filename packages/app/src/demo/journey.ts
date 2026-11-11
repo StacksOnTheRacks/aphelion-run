@@ -480,7 +480,7 @@ export type Journey = {
 	/** Where the ship is docked, which way that satellite circles, and how fast. Null while a trip is underway. */
 	docked: () => { id: string; position: Vector3; turn: number; rate: number; dock?: Dock } | null;
 	/**
-	 * The body whose planetary chart Locate opens. While a burn is underway this is the dock the
+	 * The body whose planetary chart Home opens. While a burn is underway this is the dock the
 	 * ship left. Once the ship is coupled, it is the body it is coupled to.
 	 */
 	host: () => string | null;

@@ -1,7 +1,20 @@
+import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+
 import { DOCK_SIZE, MINE_SIZE } from "./bases";
-import { INSPECT_FILL, inspectAimLift, inspectAngles, inspectDirection, inspectExtent } from "./inspect";
+import { EXTERIOR_RADIUS } from "./cockpit";
+import {
+	INSPECT_FILL,
+	inspectAimLift,
+	inspectAngles,
+	inspectDirection,
+	inspectExtent,
+	inspectMount,
+	locateLook,
+	shipFollowPose,
+} from "./inspect";
 import { HULL_CLEARANCE, trailDistance } from "./journey";
 import { HULL_LENGTH } from "./ranger";
+import { canInspect } from "./scan";
 
 const failures: string[] = [];
 
@@ -76,6 +89,41 @@ const padAlong = padStand.x * -Math.sin(angle) + padStand.z * Math.cos(angle);
 expect(padOutward > outward, "the home base is seen more from outside, so the body fills in behind the pad");
 expect(padStand.y > 0.2 && padStand.y < camera.y, "the home base is seen from lower than a mine, so the hull stays beside the pad");
 expect(Math.abs(padAlong) < Math.abs(along), "the home base camera stays near the hull's side, not its stern");
+
+expect(inspectMount("generator") === "trail" && inspectMount("collector") === "trail", "a mine or a collector is met from behind");
+expect(inspectMount("home") === "pad" && inspectMount("station") === "pad", "a home base or a station is seen as a pad");
+expect(canInspect({ id: "earth-station-marauder-1", host: "earth", kind: "station" }) === false, "a station's card still has no View");
+
+expect(locateLook({ interSystem: true, dockedId: "earth-station-marauder-1" }).kind === "galaxy", "between systems, Locate is the galaxy");
+const atDock = locateLook({ interSystem: false, dockedId: "mars-generator-ore" });
+expect(atDock.kind === "inspect" && atDock.id === "mars-generator-ore", "docked, Locate is View on that berth");
+expect(locateLook({ interSystem: false, dockedId: null }).kind === "ship", "under way, Locate rides the hull");
+
+const hull = new Vector3(3, 1, -2);
+function followFrom(heading: Vector3): { aft: number; starboard: number; up: number; distance: number } {
+	const pose = shipFollowPose(hull, heading);
+	const eye = new Vector3(
+		Math.cos(pose.alpha) * Math.sin(pose.beta),
+		Math.cos(pose.beta),
+		Math.sin(pose.alpha) * Math.sin(pose.beta)
+	).scale(pose.radius);
+	const nose = heading.normalizeToNew();
+	const right = Vector3.Cross(Vector3.Up(), nose).normalize();
+	return {
+		aft: -Vector3.Dot(eye, nose),
+		starboard: Vector3.Dot(eye, right),
+		up: eye.y,
+		distance: eye.length(),
+	};
+}
+for (const heading of [new Vector3(0, 0, 1), new Vector3(1, 0, 0), new Vector3(-0.6, 0.1, -0.8)]) {
+	const seen = followFrom(heading);
+	expect(seen.aft > 0, "the follow camera sits astern of the ship");
+	expect(seen.starboard > 0, "the follow camera sits to starboard");
+	expect(seen.up > 0, "the follow camera sits above the ship");
+	expect(Math.abs(seen.distance - EXTERIOR_RADIUS) < 1e-6, "the follow camera keeps the exterior range");
+}
+expect(shipFollowPose(hull, new Vector3(0, 0, 1)).target.equals(hull), "the follow camera looks at the hull");
 
 if (failures.length > 0) {
 	for (const failure of failures) {

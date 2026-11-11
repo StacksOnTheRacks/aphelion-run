@@ -7,6 +7,7 @@ import {
 	viewTrail,
 	wideChartStep,
 	type ChartButton,
+	type CloseLook,
 	type DemoView,
 	type EnvironmentDemo,
 	type ShipHold,
@@ -97,8 +98,9 @@ function sameBerth(left: ScanTarget | null, right: ScanTarget | null): boolean {
  *
  * The HUD reads the chart on screen, the warehouse, and the ranger. The plaque names the
  * area in frame: Sol System, a wide planetary chart such as Earth System, Sol itself, or the body
- * once the camera is closer. Locate opens the planetary chart where the ship is docked.
- * Recall opens the course planner for the cruise home, so the coast speed can be chosen. A hop
+ * once the camera is closer. Locate finds the ship: docked, it is View on that berth; under way, the
+ * camera rides astern, to starboard, and above the hull, and when the ship docks it goes on into View
+ * there. Either way the lower right says Back, the same as View. Recall opens the course planner for the cruise home, so the coast speed can be chosen. A hop
  * on the same body still moves straight onto the home dock. A countdown already headed there can be cancelled.
  * View on a mine, a collector, or the home base holds the camera on that craft: the body it orbits stays in frame,
  * a docked ship stays in frame, and the wheel does not zoom. The lower right then says Back and
@@ -133,10 +135,11 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	const [navSelected, setNavSelected] = useState<string | null>(null);
 	const [navOffer, setNavOffer] = useState<NavCourseOffer | null>(null);
 	const [navBlocked, setNavBlocked] = useState<string | null>(null);
-	const [inspecting, setInspecting] = useState<ScanTarget | null>(null);
+	const [inspecting, setInspecting] = useState<CloseLook | null>(null);
 	const back = close ? wideChartStep(view) : null;
 	const steps = back ? [back] : chartButtons(view);
-	// Home is Locate. The rest of the chart steps stay in the lower right. A close look replaces them with Back.
+	// Home stays off the lower right; Escape on the system chart still takes it. The rest of the chart
+	// steps stay there. A close look, from View or Locate, replaces them with Back.
 	const trail: CornerStep[] = inspecting
 		? [{ label: "Back", target: "back" }]
 		: steps.filter((button) => button.target !== "ship");
@@ -475,7 +478,8 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 	};
 	const recallState = recallPlan();
 
-	const location = inspecting ? { title: scanCard(inspecting).label, detail: null } : viewPlaque(view, close);
+	const location =
+		inspecting && inspecting !== "ship" ? { title: scanCard(inspecting).label, detail: null } : viewPlaque(view, close);
 	const berth = docked ? scanCard(docked).label : null;
 	const status = travel
 		? `En route · ${travel.name}`
@@ -506,7 +510,14 @@ export function SystemPlace({ system, onLeave }: { system: EnvironmentDemo; onLe
 				energy={hold.energy}
 				cargo={cargoUsed(hold.cargo)}
 				holdings={holdings}
-				locate={{ onClick: () => take({ label: "Home", target: "ship" }), title: "Where your ship is docked" }}
+				locate={{
+					onClick: () => {
+						if (system.locate() === "galaxy") {
+							onLeave();
+						}
+					},
+					title: "Find your ship",
+				}}
 				recall={{
 					onClick: recall,
 					disabled: !recallState.plan.enabled,
